@@ -145,6 +145,7 @@ async function llama_crash() {
       },
     ];
     info("Calling runWithGenerator");
+    let sawCrash = false;
     try {
       for await (const val of engine.runWithGenerator({
         prompt,
@@ -152,7 +153,8 @@ async function llama_crash() {
         info(val.text);
       }
     } catch (err) {
-      Assert.ok(true, `failed with error ${err.message}`);
+      sawCrash = true;
+      info(`failed with error ${err.message}`);
 
       let [subject, data] = await contentShutdown;
 
@@ -186,6 +188,7 @@ async function llama_crash() {
         info(`cleaning up ${subject} ${data}`);
       }
     }
+    Assert.ok(sawCrash, "the crash model must crash the serving process");
   } finally {
     await EngineProcess.destroyMLEngine();
     await cleanup();
@@ -550,12 +553,13 @@ add_task(async function test_ml_smoke_test_llama_prompt_sensitive() {
 // Greedy outputs diverge by CPU architecture: different SIMD vector
 // widths in llama.cpp's matmul/attention kernels (NEON on aarch64 vs
 // AVX on x86_64) shift logits enough to flip argmax on a handful of
-// tokens, so the constants dispatch on AppConstants.platform. macOS
+// tokens, so the constants dispatch on the CPU architecture. macOS
 // Intel 10.15 is a third bucket and exhibits within-engine
 // non-determinism for TinyStories, so the golden assertion
 // runtime-skips there. Re-pin both text and hash from a try push
 // when a llama.cpp roll legitimately changes outputs.
-const LLAMA_SMOKE_IS_AARCH64 = AppConstants.platform === "macosx";
+const LLAMA_SMOKE_IS_AARCH64 =
+  Services.sysinfo.getProperty("arch") === "aarch64";
 const LLAMA_SMOKE_EXPECTED_TEXT = LLAMA_SMOKE_IS_AARCH64
   ? "Suddenly, the mouse stopped! \nThe little mouse was scared, but he was scared. He had been so brave. He was scared, but he was still wearing his "
   : "Suddenly, the mouse stopped! \nThe old lady was surprised to see a beautiful song. The old lady was so surprised. She had never seen a little mouse and ";
