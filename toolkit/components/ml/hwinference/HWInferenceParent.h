@@ -31,7 +31,9 @@ class HWInferenceParent final : public PHWInferenceParent {
 
   void ActorDestroy(ActorDestroyReason aReason) override;
 
-  ipc::UtilityActorName GetActorName() { return ipc::UtilityActorName::HwInference; }
+  ipc::UtilityActorName GetActorName() {
+    return ipc::UtilityActorName::HwInference;
+  }
 
   nsresult BindToUtilityProcess(
       const RefPtr<ipc::UtilityProcessParent>& aUtilityParent);
@@ -43,9 +45,13 @@ class HWInferenceParent final : public PHWInferenceParent {
   static StaticAutoPtr<nsTHashMap<nsCStringHashKey, RefPtr<HWInferenceParent>>>
       sInstances;
   nsCString mInstanceKey;
+  // Distinguishes an instance whose launch is still in flight (never
+  // bound) from one whose process died (bound, but no registered process
+  // anymore); GetSingleton retires only the latter.
+  bool mEverBound = false;
   ~HWInferenceParent() = default;
 };
 
 }  // namespace mozilla::hwinference
 
-#endif // TOOLKIT_COMPONENTS_ML_HWINFERENCE_HWINFERENCEPARENT_H_
+#endif  // TOOLKIT_COMPONENTS_ML_HWINFERENCE_HWINFERENCEPARENT_H_

@@ -38,6 +38,21 @@ RefPtr<HWInferenceParent> HWInferenceParent::GetSingleton(
     sInstances = new nsTHashMap<nsCStringHashKey, RefPtr<HWInferenceParent>>();
     ClearOnShutdown(&sInstances);
   }
+  if (RefPtr<HWInferenceParent> existing = sInstances->Get(aInstanceKey)) {
+    // Retire an instance whose process is gone. The process registry
+    // forgets the process synchronously on shutdown while the actor's
+    // channel error arrives later, so a bound actor can still report
+    // CanSend() for a dead process; without this, StartUtility
+    // fast-paths on the zombie and the relaunch never happens.
+    RefPtr<ipc::UtilityProcessManager> manager =
+        ipc::UtilityProcessManager::GetSingleton();
+    if (!existing->mEverBound ||
+        (manager && manager->GetProcessParent(ipc::SandboxingKind::HW_INFERENCE,
+                                              aInstanceKey))) {
+      return existing;
+    }
+    sInstances->Remove(aInstanceKey);
+  }
   return sInstances->GetOrInsertNew(aInstanceKey, aInstanceKey);
 }
 
@@ -66,6 +81,7 @@ nsresult HWInferenceParent::BindToUtilityProcess(
 
   LOGD("StartHWInferenceService sent successfully, binding parent endpoint");
   MOZ_ALWAYS_TRUE(parentEnd.Bind(this));
+  mEverBound = true;
   return NS_OK;
 }
 
