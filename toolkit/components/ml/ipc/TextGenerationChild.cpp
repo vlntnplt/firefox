@@ -10,6 +10,7 @@
 
 #include "HWInferenceLog.h"
 #include "LlamaBackend.h"
+#include "TextGenerationMarkers.h"
 #include "mozilla/CheckedInt.h"
 #include "mozilla/Encoding.h"
 #include "mozilla/Logging.h"
@@ -200,11 +201,18 @@ class TextGenerationChild::Generation {
     if (mPrefillEnd.IsNull()) {
       mPrefillEnd = end;
     }
+    TextGenerationFinishReason reason = ComputeFinishReason();
+    PROFILER_MARKER("TextGenerator prefill", ML_INFERENCE,
+                    MarkerTiming::Interval(mGenerateStart, mPrefillEnd),
+                    TextGenerationPrefillMarker, mPromptTokens);
+    PROFILER_MARKER("TextGenerator decode", ML_INFERENCE,
+                    MarkerTiming::Interval(mPrefillEnd, end),
+                    TextGenerationDecodeMarker, mGeneratedTokens,
+                    dom::GetEnumString(reason));
     Timings timings((mPrefillEnd - mGenerateStart).ToMilliseconds(),
                     (end - mPrefillEnd).ToMilliseconds());
-    Reply(GenerateResponse(
-        GenerateResult(mContent, ComputeFinishReason(),
-                       Usage(mPromptTokens, mGeneratedTokens, timings))));
+    Reply(GenerateResponse(GenerateResult(
+        mContent, reason, Usage(mPromptTokens, mGeneratedTokens, timings))));
   }
 
   // Any thread. The compute loop polls the flag between chunks.
@@ -308,7 +316,16 @@ void TextGenerationChild::Initialize() {
   RefPtr<TextGenerationChild> self = this;
   MOZ_ALWAYS_SUCCEEDS(mTaskQueue->Dispatch(
       NS_NewRunnableFunction("TextGenerationChild::Load", [self] {
+        TimeStamp loadStart = TimeStamp::Now();
         LoadResult result = self->LoadOnQueue();
+        PROFILER_MARKER("TextGenerator load", ML_SETUP,
+                        MarkerTiming::IntervalUntilNowFrom(loadStart),
+                        TextGenerationLoadMarker, self->mOptions.contextSize(),
+                        self->mOptions.numThreads(),
+                        dom::GetEnumString(self->mOptions.kvCacheDtype()),
+                        result.type() == LoadResult::TLoadSuccess
+                            ? "ok"_ns
+                            : self->mLoadError);
         self->RunOnActorThread("TextGenerationChild::Ready",
                                [self, result = std::move(result)] {
                                  (void)self->SendReady(result);
