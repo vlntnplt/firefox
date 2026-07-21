@@ -56,9 +56,6 @@ export class TextGenerationEngine {
    * is llama.cpp.
    */
   static shouldRoute(pipelineOptions) {
-    if (!Services.prefs.getBoolPref("browser.ml.llama.hwInference", false)) {
-      return false;
-    }
     return pipelineOptions.backend === "llama.cpp";
   }
 

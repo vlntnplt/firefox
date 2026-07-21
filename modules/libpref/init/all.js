@@ -3675,9 +3675,6 @@ pref("browser.ml.modelHubUrlTemplate", "{model}/{revision}");
 pref("browser.ml.modelCacheMaxSize", 4);
 // Model cache timeout in ms
 pref("browser.ml.modelCacheTimeout", 120000);
-// Route llama.cpp inference to the HWInference utility process instead of
-// the inference content process.
-pref("browser.ml.llama.hwInference", false);
 // Minimal Physical RAM required in GiB
 pref("browser.ml.minimumPhysicalMemory", 3);
 // Check for memory before running

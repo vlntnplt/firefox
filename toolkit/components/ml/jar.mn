@@ -22,7 +22,6 @@ toolkit.jar:
     content/global/ml/ort-wasm-simd-threaded.jsep.mjs 	  (vendor/ort-wasm-simd-threaded.jsep.mjs)
     content/global/ml/transformers.js           	        (vendor/transformers.js)
     content/global/ml/ThomSample.mjs                      (content/ThomSample.mjs)
-    content/global/ml/backends/LlamaCppPipeline.mjs       (content/backends/LlamaCppPipeline.mjs)
     content/global/ml/backends/OpenAIPipeline.mjs         (content/backends/OpenAIPipeline.mjs)
     content/global/ml/backends/StaticEmbeddingsPipeline.mjs (content/backends/StaticEmbeddingsPipeline.mjs)
     content/global/ml/openai.mjs                          (vendor/openai/dist/openai.mjs)

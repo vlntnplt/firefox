@@ -7,13 +7,8 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
 
     UNIFIED_SOURCES += [
         "LlamaBackend.cpp",
-        "LlamaRunner.cpp",
         "LlamaRuntimeLinker.cpp",
         "TextGenerator.cpp",
-    ]
-
-    EXPORTS.mozilla.dom += [
-        "LlamaRunner.h",
     ]
 
     EXPORTS.mozilla.llama += [
