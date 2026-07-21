@@ -111,6 +111,8 @@ class UtilityProcessHost final : public mozilla::ipc::GeckoChildProcessHost {
 
   // Override so we can turn on Utility process-specific sandbox logging
   bool FillMacSandboxInfo(MacSandboxInfo& aInfo) override;
+
+  static bool sLaunchWithMacSandbox;
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(UtilityProcessHost);
