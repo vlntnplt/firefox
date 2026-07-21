@@ -1,0 +1,22 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+namespace mozilla {
+namespace hwinference {
+
+// Browser-side manager for inference sessions in the HWInference utility
+// process. The parent lives in the main process, which is the only side
+// that starts anything: the utility process can only act on what it is
+// handed. Bootstrap mirrors the content manager: the main process creates
+// the endpoint pair and hands the child end over PHWInference
+// (NewBrowserHWInferenceManager). Session protocols are managed by this
+// one and follow separately.
+[ChildProc=Utility]
+protocol PHWInferenceBrowserManager
+{
+};
+
+}  // namespace hwinference
+}  // namespace mozilla

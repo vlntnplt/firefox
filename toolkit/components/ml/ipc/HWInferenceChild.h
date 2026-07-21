@@ -26,6 +26,9 @@ class HWInferenceChild final : public PHWInferenceChild {
       Endpoint<hwinference::PHWInferenceManagerParent>&& aEndpoint,
       const dom::ContentParentId& aContentId);
 
+  mozilla::ipc::IPCResult RecvNewBrowserHWInferenceManager(
+      Endpoint<hwinference::PHWInferenceBrowserManagerChild>&& aEndpoint);
+
   RefPtr<IsModelAvailablePromise> SendIsModelAvailable(const nsCString& aTask,
                                                        const nsCString& aId);
 
