@@ -5,49 +5,16 @@
 
 /// <reference path="head.js" />
 
-// Shared options and helpers for the structural-smoke tasks below.
-// The greedy sampler chain must terminate in `dist`: top-k:1 alone is
-// just a filter, and without `dist` to pick the surviving token
-// llama.cpp crashes.
-const LLAMA_SMOKE_OPTIONS = {
-  backend: "llama.cpp",
+// Shared fixtures (greedy samplers, storyteller prompt, TinyStories
+// options, stream drain, printableRatio) live in head.js.
+const LLAMA_SMOKE_OPTIONS = tinyStoriesOptions({
   engineId: "ml-smoke-test-llama-smoke",
-  taskName: "text-generation",
-  modelId: "Mozilla/test-llama",
-  modelFile: "TinyStories-656K.Q8_0.gguf",
-  modelRevision: "main",
-  numContext: 256,
-};
-
-const LLAMA_SMOKE_GREEDY = [{ type: "top-k", topK: 1 }, { type: "dist" }];
-
-const LLAMA_SMOKE_PROMPT_A = [
-  { role: "system", content: "You are a friendly storyteller." },
-  { role: "user", content: "Once upon a time there was a small mouse who" },
-];
+});
 
 const LLAMA_SMOKE_PROMPT_B = [
   { role: "system", content: "You are a friendly storyteller." },
   { role: "user", content: "Deep in the forest, a tall green tree" },
 ];
-
-async function runLlamaSmokeGen(
-  engine,
-  prompt,
-  samplers = LLAMA_SMOKE_GREEDY,
-  nPredict = 32
-) {
-  let text = "";
-  const generator = engine.runWithGenerator({ prompt, samplers, nPredict });
-  let result;
-  do {
-    result = await generator.next();
-    if (!result.done) {
-      text += result.value.text ?? "";
-    }
-  } while (!result.done);
-  return text;
-}
 
 async function sha256Hex(str) {
   const bytes = new TextEncoder().encode(str);
@@ -55,27 +22,6 @@ async function sha256Hex(str) {
   return [...new Uint8Array(digest)]
     .map(b => b.toString(16).padStart(2, "0"))
     .join("");
-}
-
-// Fraction of characters that are printable ASCII or common whitespace.
-// A working tokenizer + decoder should be ~1.0; a busted one drops fast.
-function printableRatio(text) {
-  if (!text.length) {
-    return 0;
-  }
-  let n = 0;
-  for (const ch of text) {
-    const code = ch.codePointAt(0);
-    if (
-      (code >= 0x20 && code <= 0x7e) ||
-      code === 0x09 ||
-      code === 0x0a ||
-      code === 0x0d
-    ) {
-      n++;
-    }
-  }
-  return n / [...text].length;
 }
 
 // Fraction of whitespace-split tokens that are distinct. Low values
@@ -118,9 +64,11 @@ async function llama_crash() {
 
   try {
     const crashMan = Services.crashmanager;
-    // A content process can emit ipc:content-shutdown for a normal teardown,
-    // which carries no crash information. Wait for the abnormal one so that
-    // the dumpID set by ContentParent is present on the subject.
+    // The crash check is process-agnostic: whichever process serves the run
+    // dies abnormally. Both shutdown topics can also fire for normal
+    // teardowns (with no crash information), so each arm filters for the
+    // abnormal one: content sets an explicit flag, utility carries a
+    // dumpID when the crash reporter generated one.
     const contentShutdown = TestUtils.topicObserved(
       "ipc:content-shutdown",
       (subject, data) => {
@@ -128,6 +76,17 @@ async function llama_crash() {
         return subject instanceof Ci.nsIPropertyBag2 && subject.get("abnormal");
       }
     );
+    const utilityShutdown = TestUtils.topicObserved(
+      "ipc:utility-shutdown",
+      (subject, data) => {
+        info(`ipc:utility-shutdown: data=${data} subject=${subject}`);
+        return (
+          subject instanceof Ci.nsIPropertyBag2 &&
+          (!!subject.get("dumpID") || !AppConstants.MOZ_CRASHREPORTER)
+        );
+      }
+    );
+    const servingProcessGone = Promise.race([contentShutdown, utilityShutdown]);
 
     const engine = await createEngine({
       modelId: "Mozilla/test-llama",
@@ -156,15 +115,15 @@ async function llama_crash() {
       sawCrash = true;
       info(`failed with error ${err.message}`);
 
-      let [subject, data] = await contentShutdown;
+      let [subject, data] = await servingProcessGone;
 
-      info(`ipc:content-shutdown: data=${data} subject=${subject}`);
+      info(`serving process gone: data=${data} subject=${subject}`);
 
       const dumpID = subject.get("dumpID");
       if (AppConstants.MOZ_CRASHREPORTER && dumpID === null) {
-        // This test does not appear to generate minidumps, it is unclear why.
-        // We should turn this into an `ok()` call once we fix the underlying
-        // issue in bug 2003271.
+        // The content path does not appear to generate minidumps, it is
+        // unclear why. We should turn this into an `ok()` call once we fix
+        // the underlying issue in bug 2003271.
         dump("There should be a dumpID");
       }
 
@@ -354,12 +313,12 @@ async function llama_fails_with_wrong_samplers() {
       await engine.run({ prompt, samplers });
     };
 
+    // Assert the rejection names the invalid sampler, not which class
+    // rejected it: the error surface is the contract, the class is an
+    // implementation detail.
     await Assert.rejects(
       runEngine(),
-      err =>
-        String(err?.message ?? err).includes(
-          "LlamaRunner.createGenerationStream: 'dist-invalid'"
-        ),
+      err => String(err?.message ?? err).includes("'dist-invalid'"),
       "The call should be rejected because it used an invalid sampler"
     );
   } finally {
@@ -490,13 +449,13 @@ add_task(async function test_ml_smoke_test_llama_output_looks_like_text() {
   try {
     const engine = await createEngine(LLAMA_SMOKE_OPTIONS);
     try {
-      const text = await runLlamaSmokeGen(engine, LLAMA_SMOKE_PROMPT_A);
+      const { text } = await drainGenerator(engine);
       info(`Output: ${text}`);
 
       Assert.greater(text.length, 0, "Generation produced text");
       Assert.notEqual(
         text.trim(),
-        LLAMA_SMOKE_PROMPT_A[1].content.trim(),
+        TINYSTORIES_STORYTELLER_PROMPT[1].content.trim(),
         "Output is not a verbatim echo of the user prompt"
       );
 
@@ -529,8 +488,10 @@ add_task(async function test_ml_smoke_test_llama_prompt_sensitive() {
   try {
     const engine = await createEngine(LLAMA_SMOKE_OPTIONS);
     try {
-      const a = await runLlamaSmokeGen(engine, LLAMA_SMOKE_PROMPT_A);
-      const b = await runLlamaSmokeGen(engine, LLAMA_SMOKE_PROMPT_B);
+      const { text: a } = await drainGenerator(engine);
+      const { text: b } = await drainGenerator(engine, {
+        prompt: LLAMA_SMOKE_PROMPT_B,
+      });
       info(`Prompt A output: ${a}`);
       info(`Prompt B output: ${b}`);
       Assert.notEqual(
@@ -567,6 +528,70 @@ const LLAMA_SMOKE_EXPECTED_HASH = LLAMA_SMOKE_IS_AARCH64
   ? "a59803f3d1c9d983f14c54fadbe9de3b73a1053780f01bc7768fa2bc498f6005"
   : "67b4cf2e37139e20795938ab3dedbdd040ffc2143e2ded210b0838de37581fa9";
 
+// Cross-mode invariant: run() must return exactly the text that
+// runWithGenerator() streams for the same greedy request. The future
+// engine's reply carries the full content alongside the streamed
+// deltas, so this equality is the contract that lets a caller ignore
+// the stream.
+add_task(async function test_ml_smoke_test_llama_run_matches_generator() {
+  const { cleanup } = await setup();
+  try {
+    const engine = await createEngine(LLAMA_SMOKE_OPTIONS);
+    try {
+      const { text: streamed } = await drainGenerator(engine);
+      const res = await engine.run({
+        prompt: TINYSTORIES_STORYTELLER_PROMPT,
+        samplers: TINYSTORIES_GREEDY_SAMPLERS,
+        nPredict: 32,
+      });
+      info(`Streamed: ${streamed}`);
+      info(`run() finalOutput: ${res.finalOutput}`);
+      Assert.equal(
+        res.finalOutput,
+        streamed,
+        "run() returns the same greedy text runWithGenerator() streams"
+      );
+    } finally {
+      await engine.terminate?.();
+    }
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+  }
+});
+
+// Statelessness invariant: two identical greedy run() calls on one warm
+// engine produce identical text, i.e. one run leaves no context behind
+// for the next. An engine with session state must reset it between
+// runs to keep this holding.
+add_task(async function test_ml_smoke_test_llama_runs_are_stateless() {
+  const { cleanup } = await setup();
+  try {
+    const engine = await createEngine(LLAMA_SMOKE_OPTIONS);
+    try {
+      const request = {
+        prompt: TINYSTORIES_STORYTELLER_PROMPT,
+        samplers: TINYSTORIES_GREEDY_SAMPLERS,
+        nPredict: 32,
+      };
+      const first = await engine.run(request);
+      const second = await engine.run(request);
+      info(`First: ${first.finalOutput}`);
+      info(`Second: ${second.finalOutput}`);
+      Assert.equal(
+        second.finalOutput,
+        first.finalOutput,
+        "Identical greedy runs on a warm engine produce identical text"
+      );
+    } finally {
+      await engine.terminate?.();
+    }
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+  }
+});
+
 add_task(async function test_ml_smoke_test_llama_golden_text() {
   const isMacIntel =
     AppConstants.platform === "macosx" &&
@@ -585,7 +610,7 @@ add_task(async function test_ml_smoke_test_llama_golden_text() {
   try {
     const engine = await createEngine(LLAMA_SMOKE_OPTIONS);
     try {
-      const text = await runLlamaSmokeGen(engine, LLAMA_SMOKE_PROMPT_A);
+      const { text } = await drainGenerator(engine);
       const hash = await sha256Hex(text);
       info(`Greedy text: ${text}`);
       info(`Greedy SHA-256: ${hash}`);

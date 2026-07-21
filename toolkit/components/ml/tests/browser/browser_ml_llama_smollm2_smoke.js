@@ -39,7 +39,7 @@ const SMOLLM2_OPTIONS = {
   modelRevision: "main",
   modelHubUrlTemplate: "{model}/{revision}",
   numContext: 512,
-  useMmap: true,
+  useMmap: false,
   useMlock: false,
 };
 

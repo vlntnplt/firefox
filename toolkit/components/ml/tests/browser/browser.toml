@@ -56,6 +56,18 @@ skip-if = [
   "verify",
 ]
 
+# Telemetry shape test for the llama.cpp workflow; same native-backend
+# gating as browser_ml_native.js.
+["browser_ml_native_telemetry.js"]
+skip-if = [
+  "arch == 'x86'",
+  "asan",
+  "debug",
+  "os == 'android'",
+  "tsan",
+  "verify",
+]
+
 ["browser_ml_nlp_utils.js"]
 
 ["browser_ml_openai.js"]

@@ -83,6 +83,18 @@ skip-if = [
 
 ["browser_link_preview_aifeature_lifecycle.js"]
 
+# Real engine, no stubs; same native-backend gating as
+# toolkit/components/ml/tests/browser/browser_ml_native.js.
+["browser_link_preview_generation.js"]
+skip-if = [
+  "arch == 'x86'",
+  "asan",
+  "debug",
+  "os == 'android'",
+  "tsan",
+  "verify",
+]
+
 ["browser_link_preview_nimbus.js"]
 
 ["browser_link_preview_optin.js"]
