@@ -10,6 +10,10 @@ UNIFIED_SOURCES = [
     "TestTextGeneration.cpp",
 ]
 
+TEST_HARNESS_FILES.gtest += [
+    "../browser/data/Mozilla/test-llama/main/TinyStories-656K.Q8_0.gguf",
+]
+
 include("/ipc/chromium/chromium-config.mozbuild")
 
 FINAL_LIBRARY = "xul-gtest"
