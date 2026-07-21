@@ -365,6 +365,71 @@ add_task(async function test_ml_smoke_test_llama_sequential_runs() {
   }
 });
 
+add_task(async function test_ml_smoke_test_llama_context_knobs_served() {
+  const { cleanup } = await setup();
+  try {
+    const engine = await createEngine({
+      taskName: "text-generation",
+      modelId: "Mozilla/test-llama",
+      modelFile: "TinyStories-656K.Q8_0.gguf",
+      modelRevision: "main",
+      backend: "llama.cpp",
+      numContext: 128,
+      numBatch: 128,
+      numUbatch: 64,
+      numThreadsDecoding: 2,
+    });
+
+    const { text } = await drainGenerator(engine);
+    Assert.greater(
+      text.length,
+      0,
+      "Generation with explicit batch sizes and decode threads produced " +
+        "output"
+    );
+    Assert.greater(
+      printableRatio(text),
+      0.9,
+      "Output under the tuned context configuration looks like text"
+    );
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+  }
+});
+
+// Quantized KV cannot run on this model at all (its head dim is smaller
+// than the ggml quantization block), so both quantized configurations
+// must reject at context creation: without flash attention llama's
+// requires-flash check fires, with it the block-size check does. Either
+// rejection proves kvCacheDtype crossed the wire into llama.cpp; the
+// dtype has no effect at all on the old silently-dropped surface.
+add_task(async function test_ml_smoke_test_llama_quantized_kv_rejected() {
+  const { cleanup } = await setup();
+  try {
+    for (const flashAttn of [false, true]) {
+      await Assert.rejects(
+        createEngine({
+          taskName: "text-generation",
+          modelId: "Mozilla/test-llama",
+          modelFile: "TinyStories-656K.Q8_0.gguf",
+          modelRevision: "main",
+          backend: "llama.cpp",
+          numContext: 128,
+          kvCacheDtype: "q8_0",
+          flashAttn,
+        }),
+        /./,
+        `q8_0 KV with flashAttn=${flashAttn} is rejected at context creation`
+      );
+      await EngineProcess.destroyMLEngine();
+    }
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+  }
+});
+
 add_task(async function test_ml_smoke_test_llama_overlap_guard() {
   const { cleanup } = await setup();
   try {

@@ -19,6 +19,46 @@ const E2E_TEST_BASE_URL =
   "chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/";
 
 /**
+
+ * End to End test that a llama.cpp engine routes to the HWInference-backed
+ * TextGenerationEngine.
+ */
+add_task(async function test_e2e_choose_backend_llama_cpp() {
+  await EngineProcess.destroyMLEngine();
+  await IndexedDBCache.init({ reset: true });
+
+  try {
+    const engine = await createEngine({
+      engineId: "main",
+      taskName: "text-generation",
+      featureId: "link-preview",
+      backend: BACKENDS.llamaCpp,
+      modelId: "Mozilla/test-llama",
+      modelFile: "TinyStories-656K.Q8_0.gguf",
+      modelRevision: "main",
+      numContext: 128,
+    });
+    // The backend echo alone cannot fail (TextGenerationEngine stamps
+    // it unconditionally); the constructor is what shows createEngine
+    // routed to the HWInference-backed engine and not MLEngine.
+    Assert.equal(
+      engine.constructor.name,
+      "TextGenerationEngine",
+      "llama.cpp routed createEngine to the HWInference TextGenerationEngine"
+    );
+    Assert.equal(
+      engine.pipelineOptions.backend,
+      BACKENDS.llamaCpp,
+      "llama.cpp backend echoed on the HWInference engine"
+    );
+    await engine.terminate();
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await IndexedDBCache.init({ reset: true });
+  }
+});
+
+/**
  * End to End test that the engine can be cancelled.
  */
 add_task(async function test_e2e_engine_can_be_cancelled() {

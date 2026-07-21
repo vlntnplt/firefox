@@ -501,10 +501,9 @@ export class MLEngineParent extends JSProcessActorParent {
     // Create the model hub instance if needed
     if (this.modelHub === null) {
       lazy.console.debug("Creating model hub instance");
-      this.modelHub = new lazy.ModelHub({
+      this.modelHub = await MLEngineParent.createModelHub({
         rootUrl,
         urlTemplate,
-        allowDenyList: await MLEngineParent.getAllowDenyList(),
       });
     }
 
@@ -649,6 +648,29 @@ export class MLEngineParent extends JSProcessActorParent {
     return /** @type {Promise<RecordsML["ml-model-allow-deny-list"][]>} */ (
       MLEngineParent.#getRemoteClient(RS_ALLOW_DENY_COLLECTION).get()
     );
+  }
+
+  /**
+   * Creates a ModelHub instance configured with the shared allow/deny list.
+   *
+   * @param {object} [config]
+   * @param {string} [config.rootUrl] - Root URL used to download models.
+   * @param {string} [config.urlTemplate] - URL template for model files.
+   * @returns {Promise<ModelHub>}
+   */
+  static async createModelHub({ rootUrl, urlTemplate } = {}) {
+    const config = {
+      allowDenyList: await MLEngineParent.getAllowDenyList(),
+    };
+    // PipelineOptions carries null for unset hub fields; either way the
+    // ModelHub constructor defaults must apply.
+    if (rootUrl != null) {
+      config.rootUrl = rootUrl;
+    }
+    if (urlTemplate != null) {
+      config.urlTemplate = urlTemplate;
+    }
+    return new lazy.ModelHub(config);
   }
 
   /**

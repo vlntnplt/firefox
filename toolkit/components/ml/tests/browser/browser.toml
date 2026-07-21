@@ -45,6 +45,21 @@ support-files = ["ml_engine_e2e_cancel_stub.worker.mjs"]
 
 ["browser_ml_engine_security.js"]
 
+# Crash-path test for the HWInference routing; same native-backend
+# gating as browser_ml_native.js.
+["browser_ml_hwinference.js"]
+skip-if = [
+  "arch == 'x86'",
+  "asan",
+  "debug",
+  "os == 'android'",
+  "tsan",
+  "verify",
+]
+
+# Notifications/abort wiring of the HWInference routing, hub stubbed;
+# no native backend needed.
+["browser_ml_hwinference_wiring.js"]
 ["browser_ml_mock_llm_engine.js"]
 
 ["browser_ml_native.js"]

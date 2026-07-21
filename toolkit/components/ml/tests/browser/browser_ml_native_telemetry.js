@@ -126,7 +126,7 @@ function assertDeltas(table, before) {
   }
 }
 
-add_task(async function test_llama_workflow_success_telemetry() {
+async function runSuccessTelemetryWalk() {
   const { cleanup } = await setup();
   try {
     const before = snapshotCounts(SUCCESS_METRICS);
@@ -167,6 +167,10 @@ add_task(async function test_llama_workflow_success_telemetry() {
     await EngineProcess.destroyMLEngine();
     await cleanup();
   }
+}
+
+add_task(async function test_llama_workflow_success_telemetry() {
+  await runSuccessTelemetryWalk();
 });
 
 add_task(async function test_llama_workflow_failure_telemetry() {
@@ -194,8 +198,9 @@ add_task(async function test_llama_workflow_failure_telemetry() {
         engineId: "ml-native-telemetry-missing",
         modelFile: "does-not-exist.gguf",
       }),
-      () => true,
-      "Engine creation with a missing model file rejects"
+      /Failed to fetch the model file/,
+      "Engine creation with a missing model file rejects with the hub's " +
+        "fetch error"
     );
 
     assertDeltas(FAILURE_METRICS, before);
