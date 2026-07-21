@@ -12,7 +12,8 @@
 
 namespace mozilla::hwinference {
 
-// Utility-process side of the browser inference manager.
+// Utility-process side of the browser inference manager; allocates one
+// TextGenerationChild per constructed generator.
 class HWInferenceBrowserManagerChild final
     : public PHWInferenceBrowserManagerChild {
  public:
@@ -21,6 +22,15 @@ class HWInferenceBrowserManagerChild final
 
   static bool CreateForBrowser(
       Endpoint<PHWInferenceBrowserManagerChild>&& aEndpoint);
+
+  already_AddRefed<PTextGenerationChild> AllocPTextGenerationChild(
+      const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions);
+
+  // Construction completes here: the bound generator starts acquiring
+  // its model.
+  mozilla::ipc::IPCResult RecvPTextGenerationConstructor(
+      PTextGenerationChild* aActor, const ipc::FileDescriptor& aModel,
+      const TextGenerationOptions& aOptions) override;
 
   void ActorDestroy(ActorDestroyReason aReason) override;
 

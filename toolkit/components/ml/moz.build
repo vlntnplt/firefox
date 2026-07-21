@@ -21,6 +21,8 @@ DIRS += [
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
     DIRS += ["backends/llama"]
+    if CONFIG["ENABLE_TESTS"]:
+        TEST_DIRS += ["tests/gtest"]
 
 XPCSHELL_TESTS_MANIFESTS += ["tests/xpcshell/xpcshell.toml"]
 

@@ -11,9 +11,13 @@ EXPORTS.mozilla.hwinference += [
     "HWInferenceBrowserManagerChild.h",
     "HWInferenceBrowserManagerParent.h",
     "HWInferenceChild.h",
+    "HWInferenceLog.h",
     "HWInferenceManagerChild.h",
     "HWInferenceManagerParent.h",
     "HWInferenceParent.h",
+    "TextGenerationChild.h",
+    "TextGenerationEnums.h",
+    "TextGenerationParent.h",
 ]
 
 UNIFIED_SOURCES += [
@@ -23,12 +27,16 @@ UNIFIED_SOURCES += [
     "HWInferenceManagerChild.cpp",
     "HWInferenceManagerParent.cpp",
     "HWInferenceParent.cpp",
+    "TextGenerationChild.cpp",
+    "TextGenerationParent.cpp",
 ]
 
 IPDL_SOURCES = [
     "PHWInference.ipdl",
     "PHWInferenceBrowserManager.ipdl",
     "PHWInferenceManager.ipdl",
+    "PTextGeneration.ipdl",
+    "TextGenerationTypes.ipdlh",
 ]
 
 LOCAL_INCLUDES += [

@@ -1,0 +1,45 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+include protocol PHWInferenceBrowserManager;
+
+include TextGenerationTypes;
+
+namespace mozilla {
+namespace hwinference {
+
+// One text-generator over one loaded model. The manager constructs the
+// actor with the model fd and the generator options; loading the model is
+// part of construction (it starts on the generator's TaskQueue as soon as
+// the actor is bound) and the model is freed when the actor dies. Ready
+// is the one-shot outcome of that construction-time load; the parent side
+// does not hand the generator out until it arrives.
+//
+// Concurrency contract: one Generate is in flight at a time; the parent
+// surface (TextGenerator) rejects overlapping calls, so every Delta
+// belongs to the single pending Generate. The child handles messages on
+// the manager thread and runs compute on a per-generator TaskQueue,
+// issuing every Delta and the Generate reply from the manager thread,
+// reply last, so the reply always arrives after its deltas. Cancel is
+// best-effort and targets the pending Generate: an in-flight Generate
+// always resolves, a cancelled one with the tokens produced so far and
+// reason "cancelled".
+protocol PTextGeneration
+{
+  manager PHWInferenceBrowserManager;
+
+parent:
+  async Ready(LoadResult result);
+  async Delta(nsCString text);
+
+child:
+  async Generate(GenerateRequest request) returns (GenerateResponse response);
+  async Clear();
+  async Cancel();
+  async __delete__();
+};
+
+}  // namespace hwinference
+}  // namespace mozilla

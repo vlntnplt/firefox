@@ -5,11 +5,11 @@
 
 #include "HWInferenceBrowserManagerChild.h"
 
-#include "mozilla/Logging.h"
+#include "HWInferenceLog.h"
+#include "TextGenerationChild.h"
 
 namespace mozilla::hwinference {
 
-extern LazyLogModule gHWInferenceLog;
 #define LOGD(fmt, ...) \
   MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Debug, fmt, ##__VA_ARGS__)
 
@@ -24,6 +24,19 @@ bool HWInferenceBrowserManagerChild::CreateForBrowser(
   LOGD("[{} - {}] browser inference manager bound", fmt::ptr(actor.get()),
        __func__);
   return true;
+}
+
+already_AddRefed<PTextGenerationChild>
+HWInferenceBrowserManagerChild::AllocPTextGenerationChild(
+    const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
+  return MakeAndAddRef<TextGenerationChild>(aModel, aOptions);
+}
+
+ipc::IPCResult HWInferenceBrowserManagerChild::RecvPTextGenerationConstructor(
+    PTextGenerationChild* aActor, const ipc::FileDescriptor& aModel,
+    const TextGenerationOptions& aOptions) {
+  static_cast<TextGenerationChild*>(aActor)->Initialize();
+  return IPC_OK();
 }
 
 void HWInferenceBrowserManagerChild::ActorDestroy(ActorDestroyReason aReason) {
