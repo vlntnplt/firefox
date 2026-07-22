@@ -36,8 +36,10 @@
 #  include "mozilla/widget/filedialog/WinFileDialogChild.h"
 #endif
 
+#include "chrome/common/ipc_channel.h"
 #include "nsDebugImpl.h"
 #include "nsIXULRuntime.h"
+#include "nsPrintfCString.h"
 #include "nsThreadManager.h"
 #include "GeckoProfiler.h"
 
@@ -211,6 +213,25 @@ mozilla::ipc::IPCResult UtilityProcessChild::RecvPreferenceUpdate(
 mozilla::ipc::IPCResult UtilityProcessChild::RecvInitProfiler(
     Endpoint<PProfilerChild>&& aEndpoint) {
   mProfilerController = ChildProfilerController::Create(std::move(aEndpoint));
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult UtilityProcessChild::RecvGrabShutdownProfile(
+    GrabShutdownProfileResolver&& aResolver) {
+  ProfileAndAdditionalInformation profile;
+  if (mProfilerController) {
+    profile = mProfilerController->GrabShutdownProfileAndShutdown();
+    mProfilerController = nullptr;
+    if (const size_t len = profile.SizeOf();
+        len >= size_t(IPC::Channel::kMaximumMessageSize)) {
+      profile.mProfile = nsPrintfCString(
+          "*Profile from pid %u bigger (%zu) than IPC max (%zu)",
+          unsigned(profiler_current_process_id().ToNumber()), len,
+          size_t(IPC::Channel::kMaximumMessageSize));
+      profile.mAdditionalInformation.reset();
+    }
+  }
+  aResolver(std::move(profile));
   return IPC_OK();
 }
 

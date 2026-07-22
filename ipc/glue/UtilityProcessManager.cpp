@@ -18,8 +18,10 @@
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/UtilityProcessSandboxing.h"
 #include "mozilla/ipc/ProcessChild.h"
+#include "GeckoProfiler.h"
 #include "nsAppRunner.h"
 #include "nsContentUtils.h"
+#include "nsITimer.h"
 
 #ifdef XP_WIN
 #  include "mozilla/dom/WindowsUtilsParent.h"
@@ -674,14 +676,11 @@ void UtilityProcessManager::DestroyProcess(SandboxingKind aSandbox,
   }
 
   p->mQueuedPrefs.Clear();
-  p->mProcessParent = nullptr;
+  RefPtr<UtilityProcessParent> processParent = std::move(p->mProcessParent);
 
   if (!p->mProcess) {
     return;
   }
-
-  p->mProcess->Shutdown();
-  p->mProcess = nullptr;
 
   mProcesses.RemoveElement(p);
 
@@ -691,6 +690,47 @@ void UtilityProcessManager::DestroyProcess(SandboxingKind aSandbox,
   if (NoMoreProcesses()) {
     sSingleton = nullptr;
   }
+
+  // While profiling, ask the child for its profiler data before tearing the
+  // channel down; without this handoff the process's samples die with it.
+  // The host teardown then waits for the reply, a channel error, or the
+  // failsafe timer. The entry is already out of mProcesses, so a concurrent
+  // GetOrCreate launches afresh instead of joining the dying process.
+  if (!sXPCOMShutdown && profiler_is_active() && processParent &&
+      processParent->CanSend()) {
+    auto finishShutdown = [](const RefPtr<ProcessFields>& aProcess) {
+      if (aProcess->mProcess) {
+        aProcess->mProcess->Shutdown();
+        aProcess->mProcess = nullptr;
+      }
+    };
+    nsCOMPtr<nsITimer> timer =
+        NS_NewTimerWithCallback(
+            [p, finishShutdown](nsITimer*) { finishShutdown(p); }, 5000,
+            nsITimer::TYPE_ONE_SHOT, "UtilityProcessManager::DestroyProcess"_ns)
+            .unwrapOr(nullptr);
+    processParent->SendGrabShutdownProfile()->Then(
+        GetMainThreadSerialEventTarget(), __func__,
+        [p, timer, finishShutdown](ProfileAndAdditionalInformation&& aProfile) {
+          if (timer) {
+            timer->Cancel();
+          }
+          if (!aProfile.mProfile.IsEmpty()) {
+            profiler_received_exit_profile(std::move(aProfile));
+          }
+          finishShutdown(p);
+        },
+        [p, timer, finishShutdown](const ResponseRejectReason&) {
+          if (timer) {
+            timer->Cancel();
+          }
+          finishShutdown(p);
+        });
+    return;
+  }
+
+  p->mProcess->Shutdown();
+  p->mProcess = nullptr;
 }
 
 Maybe<base::ProcessId> UtilityProcessManager::ProcessPid(

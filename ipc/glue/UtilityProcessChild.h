@@ -49,6 +49,9 @@ class UtilityProcessChild final : public PUtilityProcessChild {
   mozilla::ipc::IPCResult RecvInitProfiler(
       Endpoint<PProfilerChild>&& aEndpoint);
 
+  mozilla::ipc::IPCResult RecvGrabShutdownProfile(
+      GrabShutdownProfileResolver&& aResolver);
+
   mozilla::ipc::IPCResult RecvPreferenceUpdate(const Pref& pref);
 
   mozilla::ipc::IPCResult RecvRequestMemoryReport(

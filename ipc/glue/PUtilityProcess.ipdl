@@ -5,6 +5,7 @@
 include CrashReporterInitArgs;
 include MemoryReportTypes;
 include PrefsTypes;
+include ProfilerTypes;
 
 include protocol PProfiler;
 include protocol PUtilityMediaService;
@@ -86,6 +87,11 @@ child:
   async Init(FileDescriptor? sandboxBroker, bool canRecordReleaseTelemetry, bool aIsReadyForBackgroundProcessing);
 
   async InitProfiler(Endpoint<PProfilerChild> endpoint);
+
+  // Grab the child's profiler data ahead of a clean shutdown. Without this
+  // handoff a utility process that exits during profiling takes its sample
+  // buffer with it; the parent sequences the actual teardown on the reply.
+  async GrabShutdownProfile() returns (ProfileAndAdditionalInformation profile);
 
   async RequestMemoryReport(uint32_t generation,
                             bool anonymize,
