@@ -836,6 +836,7 @@ void SetUtilitySandbox(int aBroker, ipc::SandboxingKind aKind) {
   UniquePtr<sandbox::bpf_dsl::Policy> policy;
   switch (aKind) {
     case ipc::SandboxingKind::GENERIC_UTILITY:
+    case ipc::SandboxingKind::HW_INFERENCE:
       policy = GetUtilitySandboxPolicy(sBroker);
       break;
 

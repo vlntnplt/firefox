@@ -135,53 +135,36 @@ add_task(async function test_e2e_choose_backend_can_detect_failure() {
  * End to End test that the engine is indeed initialized with llama.cpp when it is the
  * best-llama.
  */
-add_task(async function test_e2e_choose_backend_best_llamma_cpp() {
-  // Allow any url
-  Services.env.set("MOZ_ALLOW_EXTERNAL_ML_HUB", "true");
-
-  const backendData = new Uint8Array([10, 20, 30]);
-  const expectedBackendData = JSON.stringify(null);
-
-  const workerURL = new URL(
-    E2E_TEST_BASE_URL + "ml_engine_e2e_backend_stub.worker.mjs"
-  );
-  workerURL.searchParams.set("expectedBackendData", expectedBackendData);
-
+add_task(async function test_e2e_choose_backend_best_llama_cpp() {
   await EngineProcess.destroyMLEngine();
   await IndexedDBCache.init({ reset: true });
 
-  let promiseStub = sinon
-    .stub(MLEngineParent, "getWorkerConfig")
-    .callsFake(function () {
-      return { url: workerURL.href, options: { type: "module" } };
-    });
-
-  let wasmBufferStub = sinon
-    .stub(MLEngineParent, "getWasmArrayBuffer")
-    .returns(backendData);
-
+  // Force the capability decision so the test does not depend on the
+  // host; routing and the backend echo are what is under test.
   let chooseBestBackendStub = sinon
     .stub(MLEngineParent, "chooseBestBackend")
     .returns(BACKENDS.llamaCpp);
 
   try {
-    await createEngine({
+    const engine = await createEngine({
       engineId: "main",
-      taskName: "real-wllama-text-generation",
+      taskName: "text-generation",
       featureId: "link-preview",
       backend: BACKENDS.bestLlama,
-      modelId: "acme/bert",
-      modelHubUrlTemplate: "{model}/resolve/{revision}",
-      modelRevision: "v0.4",
-      modelHubRootUrl:
-        "chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data",
-      modelFile: "onnx/config.json",
+      modelId: "Mozilla/test-llama",
+      modelFile: "TinyStories-656K.Q8_0.gguf",
+      modelRevision: "main",
+      numContext: 128,
     });
+    Assert.equal(
+      engine.pipelineOptions.backend,
+      BACKENDS.llamaCpp,
+      "best-llama resolved to llama.cpp"
+    );
+    await engine.terminate();
   } finally {
     await EngineProcess.destroyMLEngine();
     await IndexedDBCache.init({ reset: true });
-    wasmBufferStub.restore();
-    promiseStub.restore();
     chooseBestBackendStub.restore();
   }
 });
@@ -220,7 +203,7 @@ add_task(async function test_e2e_engine_can_be_cancelled() {
           engineId: "main5",
           taskName: "real-wllama-text-generation",
           featureId: "link-preview",
-          backend: BACKENDS.llamaCpp,
+          backend: BACKENDS.wllama,
           modelId: "acme/bert",
           modelHubUrlTemplate: "{model}/resolve/{revision}",
           modelRevision: "v0.1",
@@ -287,7 +270,7 @@ add_task(async function test_e2e_engine_can_be_cancelled_after_fetch() {
           engineId: "main5",
           taskName: "real-wllama-text-generation",
           featureId: "link-preview",
-          backend: BACKENDS.llamaCpp,
+          backend: BACKENDS.wllama,
           modelId: "acme/bert",
           modelHubUrlTemplate: "{model}/resolve/{revision}",
           modelRevision: "v0.1",

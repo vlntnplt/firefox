@@ -113,6 +113,53 @@ TEST_F(TestUtilityProcess, LaunchAllKinds) {
   NS_ProcessPendingEvents(nullptr);
 }
 
+TEST_F(TestUtilityProcess, HWInferenceInstances) {
+  auto manager = UtilityProcessManager::GetSingleton();
+  ASSERT_TRUE(manager);
+
+  auto contentRes = WaitFor(manager->LaunchProcess(
+      SandboxingKind::HW_INFERENCE, HWINFERENCE_CONTENT_INSTANCE_KEY));
+  ASSERT_TRUE(contentRes.isOk())
+  << "Content launch LaunchError: " << contentRes.inspectErr().FunctionName()
+  << ", " << contentRes.inspectErr().ErrorCode();
+
+  auto browserRes = WaitFor(manager->LaunchProcess(
+      SandboxingKind::HW_INFERENCE, HWINFERENCE_BROWSER_INSTANCE_KEY));
+  ASSERT_TRUE(browserRes.isOk())
+  << "Browser launch LaunchError: " << browserRes.inspectErr().FunctionName()
+  << ", " << browserRes.inspectErr().ErrorCode();
+
+  // Content-driven and browser-driven inference are different OS processes.
+  auto contentPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                        HWINFERENCE_CONTENT_INSTANCE_KEY);
+  auto browserPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                        HWINFERENCE_BROWSER_INSTANCE_KEY);
+  ASSERT_TRUE(contentPid.isSome());
+  ASSERT_TRUE(browserPid.isSome());
+  ASSERT_NE(*contentPid, *browserPid);
+
+  // Shutting down one instance must not affect the other.
+  manager->CleanShutdown(SandboxingKind::HW_INFERENCE,
+                         HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(manager
+                  ->ProcessPid(SandboxingKind::HW_INFERENCE,
+                               HWINFERENCE_CONTENT_INSTANCE_KEY)
+                  .isNothing());
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                  HWINFERENCE_BROWSER_INSTANCE_KEY) ==
+              browserPid);
+
+  manager->CleanShutdown(SandboxingKind::HW_INFERENCE,
+                         HWINFERENCE_BROWSER_INSTANCE_KEY);
+  ASSERT_TRUE(manager
+                  ->ProcessPid(SandboxingKind::HW_INFERENCE,
+                               HWINFERENCE_BROWSER_INSTANCE_KEY)
+                  .isNothing());
+
+  // Drain the event queue.
+  NS_ProcessPendingEvents(nullptr);
+}
+
 #if defined(XP_WIN)
 static void LoadLibraryCrash_Test() {
   mozilla::gtest::DisableCrashReporter();

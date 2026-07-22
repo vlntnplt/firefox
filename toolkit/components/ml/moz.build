@@ -19,7 +19,7 @@ DIRS += [
 ]
 
 if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
-    DIRS += ["backends/llama"]
+    DIRS += ["backends/llama", "ipc"]
 
 XPCSHELL_TESTS_MANIFESTS += ["tests/xpcshell/xpcshell.toml"]
 
@@ -29,16 +29,35 @@ BROWSER_CHROME_MANIFESTS += [
     "tests/browser_eval/eval.toml",
 ]
 
-XPIDL_SOURCES += ["nsIMLUtils.idl"]
+XPIDL_SOURCES += [
+    "nsIMLModelHub.idl",
+    "nsIMLUtils.idl",
+]
 
-UNIFIED_SOURCES += ["MLUtils.cpp"]
-EXPORTS.mozilla.ml += ["MLUtils.h"]
+MOZ_SRC_FILES += [
+    "MLModelHubService.sys.mjs",
+]
+
+UNIFIED_SOURCES += [
+    "MLUtils.cpp",
+]
+
+EXPORTS.mozilla.ml += [
+    "MLUtils.h",
+]
 
 with Files("docs/**"):
     SCHEDULES.exclusive = ["docs"]
 
 XPCOM_MANIFESTS += [
     "components.conf",
+]
+
+LOCAL_INCLUDES += [
+    "/dom/base",
+    "/dom/file/ipc",
+    "/dom/ipc",
+    "/ipc/glue",
 ]
 
 XPIDL_MODULE = "ml"

@@ -5,10 +5,12 @@
 include CrashReporterInitArgs;
 include MemoryReportTypes;
 include PrefsTypes;
+include ProfilerTypes;
 
 include protocol PProfiler;
 include protocol PUtilityMediaService;
 include protocol PJSOracle;
+include protocol PHWInference;
 
 #if defined(XP_WIN)
 include protocol PWindowsUtils;
@@ -86,6 +88,11 @@ child:
 
   async InitProfiler(Endpoint<PProfilerChild> endpoint);
 
+  // Grab the child's profiler data ahead of a clean shutdown. Without this
+  // handoff a utility process that exits during profiling takes its sample
+  // buffer with it; the parent sequences the actual teardown on the reply.
+  async GrabShutdownProfile() returns (ProfileAndAdditionalInformation profile);
+
   async RequestMemoryReport(uint32_t generation,
                             bool anonymize,
                             bool minimizeMemoryUsage,
@@ -127,6 +134,8 @@ child:
   */
   async UnblockUntrustedModulesThread();
 #endif  // defined(XP_WIN)
+
+  async StartHWInferenceService(Endpoint<PHWInferenceChild> aEndpoint);
 
 #if defined(MOZ_SANDBOX) && defined(MOZ_DEBUG) && defined(ENABLE_TESTS)
   async InitSandboxTesting(Endpoint<PSandboxTestingChild> aEndpoint);

@@ -36,8 +36,10 @@
 #  include "mozilla/widget/filedialog/WinFileDialogChild.h"
 #endif
 
+#include "chrome/common/ipc_channel.h"
 #include "nsDebugImpl.h"
 #include "nsIXULRuntime.h"
+#include "nsPrintfCString.h"
 #include "nsThreadManager.h"
 #include "GeckoProfiler.h"
 
@@ -214,6 +216,25 @@ mozilla::ipc::IPCResult UtilityProcessChild::RecvInitProfiler(
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult UtilityProcessChild::RecvGrabShutdownProfile(
+    GrabShutdownProfileResolver&& aResolver) {
+  ProfileAndAdditionalInformation profile;
+  if (mProfilerController) {
+    profile = mProfilerController->GrabShutdownProfileAndShutdown();
+    mProfilerController = nullptr;
+    if (const size_t len = profile.SizeOf();
+        len >= size_t(IPC::Channel::kMaximumMessageSize)) {
+      profile.mProfile = nsPrintfCString(
+          "*Profile from pid %u bigger (%zu) than IPC max (%zu)",
+          unsigned(profiler_current_process_id().ToNumber()), len,
+          size_t(IPC::Channel::kMaximumMessageSize));
+      profile.mAdditionalInformation.reset();
+    }
+  }
+  aResolver(std::move(profile));
+  return IPC_OK();
+}
+
 mozilla::ipc::IPCResult UtilityProcessChild::RecvRequestMemoryReport(
     const uint32_t& aGeneration, const bool& aAnonymize,
     const bool& aMinimizeMemoryUsage, const Maybe<FileDescriptor>& aDMDFile,
@@ -304,6 +325,19 @@ mozilla::ipc::IPCResult UtilityProcessChild::RecvStartJSOracleService(
   }
 
   mJSOracleInstance->Start(std::move(aEndpoint));
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult UtilityProcessChild::RecvStartHWInferenceService(
+    Endpoint<PHWInferenceChild>&& aEndpoint) {
+  PROFILER_MARKER_UNTYPED(
+      "UtilityProcessChild::RecvStartHWInferenceService", OTHER,
+      MarkerOptions(MarkerTiming::IntervalUntilNowFrom(mChildStartTime)));
+
+  mHWInferenceInstance = MakeRefPtr<hwinference::HWInferenceChild>();
+  if (!aEndpoint.Bind(mHWInferenceInstance)) {
+    return IPC_FAIL(this, "Invalid endpoint");
+  }
   return IPC_OK();
 }
 
