@@ -33,8 +33,8 @@ enum SandboxingKind : uint64_t {
   PKCS11_MODULE,
 #endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
 
+  HW_INFERENCE,
   COUNT,
-
 };
 
 bool IsUtilitySandboxEnabled(const char* envVar, SandboxingKind aKind);

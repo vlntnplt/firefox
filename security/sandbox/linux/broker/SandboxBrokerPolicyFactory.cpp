@@ -1222,4 +1222,95 @@ SandboxBrokerPolicyFactory::GetUtilityProcessPolicy(int aPid) {
   return policy;
 }
 
+/* static */
+UniquePtr<SandboxBroker::Policy>
+SandboxBrokerPolicyFactory::GetHWInferencePolicy(int aPid) {
+  auto policy = MakeUnique<SandboxBroker::Policy>();
+
+  AddSharedMemoryPaths(policy.get(), aPid);
+
+  policy->AddPath(rdonly, "/dev/urandom");
+  // FIXME (bug 1662321): we should fix nsSystemInfo so that every
+  // child process doesn't need to re-read these files to get the info
+  // the parent process already has.
+  policy->AddPath(rdonly, "/proc/cpuinfo");
+  policy->AddPath(rdonly,
+                  "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
+  policy->AddPath(rdonly, "/sys/devices/system/cpu/cpu0/cache/index2/size");
+  policy->AddPath(rdonly, "/sys/devices/system/cpu/cpu0/cache/index3/size");
+  policy->AddTree(rdonly, "/sys/devices/cpu");
+  policy->AddTree(rdonly, "/sys/devices/system/cpu");
+  policy->AddTree(rdonly, "/sys/devices/system/node");
+  policy->AddTree(rdonly, "/lib");
+  policy->AddTree(rdonly, "/lib64");
+  policy->AddTree(rdonly, "/usr/lib");
+  policy->AddTree(rdonly, "/usr/lib32");
+  policy->AddTree(rdonly, "/usr/lib64");
+  policy->AddTree(rdonly, "/run/opengl-driver/lib");
+  policy->AddTree(rdonly, "/nix/store");
+
+  // Bug 1647957: memory reporting.
+  AddMemoryReporting(policy.get(), aPid);
+
+  // Firefox binary dir.
+  // Note that unlike the previous cases, we use NS_GetSpecialDirectory
+  // instead of GetSpecialSystemDirectory. The former requires a working XPCOM
+  // system, which may not be the case for some tests. For querying for the
+  // location of XPCOM things, we can use it anyway.
+  nsCOMPtr<nsIFile> ffDir;
+  nsresult rv = NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(ffDir));
+  if (NS_SUCCEEDED(rv)) {
+    nsAutoCString tmpPath;
+    rv = ffDir->GetNativePath(tmpPath);
+    if (NS_SUCCEEDED(rv)) {
+      policy->AddTree(rdonly, tmpPath.get());
+    }
+  }
+
+  if (!mozilla::IsPackagedBuild()) {
+    // If this is not a packaged build the resources are likely symlinks to
+    // outside the binary dir. Therefore in non-release builds we allow reads
+    // from the whole repository. MOZ_DEVELOPER_REPO_DIR is set by mach run.
+    const char* developer_repo_dir = PR_GetEnv("MOZ_DEVELOPER_REPO_DIR");
+    if (developer_repo_dir) {
+      policy->AddTree(rdonly, developer_repo_dir);
+    }
+  }
+
+  // VA-API needs GPU access and GL context creation (but not display
+  // server access, as of bug 1769499).
+  AddGLDependencies(policy.get());
+
+  // FFmpeg and GPU drivers may need general-case library loading
+  AddLdconfigPaths(policy.get());
+  AddLdLibraryEnvPaths(policy.get());
+
+#ifdef MOZ_ENABLE_V4L2
+  AddV4l2Dependencies(policy.get());
+#endif  // MOZ_ENABLE_V4L2
+
+  // Bug 1903688: NVIDIA Tegra hardware decoding from Linux4Tegra
+  // Only built on ARM64 since Tegra is ARM64 SoC with different drivers, so the
+  // path are not needed on e.g. x86-64
+#if defined(__aarch64__)
+  policy->AddTree(rdonly, "/sys/devices/system/present");
+  policy->AddTree(rdonly, "/sys/module/tegra_fuse");
+  policy->AddPath(rdwr, "/dev/nvmap");
+  policy->AddPath(rdwr, "/dev/nvhost-ctrl");
+  policy->AddPath(rdwr, "/dev/nvhost-ctrl-gpu");
+  policy->AddPath(rdwr, "/dev/nvhost-nvdec");
+  policy->AddPath(rdwr, "/dev/nvhost-nvdec1");
+  policy->AddPath(rdwr, "/dev/nvhost-vic");
+#endif  // defined(__aarch64__)
+
+#if defined(MOZ_PROFILE_GENERATE)
+  AddLLVMProfilePathDirectory(policy.get());
+#endif
+
+  if (policy->IsEmpty()) {
+    policy = nullptr;
+  }
+  return policy;
+}
+
 }  // namespace mozilla
