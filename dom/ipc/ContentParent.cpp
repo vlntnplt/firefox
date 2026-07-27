@@ -45,6 +45,7 @@
 #include "mozilla/HangDetails.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/MozPromise.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/PageloadEvent.h"
 #include "mozilla/Preferences.h"
@@ -145,6 +146,7 @@
 #include "mozilla/glean/IpcMetrics.h"
 #include "mozilla/glean/PFOGTransport.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
+#include "mozilla/hwinference/PHWInferenceManagerChild.h"
 #include "mozilla/intl/L10nRegistry.h"
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/intl/OSPreferences.h"
@@ -159,6 +161,7 @@
 #include "mozilla/ipc/SharedMemoryHandle.h"
 #include "mozilla/ipc/TestShellParent.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/ipc/UtilityProcessManager.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
@@ -5274,6 +5277,19 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateAudioIPCConnection(
     result = NS_ERROR_FAILURE;
   }
   aResolver(result);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvRequestHWInferenceConnection(
+    Endpoint<hwinference::PHWInferenceManagerParent>&& aEndpoint,
+    RequestHWInferenceConnectionResolver&& aResolver) {
+  UtilityProcessManager::GetSingleton()
+      ->StartContentHWInferenceManager(std::move(aEndpoint), mChildID)
+      ->Then(GetCurrentSerialEventTarget(), __func__,
+             [resolver = std::move(aResolver)](
+                 GenericPromise::ResolveOrRejectValue&& aValue) {
+               resolver(aValue.IsResolve());
+             });
   return IPC_OK();
 }
 

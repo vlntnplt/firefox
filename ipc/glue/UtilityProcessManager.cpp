@@ -10,6 +10,7 @@
 #include "mozilla/ProfilerMarkers.h"
 #include "mozilla/StaticPrefs_media.h"
 #include "mozilla/SyncRunnable.h"  // for LaunchUtilityProcess
+#include "mozilla/hwinference/PHWInferenceChild.h"
 #include "mozilla/ipc/UtilityProcessParent.h"
 #include "mozilla/ipc/UtilityMediaServiceChild.h"
 #include "mozilla/ipc/UtilityMediaServiceParent.h"
@@ -121,31 +122,30 @@ void UtilityProcessManager::OnPreferenceChange(const char16_t* aData) {
                              /* remoteType */ ""_ns);
 
   for (auto& p : mProcesses) {
-    if (!p) {
-      continue;
-    }
-
     if (p->mProcessParent) {
       (void)p->mProcessParent->SendPreferenceUpdate(pref);
-    } else if (IsProcessLaunching(p->mSandbox)) {
+    } else if (IsProcessLaunching(p->mSandbox, p->mInstanceKey)) {
       p->mQueuedPrefs.AppendElement(pref);
     }
   }
 }
 
 RefPtr<UtilityProcessManager::ProcessFields> UtilityProcessManager::GetProcess(
-    SandboxingKind aSandbox) {
-  if (!mProcesses[aSandbox]) {
-    return nullptr;
+    SandboxingKind aSandbox, const nsACString& aInstanceKey) {
+  for (auto& p : mProcesses) {
+    if (p->mSandbox == aSandbox && p->mInstanceKey == aInstanceKey) {
+      return p;
+    }
   }
-
-  return mProcesses[aSandbox];
+  return nullptr;
 }
 
 RefPtr<UtilityProcessManager::SharedLaunchPromise<Ok>>
-UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox) {
-  LOGD("[%p] UtilityProcessManager::LaunchProcess SandboxingKind=%" PRIu64,
-       this, aSandbox);
+UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox,
+                                     const nsACString& aInstanceKey) {
+  LOGD("[%p] UtilityProcessManager::LaunchProcess SandboxingKind=%" PRIu64
+       " InstanceKey=%s",
+       this, aSandbox, nsCString(aInstanceKey).get());
   using RetPromise = SharedLaunchPromise<Ok>;
 
   MOZ_ASSERT(NS_IsMainThread());
@@ -156,7 +156,7 @@ UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox) {
         LaunchError("UPM::LaunchProcess(): IsShutdown()"), __func__);
   }
 
-  RefPtr<ProcessFields> p = GetProcess(aSandbox);
+  RefPtr<ProcessFields> p = GetProcess(aSandbox, aInstanceKey);
   if (p && p->mNumProcessAttempts) {
     // We failed to start the Utility process earlier, abort now.
     NS_WARNING("Reject LaunchProcess() for earlier mNumProcessAttempts");
@@ -169,8 +169,8 @@ UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox) {
   }
 
   if (!p) {
-    p = new ProcessFields(aSandbox);
-    mProcesses[aSandbox] = p;
+    p = new ProcessFields(aSandbox, aInstanceKey);
+    mProcesses.AppendElement(p);
   }
 
   geckoargs::ChildProcessArgs extraArgs;
@@ -182,7 +182,7 @@ UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox) {
   p->mProcess = new UtilityProcessHost(aSandbox, this);
   if (!p->mProcess->Launch(std::move(extraArgs))) {
     p->mNumProcessAttempts++;
-    DestroyProcess(aSandbox);
+    DestroyProcess(aSandbox, aInstanceKey);
     NS_WARNING("Reject LaunchProcess() for mNumProcessAttempts++");
     return RetPromise::CreateAndReject(
         LaunchError("UPM::LaunchProcess(): mNumProcessAttempts++"), __func__);
@@ -200,7 +200,7 @@ UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox) {
               __func__);
         }
 
-        if (self->IsProcessDestroyed(aSandbox)) {
+        if (self->IsProcessDestroyed(aSandbox, p->mInstanceKey)) {
           NS_WARNING(
               "Reject LaunchProcess() after LaunchPromise() for destroyed "
               "process");
@@ -228,7 +228,7 @@ UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox) {
       [self, p, aSandbox](LaunchError error) {
         if (GetSingleton()) {
           p->mNumProcessAttempts++;
-          self->DestroyProcess(aSandbox);
+          self->DestroyProcess(aSandbox, p->mInstanceKey);
         }
         NS_WARNING("Reject LaunchProcess() for LaunchPromise() rejection");
         return RetPromise::CreateAndReject(std::move(error), __func__);
@@ -240,7 +240,8 @@ UtilityProcessManager::LaunchProcess(SandboxingKind aSandbox) {
 template <typename Actor>
 RefPtr<UtilityProcessManager::LaunchPromise<Ok>>
 UtilityProcessManager::StartUtility(RefPtr<Actor> aActor,
-                                    SandboxingKind aSandbox) {
+                                    SandboxingKind aSandbox,
+                                    const nsACString& aInstanceKey) {
   using RetPromise = LaunchPromise<Ok>;
 
   LOGD(
@@ -269,60 +270,68 @@ UtilityProcessManager::StartUtility(RefPtr<Actor> aActor,
   }
 
   RefPtr<UtilityProcessManager> self = this;
-  return LaunchProcess(aSandbox)->Then(
-      GetMainThreadSerialEventTarget(), __func__,
-      [self, aActor, aSandbox, utilityStart]() -> RefPtr<RetPromise> {
-        RefPtr<UtilityProcessParent> utilityParent =
-            self->GetProcessParent(aSandbox);
-        if (!utilityParent) {
-          NS_WARNING("Missing parent in StartUtility");
-          return RetPromise::CreateAndReject(
-              LaunchError("UPM::GetProcessParent"), __func__);
-        }
+  nsCString instanceKey(aInstanceKey);
+  return LaunchProcess(aSandbox, aInstanceKey)
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [self, aActor, aSandbox, instanceKey,
+           utilityStart]() -> RefPtr<RetPromise> {
+            RefPtr<UtilityProcessParent> utilityParent =
+                self->GetProcessParent(aSandbox, instanceKey);
+            if (!utilityParent) {
+              NS_WARNING("Missing parent in StartUtility");
+              return RetPromise::CreateAndReject(
+                  LaunchError("UPM::GetProcessParent"), __func__);
+            }
 
-        // It is possible if multiple processes concurrently request a utility
-        // actor that the previous CanSend() check returned false for both but
-        // that by the time we have started our process for real, one of them
-        // has already been able to establish the IPC connection and thus we
-        // would perform more than one Open() call.
-        //
-        // The tests within browser_utility_multipleAudio.js should be able to
-        // catch that behavior.
-        if (!aActor->CanSend()) {
-          if (!utilityParent->CanSend()) {
-            NS_WARNING("Utility process died before IPC could be established");
-            return RetPromise::CreateAndReject(
-                LaunchError("UPM::UtilityParent died"), __func__);
-          }
+            // It is possible if multiple processes concurrently request a
+            // utility actor that the previous CanSend() check returned false
+            // for both but that by the time we have started our process for
+            // real, one of them has already been able to establish the IPC
+            // connection and thus we would perform more than one Open() call.
+            //
+            // The tests within browser_utility_multipleAudio.js should be able
+            // to catch that behavior.
+            if (!aActor->CanSend()) {
+              if (!utilityParent->CanSend()) {
+                NS_WARNING(
+                    "Utility process died before IPC could be established");
+                return RetPromise::CreateAndReject(
+                    LaunchError("UPM::UtilityParent died"), __func__);
+              }
 
-          nsresult rv = aActor->BindToUtilityProcess(utilityParent);
-          if (NS_FAILED(rv)) {
-            MOZ_ASSERT(false, "Protocol endpoints failure");
-            return RetPromise::CreateAndReject(
-                LaunchError("BindToUtilityProcess", rv), __func__);
-          }
+              nsresult rv = aActor->BindToUtilityProcess(utilityParent);
+              if (NS_FAILED(rv)) {
+                LOGD("BindToUtilityProcess failed with rv=%x",
+                     static_cast<uint32_t>(rv));
+                MOZ_ASSERT(false, "Protocol endpoints failure");
+                return RetPromise::CreateAndReject(
+                    LaunchError("BindToUtilityProcess", rv), __func__);
+              }
 
-          MOZ_DIAGNOSTIC_ASSERT(aActor->CanSend(), "IPC established for actor");
-          self->RegisterActor(utilityParent, aActor->GetActorName());
-        }
+              MOZ_DIAGNOSTIC_ASSERT(aActor->CanSend(),
+                                    "IPC established for actor");
+              self->RegisterActor(utilityParent, aActor->GetActorName());
+            }
 
-        PROFILER_MARKER_TEXT(
-            "UtilityProcessManager::StartUtility", IPC,
-            MarkerOptions(MarkerTiming::IntervalUntilNowFrom(utilityStart)),
-            nsPrintfCString("SandboxingKind=%" PRIu64 " Resolve", aSandbox));
-        return RetPromise::CreateAndResolve(Ok{}, __func__);
-      },
-      [self, aSandbox, utilityStart](LaunchError const& error) {
-        NS_WARNING("Reject StartUtility() for LaunchProcess() rejection");
-        if (!self->IsShutdown()) {
-          NS_WARNING("Reject StartUtility() when !IsShutdown()");
-        }
-        PROFILER_MARKER_TEXT(
-            "UtilityProcessManager::StartUtility", IPC,
-            MarkerOptions(MarkerTiming::IntervalUntilNowFrom(utilityStart)),
-            nsPrintfCString("SandboxingKind=%" PRIu64 " Reject", aSandbox));
-        return RetPromise::CreateAndReject(error, __func__);
-      });
+            PROFILER_MARKER_TEXT(
+                "UtilityProcessManager::StartUtility", IPC,
+                MarkerOptions(MarkerTiming::IntervalUntilNowFrom(utilityStart)),
+                nsPrintfCString("SandboxingKind=%" PRIu64 " Resolve",
+                                aSandbox));
+            return RetPromise::CreateAndResolve(Ok{}, __func__);
+          },
+          [self, aSandbox, utilityStart](LaunchError const& error) {
+            NS_WARNING("Reject StartUtility() for LaunchProcess() rejection");
+            if (!self->IsShutdown()) {
+              NS_WARNING("Reject StartUtility() when !IsShutdown()");
+            }
+            PROFILER_MARKER_TEXT(
+                "UtilityProcessManager::StartUtility", IPC,
+                MarkerOptions(MarkerTiming::IntervalUntilNowFrom(utilityStart)),
+                nsPrintfCString("SandboxingKind=%" PRIu64 " Reject", aSandbox));
+            return RetPromise::CreateAndReject(error, __func__);
+          });
 }
 
 RefPtr<UtilityProcessManager::StartRemoteDecodingUtilityPromise>
@@ -547,10 +556,59 @@ UtilityProcessManager::StartPKCS11Module() {
 }
 #endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
 
-bool UtilityProcessManager::IsProcessLaunching(SandboxingKind aSandbox) {
+RefPtr<UtilityProcessManager::HWInferencePromise>
+UtilityProcessManager::StartHWInference(const nsACString& aInstanceKey) {
+  LOGD("[%p] StartHWInference called instanceKey=%s", this,
+       nsCString(aInstanceKey).get());
+  RefPtr<UtilityProcessManager> self = this;
+  using RetPromise = HWInferencePromise;
+  nsCString instanceKey(aInstanceKey);
+  RefPtr<hwinference::HWInferenceParent> hwip =
+      hwinference::HWInferenceParent::GetSingleton(aInstanceKey);
+  MOZ_ASSERT(hwip, "Unable to get a singleton for HWInference");
+  LOGD(
+      "[%p] Starting HWInference utility process with HW_INFERENCE sandboxing "
+      "instanceKey=%s",
+      this, instanceKey.get());
+  return StartUtility(hwip, SandboxingKind::HW_INFERENCE, aInstanceKey)
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [self, hwip, instanceKey]() {
+            LOGD(
+                "StartHWInference: Utility process started successfully "
+                "instanceKey=%s",
+                instanceKey.get());
+            if (!hwip->CanSend()) {
+              MOZ_ASSERT(false, "HWInferenceParent lost in the middle");
+              LOGD(
+                  "StartHWInference: HWInferenceParent cannot send! "
+                  "instanceKey=%s",
+                  instanceKey.get());
+              return RetPromise::CreateAndReject(
+                  LaunchError("StartHWInference: !hwip->CanSend()"),
+                  __PRETTY_FUNCTION__);
+            }
+            LOGD(
+                "StartHWInference: HWInferenceParent ready, CanSend=true "
+                "instanceKey=%s",
+                instanceKey.get());
+            return RetPromise::CreateAndResolve(std::move(hwip), __func__);
+          },
+          [instanceKey](LaunchError&& aError) {
+            LOGD(
+                "StartHWInference: Failed to start utility process: %s "
+                "instanceKey=%s",
+                aError.FunctionName().get(), instanceKey.get());
+            MOZ_ASSERT_UNREACHABLE("PHWInference: failure when starting actor");
+            return RetPromise::CreateAndReject(std::move(aError), __func__);
+          });
+}
+
+bool UtilityProcessManager::IsProcessLaunching(SandboxingKind aSandbox,
+                                               const nsACString& aInstanceKey) {
   MOZ_ASSERT(NS_IsMainThread());
 
-  RefPtr<ProcessFields> p = GetProcess(aSandbox);
+  RefPtr<ProcessFields> p = GetProcess(aSandbox, aInstanceKey);
   if (!p) {
     MOZ_CRASH("Cannot check process launching with no process");
     return false;
@@ -559,9 +617,10 @@ bool UtilityProcessManager::IsProcessLaunching(SandboxingKind aSandbox) {
   return p->mProcess && !(p->mProcessParent);
 }
 
-bool UtilityProcessManager::IsProcessDestroyed(SandboxingKind aSandbox) {
+bool UtilityProcessManager::IsProcessDestroyed(SandboxingKind aSandbox,
+                                               const nsACString& aInstanceKey) {
   MOZ_ASSERT(NS_IsMainThread());
-  RefPtr<ProcessFields> p = GetProcess(aSandbox);
+  RefPtr<ProcessFields> p = GetProcess(aSandbox, aInstanceKey);
   if (!p) {
     MOZ_CRASH("Cannot check process destroyed with no process");
     return false;
@@ -574,9 +633,9 @@ void UtilityProcessManager::OnProcessUnexpectedShutdown(
   MOZ_ASSERT(NS_IsMainThread());
 
   for (auto& it : mProcesses) {
-    if (it && it->mProcess && it->mProcess == aHost) {
+    if (it->mProcess && it->mProcess == aHost) {
       it->mNumUnexpectedCrashes++;
-      DestroyProcess(it->mSandbox);
+      DestroyProcess(it->mSandbox, it->mInstanceKey);
       return;
     }
   }
@@ -589,33 +648,28 @@ void UtilityProcessManager::OnProcessUnexpectedShutdown(
 void UtilityProcessManager::CleanShutdownAllProcesses() {
   LOGD("[%p] UtilityProcessManager::CleanShutdownAllProcesses", this);
 
-  for (auto& it : mProcesses) {
-    if (it) {
-      DestroyProcess(it->mSandbox);
-    }
+  // DestroyProcess() removes the matched entry from mProcesses, so iterate
+  // backwards to keep the not-yet-visited indices valid.
+  for (size_t i = mProcesses.Length(); i > 0; --i) {
+    RefPtr<ProcessFields> p = mProcesses[i - 1];
+    DestroyProcess(p->mSandbox, p->mInstanceKey);
   }
 }
 
-void UtilityProcessManager::CleanShutdown(SandboxingKind aSandbox) {
+void UtilityProcessManager::CleanShutdown(SandboxingKind aSandbox,
+                                          const nsACString& aInstanceKey) {
   LOGD("[%p] UtilityProcessManager::CleanShutdown SandboxingKind=%" PRIu64,
        this, aSandbox);
 
-  DestroyProcess(aSandbox);
+  DestroyProcess(aSandbox, aInstanceKey);
 }
 
-uint16_t UtilityProcessManager::AliveProcesses() {
-  uint16_t alive = 0;
-  for (auto& p : mProcesses) {
-    if (p != nullptr) {
-      alive++;
-    }
-  }
-  return alive;
-}
+uint16_t UtilityProcessManager::AliveProcesses() { return mProcesses.Length(); }
 
-bool UtilityProcessManager::NoMoreProcesses() { return AliveProcesses() == 0; }
+bool UtilityProcessManager::NoMoreProcesses() { return mProcesses.IsEmpty(); }
 
-void UtilityProcessManager::DestroyProcess(SandboxingKind aSandbox) {
+void UtilityProcessManager::DestroyProcess(SandboxingKind aSandbox,
+                                           const nsACString& aInstanceKey) {
   LOGD("[%p] UtilityProcessManager::DestroyProcess SandboxingKind=%" PRIu64,
        this, aSandbox);
 
@@ -629,7 +683,7 @@ void UtilityProcessManager::DestroyProcess(SandboxingKind aSandbox) {
     mObserver = nullptr;
   }
 
-  RefPtr<ProcessFields> p = GetProcess(aSandbox);
+  RefPtr<ProcessFields> p = GetProcess(aSandbox, aInstanceKey);
   if (!p) {
     return;
   }
@@ -644,7 +698,7 @@ void UtilityProcessManager::DestroyProcess(SandboxingKind aSandbox) {
   p->mProcess->Shutdown();
   p->mProcess = nullptr;
 
-  mProcesses[aSandbox] = nullptr;
+  mProcesses.RemoveElement(p);
 
   CrashReporter::RecordAnnotationCString(
       CrashReporter::Annotation::UtilityProcessStatus, "Destroyed");
@@ -655,9 +709,9 @@ void UtilityProcessManager::DestroyProcess(SandboxingKind aSandbox) {
 }
 
 Maybe<base::ProcessId> UtilityProcessManager::ProcessPid(
-    SandboxingKind aSandbox) {
+    SandboxingKind aSandbox, const nsACString& aInstanceKey) {
   MOZ_ASSERT(NS_IsMainThread());
-  RefPtr<ProcessFields> p = GetProcess(aSandbox);
+  RefPtr<ProcessFields> p = GetProcess(aSandbox, aInstanceKey);
   if (!p) {
     return Nothing();
   }
@@ -709,6 +763,36 @@ class UtilityMemoryReporter : public MemoryReportingProcess {
 RefPtr<MemoryReportingProcess> UtilityProcessManager::GetProcessMemoryReporter(
     UtilityProcessParent* parent) {
   return new UtilityMemoryReporter(parent);
+}
+
+RefPtr<GenericPromise> UtilityProcessManager::StartContentHWInferenceManager(
+    Endpoint<hwinference::PHWInferenceManagerParent>&& aEndpoint,
+    dom::ContentParentId aChildId) {
+  LOGD(
+      "[%p] UtilityProcessManager::StartContentHWInferenceManager for content "
+      "%d",
+      this, static_cast<int>(aChildId));
+
+  return StartHWInference(HWINFERENCE_CONTENT_INSTANCE_KEY)
+      ->Then(
+          GetMainThreadSerialEventTarget(), __func__,
+          [endpoint = std::move(aEndpoint),
+           aChildId](RefPtr<hwinference::HWInferenceParent> hwip) mutable
+              -> RefPtr<GenericPromise> {
+            // Send parent endpoint to utility process
+            if (!hwip->SendNewContentHWInferenceManager(std::move(endpoint),
+                                                        aChildId)) {
+              LOGD("Failed to send endpoint to utility process");
+              return GenericPromise::CreateAndReject(NS_ERROR_FAILURE,
+                                                     __func__);
+            }
+            return GenericPromise::CreateAndResolve(true, __func__);
+          },
+          [](LaunchError&& aError) {
+            LOGD("Failed to start HWInference: %s",
+                 aError.FunctionName().get());
+            return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
+          });
 }
 
 }  // namespace mozilla::ipc

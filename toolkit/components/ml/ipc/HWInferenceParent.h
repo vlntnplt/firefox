@@ -1,0 +1,53 @@
+/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#ifndef TOOLKIT_COMPONENTS_ML_IPC_HWINFERENCEPARENT_H_
+#define TOOLKIT_COMPONENTS_ML_IPC_HWINFERENCEPARENT_H_
+
+#include "mozilla/ProcInfo.h"
+#include "mozilla/StaticPtr.h"
+#include "mozilla/ipc/Endpoint.h"
+#include "mozilla/ipc/UtilityProcessParent.h"
+#include "mozilla/hwinference/PHWInferenceParent.h"
+#include "mozilla/ipc/UtilityMediaService.h"
+#include "nsTHashMap.h"
+
+namespace mozilla::hwinference {
+
+// Process-instance keys, following the remoteType convention (see
+// dom/ipc/RemoteType.h): opaque, collision-free strings, not hashes.
+#define HWINFERENCE_BROWSER_INSTANCE_KEY "browser"_ns
+#define HWINFERENCE_CONTENT_INSTANCE_KEY "content"_ns
+
+// HWInference parent process side
+class HWInferenceParent final : public PHWInferenceParent {
+ public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(HWInferenceParent, override);
+
+  explicit HWInferenceParent(const nsACString& aInstanceKey)
+      : mInstanceKey(aInstanceKey) {}
+
+  void ActorDestroy(ActorDestroyReason aReason) override;
+
+  ipc::UtilityActorName GetActorName() {
+    return ipc::UtilityActorName::HwInference;
+  }
+
+  nsresult BindToUtilityProcess(
+      const RefPtr<ipc::UtilityProcessParent>& aUtilityParent);
+
+  static RefPtr<HWInferenceParent> GetSingleton(const nsACString& aInstanceKey);
+
+ private:
+  friend PHWInferenceParent;
+  static StaticAutoPtr<nsTHashMap<nsCStringHashKey, RefPtr<HWInferenceParent>>>
+      sInstances;
+  nsCString mInstanceKey;
+  ~HWInferenceParent() = default;
+};
+
+}  // namespace mozilla::hwinference
+
+#endif  // TOOLKIT_COMPONENTS_ML_IPC_HWINFERENCEPARENT_H_

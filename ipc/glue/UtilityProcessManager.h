@@ -6,7 +6,8 @@
 #include "mozilla/MozPromise.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/ipc/UtilityProcessHost.h"
-#include "mozilla/EnumeratedArray.h"
+#include "mozilla/hwinference/HWInferenceParent.h"
+#include "mozilla/hwinference/PHWInferenceManagerChild.h"
 #include "mozilla/ProcInfo.h"
 #include "nsIObserver.h"
 #include "nsTArray.h"
@@ -59,16 +60,24 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   using PKCS11ModulePromise = LaunchPromise<RefPtr<psm::PKCS11ModuleParent>>;
 #endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
 
+  using HWInferencePromise =
+      LaunchPromise<RefPtr<hwinference::HWInferenceParent>>;
+
   static RefPtr<UtilityProcessManager> GetSingleton();
 
   static RefPtr<UtilityProcessManager> GetIfExists();
 
-  // Launch a new Utility process asynchronously
-  RefPtr<SharedLaunchPromise<Ok>> LaunchProcess(SandboxingKind aSandbox);
+  // Launch a new Utility process asynchronously. aInstanceKey distinguishes
+  // multiple concurrent processes of the same SandboxingKind (see
+  // StartHWInference); pass the empty string for every SandboxingKind that
+  // only ever has one instance.
+  RefPtr<SharedLaunchPromise<Ok>> LaunchProcess(
+      SandboxingKind aSandbox, const nsACString& aInstanceKey = ""_ns);
 
   template <typename Actor>
-  RefPtr<LaunchPromise<Ok>> StartUtility(RefPtr<Actor> aActor,
-                                         SandboxingKind aSandbox);
+  RefPtr<LaunchPromise<Ok>> StartUtility(
+      RefPtr<Actor> aActor, SandboxingKind aSandbox,
+      const nsACString& aInstanceKey = ""_ns);
 
   RefPtr<StartRemoteDecodingUtilityPromise> StartProcessForRemoteMediaDecoding(
       EndpointProcInfo aOtherProcess, dom::ContentParentId aChildId,
@@ -93,10 +102,20 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   RefPtr<PKCS11ModulePromise> StartPKCS11Module();
 #endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
 
+  // Starts (or reuses) the HWInference process instance for aInstanceKey
+  // (see HWINFERENCE_*_INSTANCE_KEY in HWInferenceParent.h).
+  RefPtr<HWInferencePromise> StartHWInference(
+      const nsACString& aInstanceKey = ""_ns);
+
+  RefPtr<GenericPromise> StartContentHWInferenceManager(
+      Endpoint<hwinference::PHWInferenceManagerParent>&& aEndpoint,
+      dom::ContentParentId aChildId);
+
   void OnProcessUnexpectedShutdown(UtilityProcessHost* aHost);
 
   // Returns the platform pid for this utility sandbox process.
-  Maybe<base::ProcessId> ProcessPid(SandboxingKind aSandbox);
+  Maybe<base::ProcessId> ProcessPid(SandboxingKind aSandbox,
+                                    const nsACString& aInstanceKey = ""_ns);
 
   // Create a MemoryReportingProcess object for this utility process
   RefPtr<MemoryReportingProcess> GetProcessMemoryReporter(
@@ -104,8 +123,9 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 
   // Returns access to the PUtility protocol if a Utility process for that
   // sandbox is present.
-  RefPtr<UtilityProcessParent> GetProcessParent(SandboxingKind aSandbox) {
-    RefPtr<ProcessFields> p = GetProcess(aSandbox);
+  RefPtr<UtilityProcessParent> GetProcessParent(
+      SandboxingKind aSandbox, const nsACString& aInstanceKey = ""_ns) {
+    RefPtr<ProcessFields> p = GetProcess(aSandbox, aInstanceKey);
     if (!p) {
       return nullptr;
     }
@@ -116,7 +136,7 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   nsTArray<RefPtr<UtilityProcessParent>> GetAllProcessesProcessParent() {
     nsTArray<RefPtr<UtilityProcessParent>> rv;
     for (auto& p : mProcesses) {
-      if (p && p->mProcessParent) {
+      if (p->mProcessParent) {
         rv.AppendElement(p->mProcessParent);
       }
     }
@@ -124,8 +144,9 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   }
 
   // Returns the Utility Process for that sandbox
-  UtilityProcessHost* Process(SandboxingKind aSandbox) {
-    RefPtr<ProcessFields> p = GetProcess(aSandbox);
+  UtilityProcessHost* Process(SandboxingKind aSandbox,
+                              const nsACString& aInstanceKey = ""_ns) {
+    RefPtr<ProcessFields> p = GetProcess(aSandbox, aInstanceKey);
     if (!p) {
       return nullptr;
     }
@@ -135,7 +156,7 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   void RegisterActor(const RefPtr<UtilityProcessParent>& aParent,
                      UtilityActorName aActorName) {
     for (auto& p : mProcesses) {
-      if (p && p->mProcessParent && p->mProcessParent == aParent) {
+      if (p->mProcessParent && p->mProcessParent == aParent) {
         p->mActors.AppendElement(aActorName);
         return;
       }
@@ -145,7 +166,7 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   Span<const UtilityActorName> GetActors(
       const RefPtr<UtilityProcessParent>& aParent) {
     for (auto& p : mProcesses) {
-      if (p && p->mProcessParent && p->mProcessParent == aParent) {
+      if (p->mProcessParent && p->mProcessParent == aParent) {
         return p->mActors;
       }
     }
@@ -154,15 +175,16 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 
   Span<const UtilityActorName> GetActors(GeckoChildProcessHost* aHost) {
     for (auto& p : mProcesses) {
-      if (p && p->mProcess == aHost) {
+      if (p->mProcess == aHost) {
         return p->mActors;
       }
     }
     return {};
   }
 
-  Span<const UtilityActorName> GetActors(SandboxingKind aSbKind) {
-    auto proc = GetProcess(aSbKind);
+  Span<const UtilityActorName> GetActors(
+      SandboxingKind aSbKind, const nsACString& aInstanceKey = ""_ns) {
+    auto proc = GetProcess(aSbKind, aInstanceKey);
     if (!proc) {
       return {};
     }
@@ -170,7 +192,8 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   }
 
   // Shutdown the Utility process for that sandbox.
-  void CleanShutdown(SandboxingKind aSandbox);
+  void CleanShutdown(SandboxingKind aSandbox,
+                     const nsACString& aInstanceKey = ""_ns);
 
   // Shutdown all utility processes
   void CleanShutdownAllProcesses();
@@ -180,8 +203,10 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
  private:
   ~UtilityProcessManager();
 
-  bool IsProcessLaunching(SandboxingKind aSandbox);
-  bool IsProcessDestroyed(SandboxingKind aSandbox);
+  bool IsProcessLaunching(SandboxingKind aSandbox,
+                          const nsACString& aInstanceKey = ""_ns);
+  bool IsProcessDestroyed(SandboxingKind aSandbox,
+                          const nsACString& aInstanceKey = ""_ns);
 
   // Called from our xpcom-shutdown observer.
   void OnXPCOMShutdown();
@@ -191,7 +216,8 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 
   void Init();
 
-  void DestroyProcess(SandboxingKind aSandbox);
+  void DestroyProcess(SandboxingKind aSandbox,
+                      const nsACString& aInstanceKey = ""_ns);
 
   bool IsShutdown() const;
 
@@ -214,7 +240,9 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
    public:
     NS_INLINE_DECL_THREADSAFE_REFCOUNTING(ProcessFields);
 
-    explicit ProcessFields(SandboxingKind aSandbox) : mSandbox(aSandbox) {};
+    explicit ProcessFields(SandboxingKind aSandbox,
+                           const nsACString& aInstanceKey = ""_ns)
+        : mSandbox(aSandbox), mInstanceKey(aInstanceKey) {};
 
     // Promise will be resolved when this Utility process has been fully started
     // and configured. Only accessed on the main thread.
@@ -236,15 +264,22 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 
     SandboxingKind mSandbox = SandboxingKind::COUNT;
 
+    // Distinguishes multiple concurrent processes of the same mSandbox kind
+    // (see StartHWInference); always the empty string for kinds that only ever
+    // have one.
+    nsCString mInstanceKey;
+
    protected:
     ~ProcessFields() = default;
   };
 
-  EnumeratedArray<SandboxingKind, RefPtr<ProcessFields>,
-                  size_t(SandboxingKind::COUNT)>
-      mProcesses;
+  // Holds every live process, keyed by (mSandbox, mInstanceKey): some kinds
+  // (see StartHWInference) can have more than one live process at a time,
+  // distinguished by mInstanceKey.
+  nsTArray<RefPtr<ProcessFields>> mProcesses;
 
-  RefPtr<ProcessFields> GetProcess(SandboxingKind);
+  RefPtr<ProcessFields> GetProcess(SandboxingKind,
+                                   const nsACString& aInstanceKey = ""_ns);
   bool NoMoreProcesses();
 
 #ifdef XP_WIN
