@@ -1,0 +1,32 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+/**
+ * Maps a task's opaque model id to a concrete ModelHub artifact. Implemented
+ * and registered in the parent process, which holds the id ->
+ * model/revision/filename mapping. HWInference looks up a resolver
+ * registered for the request's task (contract id
+ * "@mozilla.org/ml/model-resolver;1?task=<task>") and uses it to validate and
+ * expand the id supplied by the (less trusted) requesting process into the
+ * artifact coordinates it hands to ModelHub. Since aId must match one of the
+ * resolver's own known ids, the requesting process can only ever select among
+ * already-approved artifacts; it can never name a model/revision/filename
+ * itself.
+ */
+[scriptable, uuid(77c4ef02-3b7e-4210-90c4-384bbe08d2ee)]
+interface nsIMLModelResolver : nsISupports
+{
+  /**
+   * Resolve aId to a concrete ModelHub artifact. Purely a table lookup
+   * against static, in-tree data; always synchronous. Throws
+   * NS_ERROR_NOT_AVAILABLE if aId is unknown.
+   */
+  void resolve(in AUTF8String aId,
+              out AUTF8String aEngine,
+              out AUTF8String aModel,
+              out AUTF8String aRevision,
+              out AUTF8String aFilename);
+};

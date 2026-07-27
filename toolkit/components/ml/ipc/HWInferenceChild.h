@@ -26,6 +26,9 @@ class HWInferenceChild final : public PHWInferenceChild {
       Endpoint<hwinference::PHWInferenceManagerParent>&& aEndpoint,
       const dom::ContentParentId& aContentId);
 
+  RefPtr<IsModelAvailablePromise> SendIsModelAvailable(const nsCString& aTask,
+                                                       const nsCString& aId);
+
   ipc::UtilityActorName GetActorName() {
     return ipc::UtilityActorName::HwInference;
   }
