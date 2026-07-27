@@ -11,6 +11,22 @@ namespace mozilla {
 
 namespace hwinference {
 
+struct GetModelFileSuccess
+{
+  FileDescriptor fd;
+};
+
+struct GetModelError
+{
+  nsresult errorCode;
+};
+
+union GetModelFileResult
+{
+  GetModelFileSuccess;
+  GetModelError;
+};
+
 [ChildProc=Utility]
 protocol PHWInference
 {
@@ -43,6 +59,12 @@ protocol PHWInference
                        uint64_t innerWindowId,
                        ContentParentId contentId,
                        nsString progressToken) returns (bool success);
+
+    // Get the model as a file descriptor. This provides direct access to the
+    // model file from the HWInference process for use with libraries that
+    // require a FILE* handle.
+    async GetModelFile(nsCString task,
+                       nsCString id) returns (GetModelFileResult result);
 
   child:
     // Allow content processes to create direct connections to utility

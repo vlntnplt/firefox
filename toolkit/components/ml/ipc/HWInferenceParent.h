@@ -42,6 +42,9 @@ class HWInferenceParent final : public PHWInferenceParent {
       const dom::ContentParentId& aContentId, nsString&& aProgressToken,
       InstallModelResolver&& aResolver);
 
+  mozilla::ipc::IPCResult RecvGetModelFile(nsCString&& aTask, nsCString&& aId,
+                                           GetModelFileResolver&& aResolver);
+
   ipc::UtilityActorName GetActorName() {
     return ipc::UtilityActorName::HwInference;
   }

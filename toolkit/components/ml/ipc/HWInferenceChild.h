@@ -36,6 +36,9 @@ class HWInferenceChild final : public PHWInferenceChild {
       const nsCString& aTask, const nsCString& aId, uint64_t aInnerWindowId,
       const dom::ContentParentId& aContentId, const nsString& aProgressToken);
 
+  RefPtr<GetModelFilePromise> SendGetModelFile(const nsCString& aTask,
+                                               const nsCString& aId);
+
   ipc::UtilityActorName GetActorName() {
     return ipc::UtilityActorName::HwInference;
   }
