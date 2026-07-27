@@ -23,9 +23,6 @@ UNIFIED_SOURCES += [
 
 IPDL_SOURCES = [
     "PHWInference.ipdl",
-]
-
-PREPROCESSED_IPDL_SOURCES += [
     "PHWInferenceManager.ipdl",
 ]
 
