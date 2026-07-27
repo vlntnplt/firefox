@@ -51,7 +51,7 @@ interface nsIMLModelDownloadCompletionCallback : nsISupports
  * A service for checking model availability and downloading models
  * from the ML ModelHub for use by C++ components like SpeechRecognition
  */
-[scriptable, uuid(e381b167-cb68-429c-9d57-35acf9054505)]
+[scriptable, uuid(3c2e63c9-8a9a-49f9-b96d-c338f043b05c)]
 interface nsIMLModelHub : nsISupports
 {
   /**
@@ -64,6 +64,19 @@ interface nsIMLModelHub : nsISupports
    * @returns Promise that resolves to true if model is available, false otherwise
    */
   Promise isModelAvailable(in AUTF8String aEngineId, in AUTF8String aModel, in AUTF8String aRevision, in AUTF8String aFilename);
+
+  /**
+   * Check if a model is already downloaded to the local cache. Unlike
+   * isModelAvailable, this never reports true for a model that would still
+   * need to be downloaded.
+   *
+   * @param aEngineId - The engine ID to use
+   * @param aModel - The model name (organization/name)
+   * @param aRevision - The model revision
+   * @param aFilename - The file name to check
+   * @returns Promise that resolves to true if the model is already installed
+   */
+  Promise isModelInstalled(in AUTF8String aEngineId, in AUTF8String aModel, in AUTF8String aRevision, in AUTF8String aFilename);
 
   /**
    * Download a model with progress and completion callbacks
