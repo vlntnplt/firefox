@@ -1868,6 +1868,8 @@ bool SandboxBroker::SetSecurityLevelForUtilityProcess(
 #endif
     case mozilla::ipc::SandboxingKind::WINDOWS_UTILS:
       return BuildUtilitySandbox(config, WindowsUtilitySandboxProps());
+    case mozilla::ipc::SandboxingKind::HW_INFERENCE:
+      return BuildUtilitySandbox(config, GenericUtilitySandboxProps());
     default:
       MOZ_ASSERT_UNREACHABLE("Unknown sandboxing value");
       return false;
