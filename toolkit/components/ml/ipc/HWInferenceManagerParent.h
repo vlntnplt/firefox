@@ -21,6 +21,13 @@ class HWInferenceManagerParent final : public PHWInferenceManagerParent {
 
   void ActorDestroy(ActorDestroyReason aReason) override;
 
+  // Trusted id of the content process this manager was created for, assigned
+  // by the parent (never content-supplied). Used to attribute install
+  // requests to the requesting process so ownership of the requesting window
+  // can be verified. For a manager created on behalf of the parent process
+  // itself (a browser feature, not a content document), this is 0.
+  dom::ContentParentId ContentId() const { return mContentId; }
+
  private:
   explicit HWInferenceManagerParent(dom::ContentParentId aContentId);
   ~HWInferenceManagerParent() = default;
