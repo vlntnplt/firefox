@@ -1,0 +1,55 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+#include "nsISupports.idl"
+
+/**
+ * Result callback for nsIMLModelDownloadGate.shouldAllowDownload. Runs with
+ * true to allow the download, false to deny it.
+ */
+[scriptable, function, uuid(6edaeb01-b6b2-416b-9d59-9a9b933d8ba6)]
+interface nsIMLModelDownloadGateCallback : nsISupports
+{
+  void resolve(in boolean aAllow);
+};
+
+/**
+ * Authorization gate consulted before a model download started on behalf of a
+ * requesting content process. HWInference looks up a gate registered for the
+ * request's task (contract id "@mozilla.org/ml/model-download-gate;1?task=<task>")
+ * and, if one exists, only downloads when the gate allows it. Installs whose
+ * task has no registered gate stay ungated. A gate implementation may show UI
+ * and take arbitrarily long before answering.
+ *
+ * The interface is engine-agnostic: it carries only the generic ModelHub
+ * artifact coordinates plus the requesting context. Any per-engine detail
+ * (e.g. a human-readable download size) is derived by the gate itself.
+ */
+[scriptable, uuid(988181f7-5500-444b-a66d-dadada422ad2)]
+interface nsIMLModelDownloadGate : nsISupports
+{
+  /**
+   * Decide whether the model identified by (aModel, aRevision, aFilename) for
+   * aTask may be downloaded on behalf of the document with inner window id
+   * aInnerWindowId, requested by content process aContentId. The
+   * implementation is responsible for validating that aInnerWindowId actually
+   * belongs to aContentId before trusting it. aProgressToken identifies the
+   * download for progress reporting. Called on the parent main thread; answers
+   * via aCallback (possibly async).
+   *
+   * When the request originates from privileged chrome (a parent-process
+   * caller) rather than a content document, aContentId and aInnerWindowId are
+   * both 0: there is no content process to validate against and the origin is
+   * already trusted. Gates serving such tasks should treat 0 as "no content to
+   * validate".
+   */
+  void shouldAllowDownload(in AUTF8String aTask,
+                           in AUTF8String aModel,
+                           in AUTF8String aRevision,
+                           in AUTF8String aFilename,
+                           in unsigned long long aInnerWindowId,
+                           in unsigned long long aContentId,
+                           in AString aProgressToken,
+                           in nsIMLModelDownloadGateCallback aCallback);
+};

@@ -29,6 +29,13 @@ class HWInferenceChild final : public PHWInferenceChild {
   RefPtr<IsModelAvailablePromise> SendIsModelAvailable(const nsCString& aTask,
                                                        const nsCString& aId);
 
+  RefPtr<IsModelInstalledPromise> SendIsModelInstalled(const nsCString& aTask,
+                                                       const nsCString& aId);
+
+  RefPtr<InstallModelPromise> SendInstallModel(
+      const nsCString& aTask, const nsCString& aId, uint64_t aInnerWindowId,
+      const dom::ContentParentId& aContentId, const nsString& aProgressToken);
+
   ipc::UtilityActorName GetActorName() {
     return ipc::UtilityActorName::HwInference;
   }

@@ -53,6 +53,30 @@ HWInferenceChild::SendIsModelAvailable(const nsCString& aTask,
   return PHWInferenceChild::SendIsModelAvailable(aTask, aId);
 }
 
+RefPtr<HWInferenceChild::IsModelInstalledPromise>
+HWInferenceChild::SendIsModelInstalled(const nsCString& aTask,
+                                       const nsCString& aId) {
+  LOGD(
+      "[{} - {}] Sending model installed check to parent process: task={} "
+      "id={}",
+      fmt::ptr(this), __func__, aTask.get(), aId.get());
+
+  return PHWInferenceChild::SendIsModelInstalled(aTask, aId);
+}
+
+RefPtr<HWInferenceChild::InstallModelPromise>
+HWInferenceChild::SendInstallModel(const nsCString& aTask, const nsCString& aId,
+                                   uint64_t aInnerWindowId,
+                                   const dom::ContentParentId& aContentId,
+                                   const nsString& aProgressToken) {
+  LOGD(
+      "[{} - {}] Sending model installation request to parent process: "
+      "task={} id={}",
+      fmt::ptr(this), __func__, aTask.get(), aId.get());
+
+  return PHWInferenceChild::SendInstallModel(aTask, aId, aInnerWindowId,
+                                             aContentId, aProgressToken);
+}
 }  // namespace mozilla::hwinference
 
 #undef LOG
