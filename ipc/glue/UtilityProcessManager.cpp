@@ -39,6 +39,9 @@ extern LazyLogModule gUtilityProcessLog;
 
 static StaticRefPtr<UtilityProcessManager> sSingleton;
 
+StaticAutoPtr<nsTHashMap<nsCStringHashKey, uint32_t>>
+    UtilityProcessManager::sHWInferenceKeepAlives;
+
 static bool sXPCOMShutdown = false;
 
 bool UtilityProcessManager::IsShutdown() const {
@@ -648,6 +651,10 @@ void UtilityProcessManager::OnProcessUnexpectedShutdown(
 void UtilityProcessManager::CleanShutdownAllProcesses() {
   LOGD("[%p] UtilityProcessManager::CleanShutdownAllProcesses", this);
 
+  if (sHWInferenceKeepAlives) {
+    sHWInferenceKeepAlives->Clear();
+  }
+
   // DestroyProcess() removes the matched entry from mProcesses, so iterate
   // backwards to keep the not-yet-visited indices valid.
   for (size_t i = mProcesses.Length(); i > 0; --i) {
@@ -793,6 +800,51 @@ RefPtr<GenericPromise> UtilityProcessManager::StartContentHWInferenceManager(
                  aError.FunctionName().get());
             return GenericPromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
           });
+}
+
+void UtilityProcessManager::AcquireHWInferenceKeepAlive(
+    const nsACString& aInstanceKey) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!sHWInferenceKeepAlives) {
+    sHWInferenceKeepAlives = new nsTHashMap<nsCStringHashKey, uint32_t>();
+    ClearOnShutdown(&sHWInferenceKeepAlives);
+  }
+
+  uint32_t& count = sHWInferenceKeepAlives->LookupOrInsert(aInstanceKey, 0);
+  ++count;
+  LOGD("[%p] AcquireHWInferenceKeepAlive instanceKey=%s count=%u", this,
+       nsCString(aInstanceKey).get(), count);
+}
+
+void UtilityProcessManager::ReleaseHWInferenceKeepAlive(
+    const nsACString& aInstanceKey) {
+  MOZ_ASSERT(NS_IsMainThread());
+
+  if (!sHWInferenceKeepAlives) {
+    MOZ_ASSERT_UNREACHABLE("Unbalanced ReleaseHWInferenceKeepAlive");
+    return;
+  }
+
+  auto entry = sHWInferenceKeepAlives->Lookup(aInstanceKey);
+  if (!entry) {
+    MOZ_ASSERT_UNREACHABLE("Unbalanced ReleaseHWInferenceKeepAlive");
+    return;
+  }
+
+  MOZ_ASSERT(entry.Data() > 0);
+  if (--entry.Data() > 0) {
+    LOGD("[%p] ReleaseHWInferenceKeepAlive instanceKey=%s count=%u", this,
+         nsCString(aInstanceKey).get(), entry.Data());
+    return;
+  }
+
+  LOGD(
+      "[%p] ReleaseHWInferenceKeepAlive instanceKey=%s - last consumer gone, "
+      "shutting the process down",
+      this, nsCString(aInstanceKey).get());
+  entry.Remove();
+  CleanShutdown(SandboxingKind::HW_INFERENCE, aInstanceKey);
 }
 
 }  // namespace mozilla::ipc

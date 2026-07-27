@@ -9,8 +9,10 @@
 #include "mozilla/hwinference/HWInferenceParent.h"
 #include "mozilla/hwinference/PHWInferenceManagerChild.h"
 #include "mozilla/ProcInfo.h"
+#include "mozilla/StaticPtr.h"
 #include "nsIObserver.h"
 #include "nsTArray.h"
+#include "nsTHashMap.h"
 
 #include "mozilla/PRemoteMediaManagerChild.h"
 
@@ -110,6 +112,13 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   RefPtr<GenericPromise> StartContentHWInferenceManager(
       Endpoint<hwinference::PHWInferenceManagerParent>&& aEndpoint,
       dom::ContentParentId aChildId);
+
+  // Any consumer can hold a keep-alive: content processes via ContentParent
+  // (see PContent's Request/ReleaseHWInferenceConnection), parent-process
+  // features by calling these directly. The instance is shut down once the
+  // last one is released. Main thread only, must be balanced 1:1.
+  void AcquireHWInferenceKeepAlive(const nsACString& aInstanceKey);
+  void ReleaseHWInferenceKeepAlive(const nsACString& aInstanceKey);
 
   void OnProcessUnexpectedShutdown(UtilityProcessHost* aHost);
 
@@ -281,6 +290,15 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   RefPtr<ProcessFields> GetProcess(SandboxingKind,
                                    const nsACString& aInstanceKey = ""_ns);
   bool NoMoreProcesses();
+
+  // Keyed by instance key; an absent entry means zero. Static rather than a
+  // member because this manager is dropped once no utility process is left
+  // (see DestroyProcess) and recreated on demand, whereas the consumers
+  // holding keep-alives outlive that: a count stored per-manager would be lost
+  // across the reset, and a later release would then decrement a fresh count
+  // and shut down a process someone else is still using.
+  static StaticAutoPtr<nsTHashMap<nsCStringHashKey, uint32_t>>
+      sHWInferenceKeepAlives;
 
 #ifdef XP_WIN
   RefPtr<dom::WindowsUtilsParent> mWindowsUtils;

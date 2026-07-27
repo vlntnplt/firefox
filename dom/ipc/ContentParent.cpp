@@ -1985,6 +1985,17 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
     fss->Forget(ChildID());
   }
 
+  // A process that dies never sends its ReleaseHWInferenceConnection.
+  if (mHWInferenceKeepAlives) {
+    RefPtr<UtilityProcessManager> upm = UtilityProcessManager::GetSingleton();
+    while (mHWInferenceKeepAlives) {
+      --mHWInferenceKeepAlives;
+      if (upm) {
+        upm->ReleaseHWInferenceKeepAlive(HWINFERENCE_CONTENT_INSTANCE_KEY);
+      }
+    }
+  }
+
   if (why == NormalShutdown && !mCalledClose) {
     // If we shut down normally but haven't called Close, assume somebody
     // else called Close on us. In that case, we still need to call
@@ -5283,10 +5294,29 @@ mozilla::ipc::IPCResult ContentParent::RecvRequestHWInferenceConnection(
   UtilityProcessManager::GetSingleton()
       ->StartContentHWInferenceManager(std::move(aEndpoint), mChildID)
       ->Then(GetCurrentSerialEventTarget(), __func__,
-             [resolver = std::move(aResolver)](
+             [self = RefPtr{this}, resolver = std::move(aResolver)](
                  GenericPromise::ResolveOrRejectValue&& aValue) {
+               if (aValue.IsResolve()) {
+                 ++self->mHWInferenceKeepAlives;
+                 UtilityProcessManager::GetSingleton()
+                     ->AcquireHWInferenceKeepAlive(
+                         HWINFERENCE_CONTENT_INSTANCE_KEY);
+               }
                resolver(aValue.IsResolve());
              });
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvReleaseHWInferenceConnection() {
+  if (mHWInferenceKeepAlives == 0) {
+    return IPC_FAIL(this,
+                    "ReleaseHWInferenceConnection without a matching "
+                    "RequestHWInferenceConnection");
+  }
+
+  --mHWInferenceKeepAlives;
+  UtilityProcessManager::GetSingleton()->ReleaseHWInferenceKeepAlive(
+      HWINFERENCE_CONTENT_INSTANCE_KEY);
   return IPC_OK();
 }
 
