@@ -111,6 +111,7 @@ let tabFinder = {
    *
    * This is useful e.g. for reloading or closing tabs.
    *
+   * @param id
    * @return null If the xul:tab could not be found, e.g. if the
    * windowId is that of a chrome window.
    * @return {{tabbrowser: <xul:tabbrowser>, tab: <xul.tab>}} The
@@ -163,6 +164,7 @@ var State = {
   /**
    * Update the internal state.
    *
+   * @param force
    * @return {Promise}
    */
   async update(force = false) {
@@ -960,6 +962,10 @@ var View = {
 
       case "pkcs11Module":
         fluentName = "about-processes-utility-actor-pkcs11-module";
+        break;
+
+      case "hwInference":
+        fluentName = "about-processes-utility-actor-hw-inference";
         break;
 
       default:
