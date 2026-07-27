@@ -8,6 +8,7 @@ support-files = [
 
 # Asserts best-onnx resolves to onnx-native; gated to platforms that bundle
 # the native onnxruntime (matches browser_ml_native.js skip-if).
+
 ["browser_ml_best_onnx.js"]
 skip-if = [
   "arch == 'x86'",
@@ -44,9 +45,36 @@ support-files = ["ml_engine_e2e_cancel_stub.worker.mjs"]
 
 ["browser_ml_engine_security.js"]
 
+# Crash-path test for the HWInference routing; same native-backend
+# gating as browser_ml_native.js.
+["browser_ml_hwinference.js"]
+skip-if = [
+  "arch == 'x86'",
+  "asan",
+  "debug",
+  "os == 'android'",
+  "tsan",
+  "verify",
+]
+
+# Notifications/abort wiring of the HWInference routing, hub stubbed;
+# no native backend needed.
+["browser_ml_hwinference_wiring.js"]
 ["browser_ml_mock_llm_engine.js"]
 
 ["browser_ml_native.js"]
+skip-if = [
+  "arch == 'x86'",
+  "asan",
+  "debug",
+  "os == 'android'",
+  "tsan",
+  "verify",
+]
+
+# Telemetry shape test for the llama.cpp workflow; same native-backend
+# gating as browser_ml_native.js.
+["browser_ml_native_telemetry.js"]
 skip-if = [
   "arch == 'x86'",
   "asan",
@@ -74,6 +102,16 @@ skip-if = [
 ]
 support-files = [
   "ml_telemetry_stub.worker.mjs",
+]
+
+["browser_ml_textgenerator.js"]
+skip-if = [
+  "arch == 'x86'",
+  "asan",
+  "debug",
+  "os == 'android'",
+  "tsan",
+  "verify",
 ]
 
 ["browser_ml_thompson_sample.js"]

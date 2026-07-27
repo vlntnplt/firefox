@@ -9,7 +9,7 @@
 #include "LlamaRuntimeLinker.h"
 #include "ggml.h"
 #include "ggml-cpu.h"
-#include "mozilla/dom/LlamaRunnerBinding.h"
+#include "mozilla/dom/TextGeneratorBinding.h"
 #include "mozilla/Result.h"
 #include "mozilla/ResultVariant.h"
 #include "mozilla/UniquePtr.h"

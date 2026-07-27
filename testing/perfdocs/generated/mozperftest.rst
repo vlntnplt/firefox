@@ -766,7 +766,7 @@ browser_ml_llama_summarizer_perf.js
  --manifest-flavor browser-chrome
  --try-platform linux, mac, win
 
-**Template test for latency for Summarizer model using llama.cpp**
+**Latency for Qwen3-0.6B summarization on the native llama.cpp backend**
 
 browser_ml_smart_tab_perf.js
 ============================

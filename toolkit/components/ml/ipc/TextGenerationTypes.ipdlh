@@ -1,0 +1,119 @@
+/* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+using mozilla::dom::TextGenerationRole from "mozilla/hwinference/TextGenerationEnums.h";
+using mozilla::dom::TextGenerationFinishReason from "mozilla/hwinference/TextGenerationEnums.h";
+using mozilla::dom::TextGenerationSamplerType from "mozilla/hwinference/TextGenerationEnums.h";
+using mozilla::dom::TextGenerationKVCacheDtype from "mozilla/hwinference/TextGenerationEnums.h";
+
+namespace mozilla {
+namespace hwinference {
+
+// Named ChatMessage, not Message: the generated headers already use
+// IPC::Message and an unqualified Message typedef collides with it.
+struct ChatMessage {
+  TextGenerationRole role;
+  nsCString content;
+};
+
+struct LogitBias {
+  int32_t token;
+  float bias;
+};
+
+// One configured sampler in the sampling chain: `type` selects the
+// algorithm, the other fields feed it. Mirrors the surface dictionary
+// (TextGenerationSampler in TextGenerator.webidl) field for field.
+struct Sampler {
+  TextGenerationSamplerType type;
+  int32_t topK;
+  float topP;
+  float temp;
+  // Consumed by the dist sampler only; the deterministic samplers
+  // ignore it.
+  uint32_t seed;
+  LogitBias[] logitBias;
+};
+
+// Appended to the generator's context; Clear() first for a fresh start.
+// Holds what a caller varies per generation.
+struct GenerateRequest {
+  ChatMessage[] messages;
+  uint32_t maxTokens;
+  // Number of generated tokens batched into one Delta.
+  uint32_t bufferLength;
+  Sampler[] samplers;
+  int32_t[] stopTokens;
+  bool stopOnEndOfGenerationTokens;
+};
+
+// Boundaries the child measures directly. The model-load time is not
+// here: it belongs to construction and travels in Ready's LoadSuccess.
+struct Timings {
+  double prefillMs;
+  double decodeMs;
+};
+
+// The one-shot outcome of construction. The model load runs as part of
+// constructing the actor, and Ready reports how it went; errors after a
+// successful load travel in GenerateResponse instead.
+struct LoadSuccess {
+  double loadMs;
+};
+
+struct LoadError {
+  nsCString message;
+};
+
+union LoadResult {
+  LoadSuccess;
+  LoadError;
+};
+
+struct Usage {
+  uint32_t promptTokens;
+  uint32_t generatedTokens;
+  Timings timings;
+};
+
+// The reply carries the whole result, so a caller can ignore the delta
+// stream and still get everything; streaming just shows output early.
+struct GenerateResult {
+  nsCString content;
+  TextGenerationFinishReason reason;
+  Usage usage;
+};
+
+// Runtime failures (model would not load, invalid sampler chain) resolve
+// the reply with a message the caller can surface; crashes reject the
+// pending reply through ActorDestroy instead.
+struct GenerateError {
+  nsCString message;
+};
+
+union GenerateResponse {
+  GenerateResult;
+  GenerateError;
+};
+
+// What a generator is constructed with, alongside the model fd. Every
+// knob here is served verbatim; an option the backend cannot honor does
+// not appear on the wire.
+struct TextGenerationOptions {
+  uint32_t contextSize;
+  // Always concrete counts: the WebIDL layer resolves the 0 (auto)
+  // defaults before construction, so the sandboxed child never samples
+  // core topology. numThreads drives the prompt/batch phase,
+  // numThreadsDecoding the token-by-token decode phase.
+  uint32_t numThreads;
+  uint32_t numThreadsDecoding;
+  uint32_t batchSize;
+  uint32_t ubatchSize;
+  TextGenerationKVCacheDtype kvCacheDtype;
+  bool flashAttn;
+};
+
+}  // namespace hwinference
+}  // namespace mozilla

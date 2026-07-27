@@ -7,17 +7,17 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
 
     UNIFIED_SOURCES += [
         "LlamaBackend.cpp",
-        "LlamaRunner.cpp",
         "LlamaRuntimeLinker.cpp",
-    ]
-
-    EXPORTS.mozilla.dom += [
-        "LlamaRunner.h",
+        "TextGenerator.cpp",
     ]
 
     EXPORTS.mozilla.llama += [
         "LlamaBackend.h",
         "LlamaRuntimeLinker.h",
+    ]
+
+    EXPORTS.mozilla.hwinference += [
+        "TextGenerator.h",
     ]
 
     LOCAL_INCLUDES += [
@@ -26,6 +26,7 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
         "/dom/ipc",
         "/third_party/llama.cpp/ggml/include",
         "/third_party/llama.cpp/include",
+        "/toolkit/components/ml/ipc",
         "/xpcom/build",
     ]
 

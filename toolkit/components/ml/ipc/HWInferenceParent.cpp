@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "ModelFileUtils.h"
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPtr.h"
 #include "nsTHashSet.h"
@@ -483,58 +484,6 @@ ipc::IPCResult HWInferenceParent::RecvInstallModel(
   gate->ShouldAllowDownload(aTask, model, revision, filename, aInnerWindowId,
                             uint64_t(aContentId), aProgressToken, callback);
   return IPC_OK();
-}
-
-static nsresult BlobJSObjectToFileDescriptor(JSContext* aCx,
-                                             JS::Handle<JS::Value> aValue,
-                                             ipc::FileDescriptor* aDesc) {
-  if (!aValue.isObject()) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  RefPtr<dom::Blob> blob;
-  nsresult rv = UNWRAP_OBJECT(Blob, &aValue.toObject(), blob);
-  if (NS_FAILED(rv)) {
-    LOGE("BlobJSObjectToFileDescriptor - ERROR: Failed to unwrap Blob: {:x}",
-         static_cast<uint32_t>(rv));
-    return rv;
-  }
-
-  ErrorResult errorResult;
-  nsCOMPtr<nsIInputStream> stream;
-  blob->CreateInputStream(getter_AddRefs(stream), errorResult);
-  if (errorResult.Failed()) {
-    LOGE(
-        "BlobJSObjectToFileDescriptor - ERROR: Failed to create input stream "
-        "from blob");
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  nsCOMPtr<nsIFileMetadata> fileMetadata = do_QueryInterface(stream);
-  if (!fileMetadata) {
-    LOGE(
-        "BlobJSObjectToFileDescriptor - ERROR: Stream doesn't support "
-        "nsIFileMetadata");
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  PRFileDesc* fileDesc;
-  nsresult getRv = fileMetadata->GetFileDescriptor(&fileDesc);
-  if (NS_FAILED(getRv)) {
-    LOGE("BlobJSObjectToFileDescriptor - ERROR: GetFileDescriptor failed: {:x}",
-         static_cast<uint32_t>(getRv));
-    return getRv;
-  }
-
-  ipc::FileDescriptor fd(ipc::FileDescriptor::PlatformHandleType(
-      PR_FileDesc2NativeHandle(fileDesc)));
-  if (!fd.IsValid()) {
-    LOGE("BlobJSObjectToFileDescriptor - ERROR: Failed to get native handle");
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  *aDesc = std::move(fd);
-  return NS_OK;
 }
 
 ipc::IPCResult HWInferenceParent::RecvGetModelFile(

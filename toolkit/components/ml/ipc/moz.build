@@ -8,30 +8,46 @@ with Files("**"):
     BUG_COMPONENT = ("Core", "Machine Learning")
 
 EXPORTS.mozilla.hwinference += [
+    "HWInferenceBrowserManagerChild.h",
+    "HWInferenceBrowserManagerParent.h",
     "HWInferenceChild.h",
+    "HWInferenceLog.h",
     "HWInferenceManagerChild.h",
     "HWInferenceManagerParent.h",
     "HWInferenceParent.h",
+    "ModelFileUtils.h",
+    "TextGenerationChild.h",
+    "TextGenerationEnums.h",
+    "TextGenerationMarkers.h",
+    "TextGenerationParent.h",
 ]
 
 UNIFIED_SOURCES += [
+    "HWInferenceBrowserManagerChild.cpp",
+    "HWInferenceBrowserManagerParent.cpp",
     "HWInferenceChild.cpp",
     "HWInferenceManagerChild.cpp",
     "HWInferenceManagerParent.cpp",
     "HWInferenceParent.cpp",
+    "ModelFileUtils.cpp",
+    "TextGenerationChild.cpp",
+    "TextGenerationParent.cpp",
 ]
 
 IPDL_SOURCES = [
     "PHWInference.ipdl",
-]
-
-PREPROCESSED_IPDL_SOURCES += [
+    "PHWInferenceBrowserManager.ipdl",
     "PHWInferenceManager.ipdl",
+    "PTextGeneration.ipdl",
+    "TextGenerationTypes.ipdlh",
 ]
 
 LOCAL_INCLUDES += [
     "/dom/ipc",
     "/ipc/glue",
+    "/third_party/llama.cpp/ggml/include",
+    "/third_party/llama.cpp/include",
+    "/toolkit/components/ml/backends/llama",
 ]
 
 include("/ipc/chromium/chromium-config.mozbuild")

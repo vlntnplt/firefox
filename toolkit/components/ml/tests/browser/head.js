@@ -579,6 +579,16 @@ async function runInference({
     const res = await run();
     runEndTime = performance.now();
     const decodingTime = runEndTime - startTime;
+    // The HWInference path streams text-only deltas; token counts come
+    // from the engine's C++-measured usage instead of per-chunk arrays.
+    // Summed-chunk and total counts divide by the same phase times, so
+    // the series are equivalent where both exist.
+    if (!numGeneratedTokens && res.metrics?.outputTokens) {
+      numGeneratedTokens = res.metrics.outputTokens;
+    }
+    if (!numPromptTokens && res.metrics?.inputTokens) {
+      numPromptTokens = res.metrics.inputTokens;
+    }
     metrics = fetchMetrics(res.metrics?.runTimestamps || [], isFirstRun);
     metrics[`${isFirstRun ? COLD_START_PREFIX : ""}${TOTAL_MEMORY_USAGE}`] =
       await getTotalMemoryUsage();
@@ -1214,4 +1224,75 @@ async function checkForRemoteType(remoteType) {
     }
   }
   return false;
+}
+
+// Shared fixtures for the llama.cpp/TinyStories tests. The greedy
+// sampler chain must terminate in `dist`: top-k:1 alone is just a
+// filter, and without `dist` to pick the surviving token llama.cpp
+// crashes.
+const TINYSTORIES_GREEDY_SAMPLERS = [
+  { type: "top-k", topK: 1 },
+  { type: "dist" },
+];
+
+const TINYSTORIES_STORYTELLER_PROMPT = [
+  { role: "system", content: "You are a friendly storyteller." },
+  { role: "user", content: "Once upon a time there was a small mouse who" },
+];
+
+function tinyStoriesOptions(overrides = {}) {
+  return {
+    backend: "llama.cpp",
+    taskName: "text-generation",
+    modelId: "Mozilla/test-llama",
+    modelFile: "TinyStories-656K.Q8_0.gguf",
+    modelRevision: "main",
+    numContext: 256,
+    ...overrides,
+  };
+}
+
+/**
+ * Drains an engine.runWithGenerator() stream and returns the joined
+ * text and the terminal chunk value.
+ */
+async function drainGenerator(
+  engine,
+  {
+    prompt = TINYSTORIES_STORYTELLER_PROMPT,
+    samplers = TINYSTORIES_GREEDY_SAMPLERS,
+    nPredict = 32,
+  } = {}
+) {
+  let text = "";
+  const generator = engine.runWithGenerator({ prompt, samplers, nPredict });
+  let result;
+  do {
+    result = await generator.next();
+    if (!result.done) {
+      text += result.value.text ?? "";
+    }
+  } while (!result.done);
+  return { text, final: result.value };
+}
+
+// Fraction of characters that are printable ASCII or common whitespace.
+// A working tokenizer + decoder should be ~1.0; a busted one drops fast.
+function printableRatio(text) {
+  if (!text.length) {
+    return 0;
+  }
+  let n = 0;
+  for (const ch of text) {
+    const code = ch.codePointAt(0);
+    if (
+      (code >= 0x20 && code <= 0x7e) ||
+      code === 0x09 ||
+      code === 0x0a ||
+      code === 0x0d
+    ) {
+      n++;
+    }
+  }
+  return n / [...text].length;
 }

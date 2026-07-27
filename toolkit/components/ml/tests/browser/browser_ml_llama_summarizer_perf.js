@@ -12,37 +12,12 @@ async function fetchArticle(url) {
 
 let testData = [];
 
-const smollm2Model = {
-  taskName: "text-generation",
-  modelId: "HuggingFaceTB/SmolLM2-360M-Instruct-GGUF",
-  modelFile: "smollm2-360m-instruct-q8_0.gguf",
-  kvCacheDtype: "q8_0",
-  flashAttn: true,
-  useMmap: true,
-  useMlock: false,
-  perfModelId: "HuggingFaceTB/SmolLM2-360M-Instruct",
-  backend: "llama.cpp",
-};
-
-const qwen3Model = {
-  taskName: "text-generation",
-  modelId: "unsloth/Qwen3-0.6B-GGUF",
-  modelFile: "Qwen3-0.6B-Q8_0.gguf",
-  kvCacheDtype: "q8_0",
-  flashAttn: true,
-  useMmap: true,
-  useMlock: false,
-  perfModelId: "unsloth/Qwen3-0.6B-GGUF",
-};
-
 const qwen3ModelNative = {
   taskName: "text-generation",
   modelId: "unsloth/Qwen3-0.6B-GGUF",
   modelFile: "Qwen3-0.6B-Q8_0.gguf",
-  kvCacheDtype: "q8_0",
-  flashAttn: false,
   useMmap: false,
-  useMlock: true,
+  useMlock: false,
   perfModelId: "unsloth/Qwen3-0.6B-GGUF",
   backend: "llama.cpp",
 };
@@ -91,7 +66,8 @@ for (const model of [qwen3ModelNative]) {
 const perfMetadata = {
   owner: "GenAI Team",
   name: "browser_ml_llama_summarizer_perf.js",
-  description: "Template test for latency for Summarizer model using llama.cpp",
+  description:
+    "Latency for Qwen3-0.6B summarization on the native llama.cpp backend",
   options: {
     default: {
       perfherder: true,
@@ -172,9 +148,6 @@ async function run_summarizer_with_perf({
     modelId,
     modelRevision: "main",
     numContext,
-    numBatch: Math.min(numContext, 64),
-    numUbatch: Math.min(numContext, 64),
-    backend: "llama.cpp",
     timeoutMS: -1,
     ...llamaOptions,
   });
@@ -211,26 +184,26 @@ async function run_summarizer_with_perf({
   });
 }
 
-add_task(async function test_ml_smollm_tiny_article() {
+add_task(async function test_ml_qwen3_tiny_article() {
   await run_summarizer_with_perf(testData[0]);
 });
 
-add_task(async function test_ml_smollm_medium_article() {
+add_task(async function test_ml_qwen3_medium_article() {
   await run_summarizer_with_perf(testData[1]);
 });
 
-add_task(async function test_ml_smollm_medium_article() {
+add_task(async function test_ml_qwen3_big_article() {
   await run_summarizer_with_perf(testData[2]);
 });
 
-add_task(async function test_ml_smollm_tiny_article_with_mem() {
+add_task(async function test_ml_qwen3_tiny_article_with_mem() {
   await run_summarizer_with_perf({ ...testData[0], trackPeakMemory: true });
 });
 
-add_task(async function test_ml_smollm_medium_article_with_mem() {
+add_task(async function test_ml_qwen3_medium_article_with_mem() {
   await run_summarizer_with_perf({ ...testData[1], trackPeakMemory: true });
 });
 
-add_task(async function test_ml_smollm_medium_article_with_mem() {
+add_task(async function test_ml_qwen3_big_article_with_mem() {
   await run_summarizer_with_perf({ ...testData[2], trackPeakMemory: true });
 });

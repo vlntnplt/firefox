@@ -10,8 +10,6 @@ ChromeUtils.defineESModuleGetters(
   lazy,
   {
     ONNXPipeline: "chrome://global/content/ml/backends/ONNXPipeline.mjs",
-    LlamaCppPipeline:
-      "chrome://global/content/ml/backends/LlamaCppPipeline.mjs",
     PipelineOptions: "chrome://global/content/ml/EngineProcess.sys.mjs",
     OpenAIPipeline: "chrome://global/content/ml/backends/OpenAIPipeline.mjs",
     StaticEmbeddingsPipeline:
@@ -42,9 +40,6 @@ export async function getBackend(consumer, wasm, options) {
       break;
     case "onnx-native":
       factory = lazy.ONNXPipeline.initialize;
-      break;
-    case "llama.cpp":
-      factory = lazy.LlamaCppPipeline.initialize;
       break;
     case "openai":
       factory = lazy.OpenAIPipeline.initialize;
