@@ -1193,6 +1193,10 @@ parent:
     async RequestHWInferenceConnection(Endpoint<PHWInferenceManagerParent> endpoint)
         returns (bool success);
 
+    // One call per successful RequestHWInferenceConnection. The process is
+    // shut down once nothing holds it anymore.
+    async ReleaseHWInferenceConnection();
+
     sync PURLClassifier(nullable nsIPrincipal principal)
         returns (bool success);
 
