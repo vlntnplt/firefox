@@ -3,7 +3,9 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+#include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPtr.h"
+#include "nsTHashSet.h"
 #include "HWInferenceParent.h"
 #include "HWInferenceManagerParent.h"
 #include "mozilla/dom/Blob.h"
@@ -18,6 +20,7 @@
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/ErrorResult.h"
 #include "nsString.h"
+#include "nsFmtString.h"
 #include "mozilla/Logging.h"
 
 namespace mozilla::hwinference {
@@ -29,6 +32,43 @@ extern LazyLogModule gHWInferenceLog;
 
 StaticAutoPtr<nsTHashMap<nsCStringHashKey, RefPtr<HWInferenceParent>>>
     HWInferenceParent::sInstances;
+
+static StaticAutoPtr<nsTHashSet<nsCString>> sMockInstalledModels;
+
+static nsCString MockModelKey(const nsACString& aModel,
+                              const nsACString& aRevision,
+                              const nsACString& aFilename) {
+  nsCString key(aModel);
+  key.Append('/');
+  key.Append(aRevision);
+  key.Append('/');
+  key.Append(aFilename);
+  return key;
+}
+
+// Expands aId to a concrete ModelHub artifact via the resolver registered for
+// aTask (contract id "@mozilla.org/ml/model-resolver;1?task=<task>"). aId is
+// only ever compared for equality against the resolver's own known ids, so
+// the requesting process can select among already-approved artifacts but
+// never name one itself. Returns false (logging) if no resolver is
+// registered for aTask, or aId is unknown to it.
+static bool ResolveModelId(const nsACString& aTask, const nsACString& aId,
+                           nsCString& aEngine, nsCString& aModel,
+                           nsCString& aRevision, nsCString& aFilename) {
+  nsFmtCString contractId("@mozilla.org/ml/model-resolver;1?task={}", aTask);
+  nsCOMPtr<nsIMLModelResolver> resolver = do_GetService(contractId.get());
+  if (!resolver) {
+    LOGE("ResolveModelId - no resolver registered for task {}", aTask);
+    return false;
+  }
+
+  nsresult rv = resolver->Resolve(aId, aEngine, aModel, aRevision, aFilename);
+  if (NS_FAILED(rv)) {
+    LOGE("ResolveModelId - id {} not recognized for task {}", aId, aTask);
+    return false;
+  }
+  return true;
+}
 
 /* static */
 RefPtr<HWInferenceParent> HWInferenceParent::GetSingleton(
@@ -93,6 +133,54 @@ nsresult HWInferenceParent::BindToUtilityProcess(
   LOGD("StartHWInferenceService sent successfully, binding parent endpoint");
   MOZ_ALWAYS_TRUE(parentEnd.Bind(this));
   return NS_OK;
+}
+
+mozilla::ipc::IPCResult HWInferenceParent::RecvIsModelAvailable(
+    nsCString&& aTask, nsCString&& aId, IsModelAvailableResolver&& aResolver) {
+  LOGD("{}: task={} id={}", __func__, aTask, aId);
+
+  nsCString engine, model, revision, filename;
+  if (!ResolveModelId(aTask, aId, engine, model, revision, filename)) {
+    aResolver(false);
+    return IPC_OK();
+  }
+
+  if (StaticPrefs::browser_ml_modelHub_testing()) {
+    bool available =
+        sMockInstalledModels &&
+        sMockInstalledModels->Contains(MockModelKey(model, revision, filename));
+    LOGD("{} - testing mock: available={}", __func__, available);
+    aResolver(available);
+    return IPC_OK();
+  }
+
+  nsCOMPtr<nsIMLModelHub> modelHubService =
+      do_GetService("@mozilla.org/ml-modelhub;1");
+
+  if (!modelHubService) {
+    LOGE("{} - Failed to get ModelHub XPCOM service", __func__);
+    aResolver(false);
+    return IPC_OK();
+  }
+
+  RefPtr<dom::Promise> promise;
+  nsresult rv = modelHubService->IsModelAvailable(
+      engine, model, revision, filename, getter_AddRefs(promise));
+
+  if (NS_FAILED(rv) || !promise) {
+    LOGE("{}  ERROR: ModelHub call failed with nsresult={:x}", __func__,
+         static_cast<uint32_t>(rv));
+    aResolver(false);
+    return IPC_OK();
+  }
+
+  (void)promise->AddCallbacksWithCycleCollectedArgs(
+      [aResolver](JSContext* aCx, JS::Handle<JS::Value> aArg,
+                  ErrorResult& aRv) { aResolver(JS::ToBoolean(aArg)); },
+      [aResolver](JSContext* aCx, JS::Handle<JS::Value> aArg,
+                  ErrorResult& aRv) { aResolver(false); });
+
+  return IPC_OK();
 }
 
 }  // namespace mozilla::hwinference

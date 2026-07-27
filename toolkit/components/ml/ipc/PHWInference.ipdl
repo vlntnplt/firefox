@@ -14,6 +14,15 @@ namespace hwinference {
 [ChildProc=Utility]
 protocol PHWInference
 {
+  parent:
+    // id is an opaque, task-defined model id. HWInference looks up the
+    // resolver registered for task (contract id
+    // "@mozilla.org/ml/model-resolver;1?task=<task>", see
+    // nsIMLModelResolver) to validate id and expand it to a concrete
+    // artifact; an unknown id is rejected.
+    async IsModelAvailable(nsCString task,
+                           nsCString id) returns (bool available);
+
   child:
     // Allow content processes to create direct connections to utility
     async NewContentHWInferenceManager(Endpoint<PHWInferenceManagerParent> endpoint,

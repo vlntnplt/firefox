@@ -31,6 +31,9 @@ class HWInferenceParent final : public PHWInferenceParent {
 
   void ActorDestroy(ActorDestroyReason aReason) override;
 
+  mozilla::ipc::IPCResult RecvIsModelAvailable(
+      nsCString&& aTask, nsCString&& aId, IsModelAvailableResolver&& aResolver);
+
   ipc::UtilityActorName GetActorName() {
     return ipc::UtilityActorName::HwInference;
   }
