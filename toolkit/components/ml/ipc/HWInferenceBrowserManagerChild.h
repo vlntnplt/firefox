@@ -22,6 +22,15 @@ class HWInferenceBrowserManagerChild final
   static bool CreateForBrowser(
       Endpoint<PHWInferenceBrowserManagerChild>&& aEndpoint);
 
+#ifndef ANDROID
+  already_AddRefed<PTextGenerationChild> AllocPTextGenerationChild(
+      const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions);
+
+  mozilla::ipc::IPCResult RecvPTextGenerationConstructor(
+      PTextGenerationChild* aActor, const ipc::FileDescriptor& aModel,
+      const TextGenerationOptions& aOptions) override;
+#endif
+
   void ActorDestroy(ActorDestroyReason aReason) override;
 
  private:

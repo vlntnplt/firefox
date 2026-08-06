@@ -5,11 +5,13 @@
 
 #include "HWInferenceBrowserManagerChild.h"
 
-#include "mozilla/Logging.h"
+#include "HWInferenceLog.h"
+#ifndef ANDROID
+#  include "TextGenerationChild.h"
+#endif
 
 namespace mozilla::hwinference {
 
-extern LazyLogModule gHWInferenceLog;
 #define LOGD(fmt, ...) \
   MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Debug, fmt, ##__VA_ARGS__)
 
@@ -25,6 +27,21 @@ bool HWInferenceBrowserManagerChild::CreateForBrowser(
        __func__);
   return true;
 }
+
+#ifndef ANDROID
+already_AddRefed<PTextGenerationChild>
+HWInferenceBrowserManagerChild::AllocPTextGenerationChild(
+    const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
+  return MakeAndAddRef<TextGenerationChild>(aModel, aOptions);
+}
+
+ipc::IPCResult HWInferenceBrowserManagerChild::RecvPTextGenerationConstructor(
+    PTextGenerationChild* aActor, const ipc::FileDescriptor& aModel,
+    const TextGenerationOptions& aOptions) {
+  static_cast<TextGenerationChild*>(aActor)->Initialize();
+  return IPC_OK();
+}
+#endif
 
 void HWInferenceBrowserManagerChild::ActorDestroy(ActorDestroyReason aReason) {
   LOGD("[{} - {}]", fmt::ptr(this), __func__);

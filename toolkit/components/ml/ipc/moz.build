@@ -11,6 +11,7 @@ EXPORTS.mozilla.hwinference += [
     "HWInferenceBrowserManagerChild.h",
     "HWInferenceBrowserManagerParent.h",
     "HWInferenceChild.h",
+    "HWInferenceLog.h",
     "HWInferenceManagerChild.h",
     "HWInferenceManagerParent.h",
     "HWInferenceParent.h",
@@ -27,14 +28,34 @@ UNIFIED_SOURCES += [
 
 IPDL_SOURCES = [
     "PHWInference.ipdl",
-    "PHWInferenceBrowserManager.ipdl",
     "PHWInferenceManager.ipdl",
+]
+
+PREPROCESSED_IPDL_SOURCES = [
+    "PHWInferenceBrowserManager.ipdl",
 ]
 
 LOCAL_INCLUDES += [
     "/dom/ipc",
     "/ipc/glue",
 ]
+
+if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
+    EXPORTS.mozilla.hwinference += [
+        "TextGenerationChild.h",
+        "TextGenerationEnums.h",
+        "TextGenerationParent.h",
+    ]
+
+    UNIFIED_SOURCES += [
+        "TextGenerationChild.cpp",
+        "TextGenerationParent.cpp",
+    ]
+
+    IPDL_SOURCES += [
+        "PTextGeneration.ipdl",
+        "TextGenerationTypes.ipdlh",
+    ]
 
 include("/ipc/chromium/chromium-config.mozbuild")
 

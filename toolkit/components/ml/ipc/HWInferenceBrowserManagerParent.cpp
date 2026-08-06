@@ -7,6 +7,9 @@
 
 #include "HWInferenceLog.h"
 #include "HWInferenceParent.h"
+#ifndef ANDROID
+#  include "TextGenerationParent.h"
+#endif
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/ipc/Endpoint.h"
@@ -38,6 +41,14 @@ HWInferenceBrowserManagerParent::Reservation::~Reservation() {
   mManager->mReservations--;
   mManager->MaybeShutDownProcess();
 }
+
+#ifndef ANDROID
+RefPtr<TextGenerationParent>
+HWInferenceBrowserManagerParent::Reservation::CreateTextGeneration(
+    const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
+  return mManager->CreateTextGeneration(aModel, aOptions);
+}
+#endif
 
 /* static */
 RefPtr<HWInferenceBrowserManagerParent::CreatePromise>
@@ -132,9 +143,35 @@ HWInferenceBrowserManagerParent::Create() {
 #endif  // ANDROID
 }
 
+#ifndef ANDROID
+RefPtr<TextGenerationParent>
+HWInferenceBrowserManagerParent::CreateTextGeneration(
+    const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
+  AssertIsOnMainThread();
+  if (!CanSend()) {
+    return nullptr;
+  }
+  CancelIdleTimer();
+  RefPtr<TextGenerationParent> generator = new TextGenerationParent();
+  if (!SendPTextGenerationConstructor(generator, aModel, aOptions)) {
+    MaybeShutDownProcess();
+    return nullptr;
+  }
+  return generator;
+}
+
+void HWInferenceBrowserManagerParent::OnTextGenerationDestroyed() {
+  MaybeShutDownProcess();
+}
+#endif
+
 bool HWInferenceBrowserManagerParent::IsIdle() {
   AssertIsOnMainThread();
+#ifdef ANDROID
   return mReservations == 0;
+#else
+  return mReservations == 0 && ManagedPTextGenerationParent().IsEmpty();
+#endif
 }
 
 void HWInferenceBrowserManagerParent::MaybeShutDownProcess() {

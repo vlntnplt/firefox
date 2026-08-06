@@ -14,11 +14,11 @@
 
 namespace mozilla::hwinference {
 
-// Main-process side of the browser inference manager: one manager over
-// the one browser-keyed HWInference process. GetOrCreate() launches the
-// process and binds the manager on first use, and every consumer in the
-// browser shares them, so the manager's reservation count is what its
-// shutdown decision consults.
+#ifndef ANDROID
+class TextGenerationParent;
+#endif
+
+// Main-process side of the browser inference manager, one per browser.
 class HWInferenceBrowserManagerParent final
     : public PHWInferenceBrowserManagerParent {
  public:
@@ -29,9 +29,15 @@ class HWInferenceBrowserManagerParent final
 
   using CreatePromise = MozPromise<RefPtr<Reservation>, nsresult, false>;
 
-  // Main thread only. Resolves with a reservation over the live shared
-  // manager, joining an in-flight launch if one is already under way.
+  // Main thread only.
   static RefPtr<CreatePromise> GetOrCreate();
+
+#ifndef ANDROID
+  RefPtr<TextGenerationParent> CreateTextGeneration(
+      const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions);
+
+  void OnTextGenerationDestroyed();
+#endif
 
   void ActorDestroy(ActorDestroyReason aReason) override;
 
@@ -70,6 +76,11 @@ class HWInferenceBrowserManagerParent::Reservation final {
   HWInferenceBrowserManagerParent* Manager() const { return mManager; }
 
   bool ProcessReused() const { return mProcessReused; }
+
+#ifndef ANDROID
+  RefPtr<TextGenerationParent> CreateTextGeneration(
+      const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions);
+#endif
 
  private:
   ~Reservation();
