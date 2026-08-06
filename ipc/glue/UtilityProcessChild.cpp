@@ -377,6 +377,36 @@ UtilityProcessChild::RecvUnblockUntrustedModulesThread() {
 }
 #endif  // defined(XP_WIN)
 
+mozilla::ipc::IPCResult UtilityProcessChild::RecvShutdown() {
+  GetIPCChannel()->SetAbortOnError(false);
+
+  if (mProfilerController) {
+    ProfileAndAdditionalInformation shutdownProfileAndAdditionalInformation =
+        mProfilerController->GrabShutdownProfileAndShutdown();
+    if (const size_t len = shutdownProfileAndAdditionalInformation.SizeOf();
+        len >= size_t(IPC::Channel::kMaximumMessageSize)) {
+      shutdownProfileAndAdditionalInformation.mProfile = nsPrintfCString(
+          "*Profile from pid %u bigger (%zu) than IPC max (%zu)",
+          unsigned(profiler_current_process_id().ToNumber()), len,
+          size_t(IPC::Channel::kMaximumMessageSize));
+      shutdownProfileAndAdditionalInformation.mAdditionalInformation.reset();
+    }
+
+    // Send the shutdown profile to the parent process through our own
+    // message channel, which we know will survive for long enough.
+    (void)SendShutdownProfile(
+        std::move(shutdownProfileAndAdditionalInformation));
+  }
+
+  // Now tell the parent to actually destroy our channel which will make end
+  // our process. This is expected to be the last event the parent will
+  // ever process for this ContentChild.
+  if (!SendFinishShutdown()) {
+    NS_WARNING("Failed to finish shutdown on Utility process!");
+  }
+  return IPC_OK();
+}
+
 void UtilityProcessChild::ActorDestroy(ActorDestroyReason aWhy) {
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
   DestroySandboxProfiler();
@@ -395,10 +425,7 @@ void UtilityProcessChild::ActorDestroy(ActorDestroyReason aWhy) {
   ProcessChild::QuickExit();
 #else
 
-  if (mProfilerController) {
-    mProfilerController->Shutdown();
-    mProfilerController = nullptr;
-  }
+  mProfilerController = nullptr;
 
   uint32_t timeout = 0;
   if (mUtilityMediaServiceInstance) {

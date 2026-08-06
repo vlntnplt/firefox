@@ -252,14 +252,17 @@ void UtilityProcessHost::Shutdown() {
 
     // The channel might already be closed if we got here unexpectedly.
     if (mUtilityProcessParent->CanSend()) {
-      mUtilityProcessParent->Close();
-    }
+      if (!mUtilityProcessParent->SendShutdown()) {
+        // Failed to send the shutdown message. Close the channel directly.
+        mUtilityProcessParent->Close();
 
 #ifndef NS_FREE_PERMANENT_DATA
-    // No need to communicate shutdown, the Utility process doesn't need to
-    // communicate anything back.
-    KillHard("NormalShutdown");
+        // We couldn't ask the Utility process to shut down gracefully, so it
+        // can't send anything back (such as a shutdown profile). Kill it.
+        KillHard("NormalShutdown");
 #endif
+      }
+    }
 
     // If we're shutting down unexpectedly, we're in the middle of handling an
     // ActorDestroy for PUtilityProcessParent, which is still on the stack.
