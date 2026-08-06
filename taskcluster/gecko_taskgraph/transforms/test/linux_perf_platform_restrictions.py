@@ -22,6 +22,8 @@ PERFTEST_LINUX_1804_TESTS = {
     "ml-perf-suggest-inf",
     "tr8ns-perf-base",
     "ml-llama-summarizer-perf",
+    # Must stay on the same platform as ml-llama-summarizer-perf; compared.
+    "ml-llama-summarizer-perf-hwinference",
     "ml-multi-perf",
     "ml-perf",
     "ml-perf-smart-tab",

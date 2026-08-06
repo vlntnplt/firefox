@@ -500,11 +500,24 @@ async function perfSetup({ disabled = false, prefs = [], backend } = {}) {
   };
 }
 
+const LLAMA_HW_INFERENCE_PREF = "browser.ml.llama.hwInference";
+
+function onHWInferencePath() {
+  return Services.prefs.getBoolPref(LLAMA_HW_INFERENCE_PREF, false);
+}
+
+// Empty on the content-process path, keeping its perfherder series continuous.
+function llamaPathSuffix() {
+  return onHWInferencePath() ? "_hwinf" : "";
+}
+
 /**
  * Returns the current total physical memory usage in MiB for the inference process
  */
 async function getTotalMemoryUsage() {
-  const procInfo = await getInferenceProcessInfo();
+  const procInfo = await getInferenceProcessInfo(
+    onHWInferencePath() ? "hwInference" : "inference"
+  );
   return Math.round(procInfo.memory / ONE_MIB);
 }
 
@@ -635,7 +648,9 @@ class PeakMemoryTracker {
   }
 
   async collectPeakMemory() {
-    const procInfo = await getInferenceProcessInfo();
+    const procInfo = await getInferenceProcessInfo(
+      onHWInferencePath() ? "hwInference" : "inference"
+    );
     if (procInfo.memory && procInfo.memory > this._memory) {
       this._memory = procInfo.memory;
     }

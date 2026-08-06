@@ -54,8 +54,10 @@ let numEngines = 0;
 
 for (const model of [smollm2Model, qwen3Model]) {
   for (const article of articles) {
-    // Replace all non-alphabnumeric or dash or underscore by underscore
-    const perfName = `${model.perfModelId.replace(/\//g, "-")}_${article.type}`;
+    // Keep the suffix short: perfherder caps subtest names at 80 characters.
+    const perfName = `${model.perfModelId.replace(/\//g, "-")}_${
+      article.type
+    }${llamaPathSuffix()}`;
 
     const engineId = `engine-${numEngines}`;
 

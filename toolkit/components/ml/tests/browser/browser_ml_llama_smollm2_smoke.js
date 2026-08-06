@@ -122,7 +122,11 @@ const EXPECTED_HASH =
   "07c098aaf1387c9ab07fbb77e466243bf0498f9d22dcc16672c6cfd9f07f4fe3";
 
 add_task(async function test_smollm2_survives_and_metrics_populated() {
-  info("test_smollm2_survives_and_metrics_populated: starting");
+  info(
+    `test_smollm2_survives_and_metrics_populated: starting on the ${
+      onHWInferencePath() ? "hwinference" : "mlengine"
+    } path`
+  );
   const { cleanup, engine } = await initializeEngine(SMOLLM2_OPTIONS);
   info("test_smollm2_survives_and_metrics_populated: engine ready");
   try {
@@ -143,17 +147,17 @@ add_task(async function test_smollm2_survives_and_metrics_populated() {
     // even with perfherder reporting disabled.
     const reported = [
       {
-        name: "smollm2-inputTokens",
+        name: `smollm2-inputTokens${llamaPathSuffix()}`,
         values: [metrics.inputTokens],
         value: metrics.inputTokens,
       },
       {
-        name: "smollm2-outputTokens",
+        name: `smollm2-outputTokens${llamaPathSuffix()}`,
         values: [metrics.outputTokens],
         value: metrics.outputTokens,
       },
       {
-        name: "smollm2-tokensPerSecond",
+        name: `smollm2-tokensPerSecond${llamaPathSuffix()}`,
         values: [metrics.tokensPerSecond],
         value: metrics.tokensPerSecond,
       },
