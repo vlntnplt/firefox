@@ -6,16 +6,21 @@
 #ifndef mozilla_hwinference_TextGenerationChild_h
 #define mozilla_hwinference_TextGenerationChild_h
 
+#include <functional>
+
+#include "mozilla/Atomics.h"
+#include "mozilla/TaskQueue.h"
 #include "mozilla/hwinference/PTextGenerationChild.h"
 #include "mozilla/ipc/FileDescriptor.h"
 
+namespace mozilla::llama {
+class LlamaBackend;
+}
+
 namespace mozilla::hwinference {
 
-// Utility-process side of one generator. Echo stub for now: it
-// resolves Generate with the concatenated message contents and emits one
-// matching Delta, exercising the whole message surface with no
-// inference behind it. The llama backend replaces the echo in the next
-// slice.
+// Utility-process side of one text generator, driving a LlamaBackend on
+// its own TaskQueue.
 class TextGenerationChild final : public PTextGenerationChild {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TextGenerationChild, override);
@@ -23,9 +28,7 @@ class TextGenerationChild final : public PTextGenerationChild {
   TextGenerationChild(const ipc::FileDescriptor& aModel,
                       const TextGenerationOptions& aOptions);
 
-  // Completes construction once the actor is bound: acquires the model
-  // and reports the outcome with the one-shot Ready message. The echo
-  // stub acquires nothing and reports success immediately.
+  // Call once the actor is bound; reports the load outcome with Ready.
   void Initialize();
 
   mozilla::ipc::IPCResult RecvGenerate(const GenerateRequest& aRequest,
@@ -37,10 +40,31 @@ class TextGenerationChild final : public PTextGenerationChild {
 
  private:
   friend PTextGenerationChild;
-  ~TextGenerationChild() = default;
+  class Generation;
+
+  ~TextGenerationChild();
+
+  // Runs on mTaskQueue.
+  LoadResult LoadOnQueue();
+
+  // Skipped if the actor can no longer send.
+  void RunOnActorThread(const char* aName, std::function<void()>&& aFn);
 
   ipc::FileDescriptor mModel;
-  TextGenerationOptions mOptions;
+  const TextGenerationOptions mOptions;
+
+  const RefPtr<TaskQueue> mTaskQueue;
+  const nsCOMPtr<nsISerialEventTarget> mActorThread;
+
+  // TaskQueue only.
+  RefPtr<llama::LlamaBackend> mBackend;
+  nsCString mLoadError;
+
+  // Actor thread only.
+  CopyableTArray<ChatMessage> mHistory;
+  RefPtr<Generation> mCurrentGeneration;
+
+  Atomic<bool> mShutdown{false};
 };
 
 }  // namespace mozilla::hwinference
