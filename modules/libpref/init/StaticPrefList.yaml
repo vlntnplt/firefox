@@ -1840,6 +1840,13 @@
   value: false
   mirror: always
 
+# How long the browser-keyed HWInference process outlives its last consumer,
+# in milliseconds. Zero tears it down as soon as it goes idle.
+- name: browser.ml.hwInference.processTimeout
+  type: uint32_t
+  value: 120000
+  mirror: always
+
 - name: browser.navigation.requireUserInteraction
   type: bool
   value: true
