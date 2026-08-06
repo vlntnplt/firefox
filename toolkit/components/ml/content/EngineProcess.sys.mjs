@@ -9,6 +9,17 @@
  * @typedef {import("../content/Utils.sys.mjs").ProgressAndStatusCallbackParams} ProgressAndStatusCallbackParams
  */
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(
+  lazy,
+  {
+    TextGenerationEngine:
+      "moz-src:///toolkit/components/ml/engines/TextGenerationEngine.sys.mjs",
+  },
+  { global: "contextual" }
+);
+
 /**
  * @constant
  * @type {string}
@@ -1272,6 +1283,13 @@ export async function createEngine(
 ) {
   try {
     const pipelineOptions = new PipelineOptions(options);
+    if (lazy.TextGenerationEngine.shouldRoute(pipelineOptions)) {
+      return lazy.TextGenerationEngine.create(
+        pipelineOptions,
+        notificationsCallback,
+        abortSignal
+      );
+    }
     const engineParent = await EngineProcess.getMLEngineParent();
     return engineParent.getEngine({
       pipelineOptions,

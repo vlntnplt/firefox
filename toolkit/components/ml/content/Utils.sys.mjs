@@ -542,12 +542,28 @@ Progress.readResponse = readResponse;
 Progress.readResponseToWriter = readResponseToWriter;
 Progress.fetchUrl = fetchUrl;
 
-export async function getInferenceProcessInfo() {
-  // for now we only have a single inference process.
+/**
+ * @param {?string} [processType] - "inference", "hwInference", or null for
+ * either.
+ */
+export async function getInferenceProcessInfo(processType = null) {
   let info = await ChromeUtils.requestProcInfo();
 
+  const isInference = child => child.type === "inference";
+  const isHwInference = child =>
+    child.type.startsWith("utility") &&
+    child.utilityActors.some(actor => actor.actorName === "hwInference");
+
   for (const child of info.children) {
-    if (child.type === "inference") {
+    let matches;
+    if (processType === "inference") {
+      matches = isInference(child);
+    } else if (processType === "hwInference") {
+      matches = isHwInference(child);
+    } else {
+      matches = isInference(child) || isHwInference(child);
+    }
+    if (matches) {
       return {
         pid: child.pid,
         memory: child.memory,
