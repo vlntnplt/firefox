@@ -4,6 +4,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 #include "HWInferenceChild.h"
+#include "HWInferenceBrowserManagerChild.h"
 #include "HWInferenceManagerParent.h"
 #include "mozilla/Logging.h"
 #include "nsDebugImpl.h"
@@ -39,6 +40,19 @@ ipc::IPCResult HWInferenceChild::RecvNewContentHWInferenceManager(
 
   LOGD("[{} - {}] Successfully created HWInferenceManagerParent for content {}",
        fmt::ptr(this), __func__, static_cast<uint64_t>(aContentId));
+  return IPC_OK();
+}
+
+ipc::IPCResult HWInferenceChild::RecvNewBrowserHWInferenceManager(
+    Endpoint<hwinference::PHWInferenceBrowserManagerChild>&& aEndpoint) {
+  LOGD("[{} - {}] Received browser manager connection request", fmt::ptr(this),
+       __func__);
+
+  if (!HWInferenceBrowserManagerChild::CreateForBrowser(std::move(aEndpoint))) {
+    LOGE("[{} - {}] Error: Failed to bind HWInferenceBrowserManagerChild",
+         fmt::ptr(this), __func__);
+    return IPC_FAIL(this, "Failed to bind HWInferenceBrowserManagerChild");
+  }
   return IPC_OK();
 }
 

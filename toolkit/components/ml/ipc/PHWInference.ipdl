@@ -3,6 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
+include protocol PHWInferenceBrowserManager;
 include protocol PHWInferenceManager;
 
 using mozilla::dom::ContentParentId from "mozilla/dom/ipc/IdType.h";
@@ -70,6 +71,8 @@ protocol PHWInference
     // Allow content processes to create direct connections to utility
     async NewContentHWInferenceManager(Endpoint<PHWInferenceManagerParent> endpoint,
                                        ContentParentId contentId);
+
+    async NewBrowserHWInferenceManager(Endpoint<PHWInferenceBrowserManagerChild> endpoint);
 };
 
 } // namespace hwinference
