@@ -15,6 +15,7 @@
 #include "mozilla/dom/Blob.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/ipc/UtilityProcessManager.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 #include "nsIMLUtils.h"
 #include "nsPrintfCString.h"
 #include "nsServiceManagerUtils.h"
@@ -47,6 +48,27 @@ static uint32_t ResolveNumThreads(uint32_t aRequested) {
 
 // llama.cpp's LLAMA_DEFAULT_SEED.
 static constexpr uint32_t kDefaultSeed = 0xFFFFFFFF;
+
+static void MarkGeneratorCreate(TimeStamp aStart, double aBackendInitMs) {
+  const double wallMs = (TimeStamp::Now() - aStart).ToMilliseconds();
+  PROFILER_MARKER(AIR_TEXT_GENERATION_TRACK, ML_SETUP,
+                  MarkerTiming::IntervalUntilNowFrom(aStart),
+                  MLGeneratorCreateMarker, aBackendInitMs,
+                  std::max(0.0, wallMs - aBackendInitMs));
+}
+
+static void MarkFailed(TimeStamp aStart, const nsCString& aPhase,
+                       const nsCString& aReason) {
+  PROFILER_MARKER(AIR_TEXT_GENERATION_TRACK, ML_SETUP,
+                  MarkerTiming::IntervalUntilNowFrom(aStart), MLFailedMarker,
+                  aPhase, aReason);
+}
+
+static void RejectFailed(Promise* aPromise, TimeStamp aStart,
+                         const nsCString& aPhase, const nsCString& aMessage) {
+  MarkFailed(aStart, aPhase, aMessage);
+  aPromise->MaybeRejectWithOperationError(aMessage);
+}
 
 static TextGenerationOptions ToTextGenerationOptions(
     const dom::TextGeneratorCreateOptions& aOptions) {
@@ -124,18 +146,56 @@ static void CallDeltaCallback(dom::TextGenerationDeltaCallback& aCallback,
   aCallback.Call(aText);
 }
 
+// Feeds the run marker only.
+struct DeltaStats {
+  TimeStamp mFirstDeltaAt;
+  double mDeliverMs = 0.0;
+};
+
 // Empty when the caller passed no callback, which is what RecvDelta tests.
 static TextGenerationParent::DeltaHandler MakeDeltaHandler(
     const dom::Optional<OwningNonNull<dom::TextGenerationDeltaCallback>>&
-        aOnDelta) {
+        aOnDelta,
+    const std::shared_ptr<DeltaStats>& aStats) {
   if (!aOnDelta.WasPassed()) {
     return nullptr;
   }
   RefPtr<dom::TextGenerationDeltaCallback> callback = &aOnDelta.Value();
+  const bool profiling = profiler_thread_is_being_profiled_for_markers();
   // Capturing `this` would close a cycle the cycle collector cannot see.
-  return [callback](const nsCString& aText) {
+  return [callback, aStats, profiling](const nsCString& aText) {
+    TimeStamp deltaStart;
+    if (profiling) {
+      deltaStart = TimeStamp::Now();
+      if (aStats->mFirstDeltaAt.IsNull()) {
+        aStats->mFirstDeltaAt = deltaStart;
+      }
+    }
     CallDeltaCallback(MOZ_KnownLive(*callback), aText);
+    if (profiling) {
+      aStats->mDeliverMs += (TimeStamp::Now() - deltaStart).ToMilliseconds();
+    }
   };
+}
+
+static void MarkGeneratorRun(TimeStamp aStart, const GenerateResult& aResult,
+                             const DeltaStats& aStats, uint32_t aChunkTokens) {
+  const hwinference::Usage& usage = aResult.usage();
+  const double ttfcMs = aStats.mFirstDeltaAt.IsNull()
+                            ? 0.0
+                            : (aStats.mFirstDeltaAt - aStart).ToMilliseconds();
+  const double computeMs =
+      usage.timings().prefillMs() + usage.timings().decodeMs();
+  const double wallMs = (TimeStamp::Now() - aStart).ToMilliseconds();
+  PROFILER_MARKER(
+      AIR_TEXT_GENERATION_TRACK, ML_INFERENCE,
+      MarkerTiming::IntervalUntilNowFrom(aStart), MLGeneratorRunMarker,
+      usage.promptTokens(), usage.generatedTokens(), ttfcMs, aChunkTokens,
+      ml::TokensPerSecond(usage.promptTokens(), usage.timings().prefillMs()),
+      ml::TokensPerSecond(usage.generatedTokens(), usage.timings().decodeMs()),
+      computeMs, aStats.mDeliverMs,
+      std::max(0.0, wallMs - computeMs - aStats.mDeliverMs),
+      dom::GetEnumString(aResult.reason()));
 }
 
 TextGenerator::TextGenerator(nsIGlobalObject* aGlobal,
@@ -170,16 +230,22 @@ already_AddRefed<Promise> TextGenerator::Create(
   mozilla::ipc::FileDescriptor modelFd = fd.unwrap();
   TextGenerationOptions options = ToTextGenerationOptions(aOptions);
 
+  TimeStamp acquireStart = TimeStamp::Now();
   HWInferenceBrowserManagerParent::GetOrCreate()->Then(
       GetMainThreadSerialEventTarget(), __func__,
-      [promise, global, modelFd,
-       options](const RefPtr<HWInferenceBrowserManagerParent::Reservation>&
-                    aReservation) {
+      [promise, global, modelFd, options,
+       acquireStart](const RefPtr<HWInferenceBrowserManagerParent::Reservation>&
+                         aReservation) {
+        TimeStamp createStart = TimeStamp::Now();
+        PROFILER_MARKER(AIR_TEXT_GENERATION_TRACK, ML_SETUP,
+                        MarkerTiming::Interval(acquireStart, createStart),
+                        MLProcessAcquireMarker, aReservation->ProcessReused());
         RefPtr<TextGenerationParent> actor =
             aReservation->CreateTextGeneration(modelFd, options);
         if (!actor) {
-          promise->MaybeRejectWithOperationError(
-              "TextGenerator.create: failed to construct the generator");
+          RejectFailed(
+              promise, createStart, "generator create"_ns,
+              "TextGenerator.create: failed to construct the generator"_ns);
           return;
         }
         RefPtr<TextGenerationParent> readyActor = actor;
@@ -187,13 +253,18 @@ already_AddRefed<Promise> TextGenerator::Create(
             global, aReservation->Manager(), std::move(actor));
         readyActor->WhenReady()->Then(
             GetMainThreadSerialEventTarget(), __func__,
-            [promise, generator](double) { promise->MaybeResolve(generator); },
-            [promise, generator](const nsCString& aError) {
+            [promise, generator, createStart](double aBackendInitMs) {
+              MarkGeneratorCreate(createStart, aBackendInitMs);
+              promise->MaybeResolve(generator);
+            },
+            [promise, generator, createStart](const nsCString& aError) {
               generator->Terminate();
-              promise->MaybeRejectWithOperationError(aError);
+              RejectFailed(promise, createStart, "generator create"_ns, aError);
             });
       },
-      [promise](nsresult aError) {
+      [promise, acquireStart](nsresult aError) {
+        MarkFailed(acquireStart, "process acquire"_ns,
+                   "no inference process available"_ns);
         promise->MaybeRejectWithOperationError(nsPrintfCString(
             "TextGenerator.create: failed to start the inference process "
             "(0x%08" PRIx32 ")",
@@ -224,29 +295,47 @@ already_AddRefed<Promise> TextGenerator::Generate(
   }
 
   GenerateRequest request = ToGenerateRequest(aRequest);
-  mActor->SetDeltaHandler(MakeDeltaHandler(aOnDelta));
+
+  TimeStamp generateStart = TimeStamp::Now();
+  auto stats = std::make_shared<DeltaStats>();
+  mActor->SetDeltaHandler(MakeDeltaHandler(aOnDelta, stats));
 
   mGenerateInFlight = true;
   RefPtr<TextGenerator> self = this;
+  const uint32_t chunkTokens = request.bufferLength();
   mActor->SendGenerate(request)->Then(
       GetMainThreadSerialEventTarget(), __func__,
-      [promise, self](const GenerateResponse& aResponse) {
+      [promise, self, generateStart, stats,
+       chunkTokens](const GenerateResponse& aResponse) {
         self->OnGenerateSettled();
         if (aResponse.type() == GenerateResponse::TGenerateError) {
+          // Inference-phase category; RejectFailed emits under ML_SETUP.
+          PROFILER_MARKER(AIR_TEXT_GENERATION_TRACK, ML_INFERENCE,
+                          MarkerTiming::IntervalUntilNowFrom(generateStart),
+                          MLFailedMarker, "generate"_ns,
+                          aResponse.get_GenerateError().message());
           promise->MaybeRejectWithOperationError(
               aResponse.get_GenerateError().message());
           return;
         }
         const GenerateResult& result = aResponse.get_GenerateResult();
+        MarkGeneratorRun(generateStart, result, *stats, chunkTokens);
         promise->MaybeResolve(ToJSResult(result));
       },
-      [promise, self](mozilla::ipc::ResponseRejectReason) {
+      [promise, self, generateStart](mozilla::ipc::ResponseRejectReason) {
         self->OnGenerateSettled();
         if (self->mTeardownRequested) {
+          PROFILER_MARKER(AIR_TEXT_GENERATION_TRACK, ML_INFERENCE,
+                          MarkerTiming::IntervalUntilNowFrom(generateStart),
+                          MLCancelMarker, "teardown"_ns);
           promise->MaybeRejectWithAbortError(
               "TextGenerator.generate: the generator was terminated");
           return;
         }
+        PROFILER_MARKER(AIR_TEXT_GENERATION_TRACK, ML_INFERENCE,
+                        MarkerTiming::IntervalUntilNowFrom(generateStart),
+                        MLFailedMarker, "generate"_ns,
+                        "the generator went away"_ns);
         promise->MaybeRejectWithAbortError(
             "TextGenerator.generate: the generator went away");
       });
@@ -269,6 +358,8 @@ void TextGenerator::Clear() {
 
 void TextGenerator::Cancel() {
   if (mActor && mActor->CanSend()) {
+    PROFILER_MARKER(AIR_TEXT_GENERATION_TRACK, ML_INFERENCE, {}, MLCancelMarker,
+                    "requested"_ns);
     (void)mActor->SendCancel();
   }
 }

@@ -5,6 +5,8 @@
 
 #include "HWInferenceBrowserManagerParent.h"
 
+#include <algorithm>
+
 #include "HWInferenceLog.h"
 #include "HWInferenceParent.h"
 #ifndef ANDROID
@@ -15,6 +17,7 @@
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/UtilityProcessManager.h"
 #include "mozilla/ipc/UtilityProcessParent.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 
 namespace mozilla::hwinference {
 
@@ -55,6 +58,11 @@ RefPtr<HWInferenceBrowserManagerParent::CreatePromise>
 HWInferenceBrowserManagerParent::GetOrCreate() {
   AssertIsOnMainThread();
   if (sManager && sManager->CanSend()) {
+    const double idleRemainingMs = sManager->IdleRemainingMs();
+    sManager->CloseIdleWindow();
+    PROFILER_MARKER(AIR_PROCESS_LIFECYCLE_TRACK, ML_SETUP, {},
+                    MLProcessReuseMarker, idleRemainingMs,
+                    sManager->mReservations);
     sManager->CancelIdleTimer();
     return CreatePromise::CreateAndResolve(
         MakeRefPtr<Reservation>(sManager.get(), /* aProcessReused */ true),
@@ -89,10 +97,19 @@ HWInferenceBrowserManagerParent::Create() {
     return CreatePromise::CreateAndReject(NS_ERROR_NOT_AVAILABLE, __func__);
   }
 
+  TimeStamp spawnStart = TimeStamp::Now();
+  auto spawnFailed = [spawnStart](const nsCString& aWhy) {
+    PROFILER_MARKER(AIR_PROCESS_LIFECYCLE_TRACK, ML_SETUP,
+                    MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                    MLFailedMarker, "process spawn"_ns, aWhy);
+  };
+
   return manager->StartHWInference(HWINFERENCE_BROWSER_INSTANCE_KEY)
       ->Then(
           GetMainThreadSerialEventTarget(), __func__,
-          [manager](RefPtr<HWInferenceParent> aRoot) -> RefPtr<CreatePromise> {
+          [manager, spawnStart, spawnFailed](
+              RefPtr<HWInferenceParent> aRoot) -> RefPtr<CreatePromise> {
+            const TimeDuration launch = TimeStamp::Now() - spawnStart;
             manager->AcquireHWInferenceKeepAlive(
                 HWINFERENCE_BROWSER_INSTANCE_KEY);
             auto shutDown = [&manager] {
@@ -102,6 +119,7 @@ HWInferenceBrowserManagerParent::Create() {
             if (!aRoot || !aRoot->CanSend()) {
               LOGE("Create - ERROR: HWInference root actor lost");
               shutDown();
+              spawnFailed("root actor lost"_ns);
               return CreatePromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
             }
 
@@ -111,6 +129,7 @@ HWInferenceBrowserManagerParent::Create() {
             if (!processParent) {
               LOGE("Create - ERROR: utility process parent lost");
               shutDown();
+              spawnFailed("utility process parent lost"_ns);
               return CreatePromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
             }
 
@@ -123,6 +142,7 @@ HWInferenceBrowserManagerParent::Create() {
             if (!aRoot->SendNewBrowserHWInferenceManager(std::move(childEnd))) {
               LOGE("Create - ERROR: SendNewBrowserHWInferenceManager failed");
               shutDown();
+              spawnFailed("manager construction failed"_ns);
               return CreatePromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
             }
 
@@ -131,13 +151,19 @@ HWInferenceBrowserManagerParent::Create() {
             MOZ_ALWAYS_TRUE(parentEnd.Bind(actor));
             actor->mHoldsKeepAlive = true;
             LOGD("Create - browser inference manager bound");
+            PROFILER_MARKER(
+                AIR_PROCESS_LIFECYCLE_TRACK, ML_SETUP,
+                MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                MLProcessSpawnMarker, launch.ToMilliseconds(),
+                (TimeStamp::Now() - spawnStart - launch).ToMilliseconds());
             return CreatePromise::CreateAndResolve(
                 MakeRefPtr<Reservation>(actor, /* aProcessReused */ false),
                 __func__);
           },
-          [](ipc::LaunchError aError) {
+          [spawnFailed](ipc::LaunchError aError) {
             LOGE("Create - ERROR: HWInference launch failed in {}",
                  aError.FunctionName().get());
+            spawnFailed(nsCString(aError.FunctionName()));
             return CreatePromise::CreateAndReject(NS_ERROR_FAILURE, __func__);
           });
 #endif  // ANDROID
@@ -157,6 +183,7 @@ HWInferenceBrowserManagerParent::CreateTextGeneration(
     MaybeShutDownProcess();
     return nullptr;
   }
+  mGeneratorsServed++;
   return generator;
 }
 
@@ -204,17 +231,41 @@ void HWInferenceBrowserManagerParent::ArmIdleTimer(uint32_t aTimeoutMs) {
   AssertIsOnMainThread();
   CancelIdleTimer();
   RefPtr<HWInferenceBrowserManagerParent> self = this;
+  mIdleStart = TimeStamp::Now();
+  mIdleTimeoutMs = aTimeoutMs;
   NS_NewTimerWithCallback(
       getter_AddRefs(mIdleTimer),
       [self](nsITimer*) {
         if (!self->CanSend() || self->IsIdle()) {
           LOGD("[{} - {}] idle timeout expired, releasing the keep-alive",
                fmt::ptr(self.get()), "ArmIdleTimer");
+          self->CloseIdleWindow();
           self->RetireForIdle();
         }
       },
       aTimeoutMs, nsITimer::TYPE_ONE_SHOT,
       "HWInferenceBrowserManagerParent::mIdleTimer"_ns);
+}
+
+double HWInferenceBrowserManagerParent::IdleRemainingMs() const {
+  AssertIsOnMainThread();
+  if (mIdleStart.IsNull()) {
+    return 0.0;
+  }
+  return std::max(
+      0.0, mIdleTimeoutMs - (TimeStamp::Now() - mIdleStart).ToMilliseconds());
+}
+
+void HWInferenceBrowserManagerParent::CloseIdleWindow() {
+  AssertIsOnMainThread();
+  if (mIdleStart.IsNull()) {
+    return;
+  }
+  PROFILER_MARKER(AIR_PROCESS_LIFECYCLE_TRACK, ML_SETUP,
+                  MarkerTiming::IntervalUntilNowFrom(mIdleStart),
+                  MLProcessIdleMarker, mIdleTimeoutMs, mGeneratorsServed);
+  mIdleStart = TimeStamp();
+  mIdleTimeoutMs = 0;
 }
 
 void HWInferenceBrowserManagerParent::CancelIdleTimer() {
@@ -240,6 +291,9 @@ void HWInferenceBrowserManagerParent::ReleaseKeepAlive() {
     return;
   }
   mHoldsKeepAlive = false;
+  PROFILER_MARKER(AIR_PROCESS_LIFECYCLE_TRACK, ML_SETUP, {},
+                  MLProcessTeardownMarker, mGeneratorsServed,
+                  CanSend() ? "idle"_ns : "actor gone"_ns);
   // Null during XPCOM shutdown, where ClearOnShutdown drops the counts.
   if (RefPtr<ipc::UtilityProcessManager> manager =
           ipc::UtilityProcessManager::GetSingleton()) {
@@ -249,6 +303,7 @@ void HWInferenceBrowserManagerParent::ReleaseKeepAlive() {
 
 void HWInferenceBrowserManagerParent::ActorDestroy(ActorDestroyReason aReason) {
   LOGD("[{} - {}]", fmt::ptr(this), __func__);
+  CloseIdleWindow();
   CancelIdleTimer();
   if (sManager == this) {
     sManager = nullptr;

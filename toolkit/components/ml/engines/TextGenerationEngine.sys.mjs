@@ -7,6 +7,12 @@
 
 /** MLEngine-shaped engine over the HWInference utility process. */
 
+import {
+  mark,
+  markFailed,
+  registerMarkerSchemas,
+} from "moz-src:///toolkit/components/ml/engines/TextGenerationMarkers.sys.mjs";
+
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -99,16 +105,18 @@ class ChunkQueue {
   }
 }
 
-/** Per-run counters for the engine-run telemetry record. */
+/** Per-run counters, and the rule that exactly one terminal marker is emitted. */
 class RunTracker {
-  settled = false;
+  marked = false;
   firstChunkAt = 0;
   chunkCount = 0;
   characterCount = 0;
 
-  constructor(streaming) {
+  constructor(streaming, chunkTokens, featureId) {
     this.beforeRun = ChromeUtils.now();
     this.streaming = streaming;
+    this.chunkTokens = chunkTokens;
+    this.featureId = featureId;
   }
 
   onChunk(text) {
@@ -117,6 +125,39 @@ class RunTracker {
     }
     this.chunkCount += 1;
     this.characterCount += text.length;
+  }
+
+  finish(metrics, reason) {
+    if (this.marked) {
+      return;
+    }
+    this.marked = true;
+    const computeMs = metrics ? metrics.inferenceTime : 0;
+    const payload = {
+      type: "MLEngineRun",
+      streaming: this.streaming,
+      inputTokens: metrics?.inputTokens ?? 0,
+      outputTokens: metrics?.outputTokens ?? this.chunkCount,
+      ttfcMs: this.firstChunkAt ? this.firstChunkAt - this.beforeRun : 0,
+      computeMs,
+      overheadMs: Math.max(0, ChromeUtils.now() - this.beforeRun - computeMs),
+      featureId: this.featureId,
+    };
+    if (reason) {
+      payload.reason = reason;
+    }
+    if (this.chunkTokens) {
+      payload.chunkTokens = this.chunkTokens;
+    }
+    mark(this.beforeRun, payload);
+  }
+
+  fail(error) {
+    if (this.marked) {
+      return;
+    }
+    this.marked = true;
+    markFailed(this.beforeRun, "engine run", error);
   }
 
   // tokenCount reports chunks, not tokens; see section 7 of the backlog.
@@ -146,6 +187,8 @@ export class TextGenerationEngine {
   #generator = null;
   #initTimestamps = [];
   #inFlight = false;
+  #fetchMs = 0;
+  #generatorMs = 0;
 
   static shouldRoute(pipelineOptions) {
     if (!Services.prefs.getBoolPref("browser.ml.llama.hwInference", false)) {
@@ -162,6 +205,7 @@ export class TextGenerationEngine {
     notificationsCallback = null,
     abortSignal = undefined
   ) {
+    registerMarkerSchemas();
     const engineId = pipelineOptions.engineId;
     const start = ChromeUtils.now();
     const engine = new TextGenerationEngine(
@@ -174,6 +218,18 @@ export class TextGenerationEngine {
         engineId,
         duration: ChromeUtils.now() - start,
       });
+      mark(start, {
+        type: "MLEngineCreate",
+        fetchMs: engine.#fetchMs,
+        generatorMs: engine.#generatorMs,
+        overheadMs: Math.max(
+          0,
+          ChromeUtils.now() - start - engine.#fetchMs - engine.#generatorMs
+        ),
+        featureId: pipelineOptions.featureId ?? "",
+        engineId,
+        modelId: pipelineOptions.modelId,
+      });
     } catch (error) {
       engine.telemetry.recordEngineCreationFailure({
         modelId: pipelineOptions.modelId,
@@ -182,6 +238,7 @@ export class TextGenerationEngine {
         engineId,
         error,
       });
+      markFailed(start, "engine create", error);
       throw error;
     }
     return engine;
@@ -204,6 +261,7 @@ export class TextGenerationEngine {
       { name: "initializationStart", when: ChromeUtils.now() },
     ];
 
+    const fetchStart = ChromeUtils.now();
     const hub = await lazy.MLEngineParent.createModelHub({
       rootUrl: options.modelHubRootUrl,
       urlTemplate: options.modelHubUrlTemplate,
@@ -220,13 +278,21 @@ export class TextGenerationEngine {
       abortSignal,
       featureId: options.featureId,
     });
+    this.#fetchMs = ChromeUtils.now() - fetchStart;
+    mark(fetchStart, {
+      type: "MLModelFetch",
+      bytes: modelBlob.size,
+      modelId: options.modelId,
+    });
 
     // Leave unset fields absent so TextGeneratorCreateOptions defaults apply.
     const createOptions = { contextSize: options.numContext };
     if (options.numThreads) {
       createOptions.numThreads = options.numThreads;
     }
+    const generatorStart = ChromeUtils.now();
     this.#generator = await TextGenerator.create(modelBlob, createOptions);
+    this.#generatorMs = ChromeUtils.now() - generatorStart;
     this.pipelineOptions.backend = "llama.cpp";
     this.#initTimestamps.push({
       name: "initializationEnd",
@@ -283,24 +349,32 @@ export class TextGenerationEngine {
       backend: this.pipelineOptions.backend,
       ...(tracker.streaming ? tracker.streamingMetrics() : {}),
     });
-    tracker.settled = true;
+    tracker.finish(result.metrics, null);
+  }
+
+  #newTracker(request, streaming) {
+    return new RunTracker(
+      streaming,
+      request.minOutputBufferSize,
+      this.pipelineOptions.featureId ?? ""
+    );
   }
 
   async run(request) {
-    const tracker = new RunTracker(false);
+    const tracker = this.#newTracker(request, false);
     try {
       const result = await this.#execute(request);
       this.#recordRun(tracker, result);
       return result;
     } catch (error) {
       this.telemetry.recordRunInferenceFailure(error);
-      tracker.settled = true;
+      tracker.fail(error);
       throw error;
     }
   }
 
   async *runWithGenerator(request) {
-    const tracker = new RunTracker(true);
+    const tracker = this.#newTracker(request, true);
     const queue = new ChunkQueue();
     let completion = null;
     try {
@@ -325,17 +399,19 @@ export class TextGenerationEngine {
       return result;
     } catch (error) {
       this.telemetry.recordRunInferenceFailure(error);
-      tracker.settled = true;
+      tracker.fail(error);
       throw error;
     } finally {
       // Breaking out of a `for await` loop returns this generator mid-decode.
-      if (!tracker.settled) {
+      if (!tracker.marked) {
         this.cancel();
+        let metrics = null;
         try {
-          await completion;
+          metrics = (await completion).metrics;
         } catch (error) {
-          // Ignored: the consumer already walked away.
+          // Ignored: "cancelled" stays the recorded reason.
         }
+        tracker.finish(metrics, "cancelled");
       }
     }
   }

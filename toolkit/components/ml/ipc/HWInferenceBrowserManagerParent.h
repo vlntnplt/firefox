@@ -7,6 +7,7 @@
 #define mozilla_hwinference_HWInferenceBrowserManagerParent_h
 
 #include "mozilla/MozPromise.h"
+#include "mozilla/TimeStamp.h"
 #include "mozilla/hwinference/PHWInferenceBrowserManagerParent.h"
 #include "mozilla/ipc/FileDescriptor.h"
 #include "nsCOMPtr.h"
@@ -57,6 +58,10 @@ class HWInferenceBrowserManagerParent final
   void ArmIdleTimer(uint32_t aTimeoutMs);
   void CancelIdleTimer();
 
+  double IdleRemainingMs() const;
+
+  void CloseIdleWindow();
+
   // Idempotent; runs from both the shutdown decision and ActorDestroy.
   void ReleaseKeepAlive();
 
@@ -64,6 +69,9 @@ class HWInferenceBrowserManagerParent final
   uint32_t mReservations = 0;
   nsCOMPtr<nsITimer> mIdleTimer;
   bool mHoldsKeepAlive = false;
+  TimeStamp mIdleStart;
+  uint32_t mIdleTimeoutMs = 0;
+  uint32_t mGeneratorsServed = 0;
 };
 
 // While a reservation is outstanding the manager is not retired for idle.
