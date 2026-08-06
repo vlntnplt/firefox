@@ -9,10 +9,12 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
         "LlamaBackend.cpp",
         "LlamaRunner.cpp",
         "LlamaRuntimeLinker.cpp",
+        "TextGenerator.cpp",
     ]
 
     EXPORTS.mozilla.dom += [
         "LlamaRunner.h",
+        "TextGenerator.h",
     ]
 
     EXPORTS.mozilla.llama += [
@@ -26,6 +28,7 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
         "/dom/ipc",
         "/third_party/llama.cpp/ggml/include",
         "/third_party/llama.cpp/include",
+        "/toolkit/components/ml/ipc",
         "/xpcom/build",
     ]
 

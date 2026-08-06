@@ -15,6 +15,7 @@ EXPORTS.mozilla.hwinference += [
     "HWInferenceManagerChild.h",
     "HWInferenceManagerParent.h",
     "HWInferenceParent.h",
+    "ModelFileUtils.h",
 ]
 
 UNIFIED_SOURCES += [
@@ -24,6 +25,7 @@ UNIFIED_SOURCES += [
     "HWInferenceManagerChild.cpp",
     "HWInferenceManagerParent.cpp",
     "HWInferenceParent.cpp",
+    "ModelFileUtils.cpp",
 ]
 
 IPDL_SOURCES = [
