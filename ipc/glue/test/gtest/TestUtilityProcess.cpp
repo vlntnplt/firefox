@@ -113,6 +113,187 @@ TEST_F(TestUtilityProcess, LaunchAllKinds) {
   NS_ProcessPendingEvents(nullptr);
 }
 
+// Android has no HW_INFERENCE sandboxing kind, and binds a single utility
+// service per process type, so it cannot host these instances.
+#ifndef ANDROID
+
+TEST_F(TestUtilityProcess, HWInferenceInstances) {
+  auto manager = UtilityProcessManager::GetSingleton();
+  ASSERT_TRUE(manager);
+
+  auto contentRes = WaitFor(manager->LaunchProcess(
+      SandboxingKind::HW_INFERENCE, HWINFERENCE_CONTENT_INSTANCE_KEY));
+  ASSERT_TRUE(contentRes.isOk())
+  << "Content launch LaunchError: " << contentRes.inspectErr().FunctionName()
+  << ", " << contentRes.inspectErr().ErrorCode();
+
+  auto browserRes = WaitFor(manager->LaunchProcess(
+      SandboxingKind::HW_INFERENCE, HWINFERENCE_BROWSER_INSTANCE_KEY));
+  ASSERT_TRUE(browserRes.isOk())
+  << "Browser launch LaunchError: " << browserRes.inspectErr().FunctionName()
+  << ", " << browserRes.inspectErr().ErrorCode();
+
+  // Content-driven and browser-driven inference are different OS processes.
+  auto contentPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                        HWINFERENCE_CONTENT_INSTANCE_KEY);
+  auto browserPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                        HWINFERENCE_BROWSER_INSTANCE_KEY);
+  ASSERT_TRUE(contentPid.isSome());
+  ASSERT_TRUE(browserPid.isSome());
+  ASSERT_NE(*contentPid, *browserPid);
+
+  // Shutting down one instance must not affect the other.
+  manager->CleanShutdown(SandboxingKind::HW_INFERENCE,
+                         HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(manager
+                  ->ProcessPid(SandboxingKind::HW_INFERENCE,
+                               HWINFERENCE_CONTENT_INSTANCE_KEY)
+                  .isNothing());
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                  HWINFERENCE_BROWSER_INSTANCE_KEY) ==
+              browserPid);
+
+  manager->CleanShutdown(SandboxingKind::HW_INFERENCE,
+                         HWINFERENCE_BROWSER_INSTANCE_KEY);
+  ASSERT_TRUE(manager
+                  ->ProcessPid(SandboxingKind::HW_INFERENCE,
+                               HWINFERENCE_BROWSER_INSTANCE_KEY)
+                  .isNothing());
+
+  // Drain the event queue.
+  NS_ProcessPendingEvents(nullptr);
+}
+
+// Checks that a request arriving in the window right after teardown launches
+// a fresh process. HWInferenceParent is bound to PHWInference, a separate
+// toplevel from PUtilityProcess, so once DestroyProcess has removed the
+// UtilityProcessManager entry the cached actor still reports CanSend() until
+// the peer dies and the channel errors, a main-thread dispatch later.
+// GetSingleton evicts it in that window so StartUtility relaunches instead of
+// taking its CanSend() fast path.
+TEST_F(TestUtilityProcess, HWInferenceRelaunchesAfterShutdown) {
+  auto manager = UtilityProcessManager::GetSingleton();
+  ASSERT_TRUE(manager);
+
+  // The browser instance stays up for the whole test, so the manager singleton
+  // survives shutting the content one down: DestroyProcess drops the singleton
+  // once no utility process is left.
+  auto keepAlive = WaitFor(manager->LaunchProcess(
+      SandboxingKind::HW_INFERENCE, HWINFERENCE_BROWSER_INSTANCE_KEY));
+  ASSERT_TRUE(keepAlive.isOk());
+
+  // StartHWInference binds HWInferenceParent and caches it in sInstances,
+  // which is what puts an actor there to go stale.
+  auto res =
+      WaitFor(manager->StartHWInference(HWINFERENCE_CONTENT_INSTANCE_KEY));
+  ASSERT_TRUE(res.isOk())
+  << "Launch LaunchError: " << res.inspectErr().FunctionName() << ", "
+  << res.inspectErr().ErrorCode();
+
+  auto firstPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                      HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(firstPid.isSome());
+
+  // Nothing spins the event loop between these two, so the actor's
+  // ActorDestroy cannot have run yet: this is exactly the stale window.
+  manager->CleanShutdown(SandboxingKind::HW_INFERENCE,
+                         HWINFERENCE_CONTENT_INSTANCE_KEY);
+  auto relaunch =
+      WaitFor(manager->StartHWInference(HWINFERENCE_CONTENT_INSTANCE_KEY));
+  ASSERT_TRUE(relaunch.isOk())
+  << "Relaunch LaunchError: " << relaunch.inspectErr().FunctionName() << ", "
+  << relaunch.inspectErr().ErrorCode();
+
+  // A fresh process is running, with a different pid.
+  auto secondPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                       HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(secondPid.isSome());
+  ASSERT_NE(*firstPid, *secondPid);
+
+  manager->CleanShutdown(SandboxingKind::HW_INFERENCE,
+                         HWINFERENCE_CONTENT_INSTANCE_KEY);
+  manager->CleanShutdown(SandboxingKind::HW_INFERENCE,
+                         HWINFERENCE_BROWSER_INSTANCE_KEY);
+
+  // Drain the event queue.
+  NS_ProcessPendingEvents(nullptr);
+}
+
+// Consumers decide the HWInference process' lifetime: it must go away as soon
+// as the last keep-alive is released, rather than living until browser
+// shutdown.
+TEST_F(TestUtilityProcess, HWInferenceKeepAlive) {
+  auto manager = UtilityProcessManager::GetSingleton();
+  ASSERT_TRUE(manager);
+
+  auto res = WaitFor(manager->LaunchProcess(SandboxingKind::HW_INFERENCE,
+                                            HWINFERENCE_CONTENT_INSTANCE_KEY));
+  ASSERT_TRUE(res.isOk())
+  << "Launch LaunchError: " << res.inspectErr().FunctionName() << ", "
+  << res.inspectErr().ErrorCode();
+
+  auto pid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                 HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(pid.isSome());
+
+  // Two consumers: the process must survive until *both* are gone.
+  manager->AcquireHWInferenceKeepAlive(HWINFERENCE_CONTENT_INSTANCE_KEY);
+  manager->AcquireHWInferenceKeepAlive(HWINFERENCE_CONTENT_INSTANCE_KEY);
+
+  manager->ReleaseHWInferenceKeepAlive(HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                  HWINFERENCE_CONTENT_INSTANCE_KEY) == pid);
+
+  manager->ReleaseHWInferenceKeepAlive(HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(manager
+                  ->ProcessPid(SandboxingKind::HW_INFERENCE,
+                               HWINFERENCE_CONTENT_INSTANCE_KEY)
+                  .isNothing());
+
+  // Drain the event queue.
+  NS_ProcessPendingEvents(nullptr);
+}
+
+// A keep-alive on one instance must not shut the other instance down.
+TEST_F(TestUtilityProcess, HWInferenceKeepAlivePerInstance) {
+  auto manager = UtilityProcessManager::GetSingleton();
+  ASSERT_TRUE(manager);
+
+  for (const auto& key :
+       {HWINFERENCE_CONTENT_INSTANCE_KEY, HWINFERENCE_BROWSER_INSTANCE_KEY}) {
+    auto res =
+        WaitFor(manager->LaunchProcess(SandboxingKind::HW_INFERENCE, key));
+    ASSERT_TRUE(res.isOk())
+    << "Launch LaunchError: " << res.inspectErr().FunctionName() << ", "
+    << res.inspectErr().ErrorCode();
+    manager->AcquireHWInferenceKeepAlive(key);
+  }
+
+  auto browserPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                        HWINFERENCE_BROWSER_INSTANCE_KEY);
+  ASSERT_TRUE(browserPid.isSome());
+
+  manager->ReleaseHWInferenceKeepAlive(HWINFERENCE_CONTENT_INSTANCE_KEY);
+  ASSERT_TRUE(manager
+                  ->ProcessPid(SandboxingKind::HW_INFERENCE,
+                               HWINFERENCE_CONTENT_INSTANCE_KEY)
+                  .isNothing());
+  ASSERT_TRUE(manager->ProcessPid(SandboxingKind::HW_INFERENCE,
+                                  HWINFERENCE_BROWSER_INSTANCE_KEY) ==
+              browserPid);
+
+  manager->ReleaseHWInferenceKeepAlive(HWINFERENCE_BROWSER_INSTANCE_KEY);
+  ASSERT_TRUE(manager
+                  ->ProcessPid(SandboxingKind::HW_INFERENCE,
+                               HWINFERENCE_BROWSER_INSTANCE_KEY)
+                  .isNothing());
+
+  // Drain the event queue.
+  NS_ProcessPendingEvents(nullptr);
+}
+
+#endif  // ANDROID
+
 #if defined(XP_WIN)
 static void LoadLibraryCrash_Test() {
   mozilla::gtest::DisableCrashReporter();

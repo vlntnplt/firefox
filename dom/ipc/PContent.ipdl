@@ -41,6 +41,7 @@ include protocol PURLClassifierLocal;
 include protocol PURLClassifierLocalByName;
 include protocol PVRManager;
 include protocol PRemoteMediaManager;
+include protocol PHWInferenceManager;
 include protocol PRemoteWorkerDebuggerManager;
 include protocol PRemoteWorkerService;
 include protocol PProfiler;
@@ -1188,6 +1189,13 @@ parent:
 #endif
 
     async CreateAudioIPCConnection() returns (FileDescOrError fd);
+
+    async RequestHWInferenceConnection(Endpoint<PHWInferenceManagerParent> endpoint)
+        returns (bool success);
+
+    // One call per successful RequestHWInferenceConnection. The process is
+    // shut down once nothing holds it anymore.
+    async ReleaseHWInferenceConnection();
 
     sync PURLClassifier(nullable nsIPrincipal principal)
         returns (bool success);

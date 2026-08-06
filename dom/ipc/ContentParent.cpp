@@ -45,6 +45,7 @@
 #include "mozilla/HangDetails.h"
 #include "mozilla/LookAndFeel.h"
 #include "mozilla/Maybe.h"
+#include "mozilla/MozPromise.h"
 #include "mozilla/NullPrincipal.h"
 #include "mozilla/PageloadEvent.h"
 #include "mozilla/Preferences.h"
@@ -145,6 +146,7 @@
 #include "mozilla/glean/IpcMetrics.h"
 #include "mozilla/glean/PFOGTransport.h"
 #include "mozilla/hal_sandbox/PHalParent.h"
+#include "mozilla/hwinference/PHWInferenceManagerChild.h"
 #include "mozilla/intl/L10nRegistry.h"
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/intl/OSPreferences.h"
@@ -159,6 +161,7 @@
 #include "mozilla/ipc/SharedMemoryHandle.h"
 #include "mozilla/ipc/TestShellParent.h"
 #include "mozilla/ipc/URIUtils.h"
+#include "mozilla/ipc/UtilityProcessManager.h"
 #include "mozilla/layers/CompositorThread.h"
 #include "mozilla/layers/ImageBridgeParent.h"
 #include "mozilla/layers/LayerTreeOwnerTracker.h"
@@ -1984,6 +1987,17 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
   RefPtr<FileSystemSecurity> fss = FileSystemSecurity::Get();
   if (fss) {
     fss->Forget(ChildID());
+  }
+
+  // A process that dies never sends its ReleaseHWInferenceConnection.
+  if (mHWInferenceKeepAlives) {
+    RefPtr<UtilityProcessManager> upm = UtilityProcessManager::GetSingleton();
+    while (mHWInferenceKeepAlives) {
+      --mHWInferenceKeepAlives;
+      if (upm) {
+        upm->ReleaseHWInferenceKeepAlive(HWINFERENCE_CONTENT_INSTANCE_KEY);
+      }
+    }
   }
 
   if (why == NormalShutdown && !mCalledClose) {
@@ -5274,6 +5288,38 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateAudioIPCConnection(
     result = NS_ERROR_FAILURE;
   }
   aResolver(result);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvRequestHWInferenceConnection(
+    Endpoint<hwinference::PHWInferenceManagerParent>&& aEndpoint,
+    RequestHWInferenceConnectionResolver&& aResolver) {
+  UtilityProcessManager::GetSingleton()
+      ->StartContentHWInferenceManager(std::move(aEndpoint), mChildID)
+      ->Then(GetCurrentSerialEventTarget(), __func__,
+             [self = RefPtr{this}, resolver = std::move(aResolver)](
+                 GenericPromise::ResolveOrRejectValue&& aValue) {
+               if (aValue.IsResolve()) {
+                 ++self->mHWInferenceKeepAlives;
+                 UtilityProcessManager::GetSingleton()
+                     ->AcquireHWInferenceKeepAlive(
+                         HWINFERENCE_CONTENT_INSTANCE_KEY);
+               }
+               resolver(aValue.IsResolve());
+             });
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvReleaseHWInferenceConnection() {
+  if (mHWInferenceKeepAlives == 0) {
+    return IPC_FAIL(this,
+                    "ReleaseHWInferenceConnection without a matching "
+                    "RequestHWInferenceConnection");
+  }
+
+  --mHWInferenceKeepAlives;
+  UtilityProcessManager::GetSingleton()->ReleaseHWInferenceKeepAlive(
+      HWINFERENCE_CONTENT_INSTANCE_KEY);
   return IPC_OK();
 }
 

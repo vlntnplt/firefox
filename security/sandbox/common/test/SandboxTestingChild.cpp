@@ -102,6 +102,11 @@ void SandboxTestingChild::Bind(Endpoint<PSandboxTestingChild>&& aEndpoint) {
         RunTestsUtilityMediaService(this, s->mSandbox);
         break;
 #endif
+#ifndef ANDROID
+      case ipc::SandboxingKind::HW_INFERENCE:
+        RunTestsHWInference(this);
+        break;
+#endif
 
       default:
         MOZ_ASSERT(false, "Invalid SandboxingKind");

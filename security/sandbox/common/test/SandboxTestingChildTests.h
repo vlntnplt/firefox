@@ -1077,6 +1077,131 @@ void RunTestsGenericUtility(SandboxTestingChild* child) {
 #endif             // XP_MACOSX
 }
 
+// The HWInference process runs third-party inference code (llama.cpp) over
+// attacker-influenced input, and its model always arrives as an already-open
+// descriptor. So it needs no filesystem reach of its own, no network, and no
+// ability to spawn anything: these assert that.
+void RunTestsHWInference(SandboxTestingChild* child) {
+  MOZ_ASSERT(child, "No SandboxTestingChild*?");
+
+  RunGenericTests(child);
+
+#if defined(XP_MACOSX)
+  // Every id below is prefixed so the parent can tell this set apart from
+  // the other process types' results, which arrive interleaved on the same
+  // observer and otherwise collide by name (GPU also has a "/tmp" probe).
+
+  // Nothing below means anything if no policy was applied, so this comes
+  // first and is asserted on its own.
+  bool isSandboxStarted = sandbox_check(getpid(), NULL, 0) == 1;
+  child->SendReportTestResults(
+      "hwinference_sandbox_check"_ns, isSandboxStarted,
+      isSandboxStarted ? "the HWInference sandbox is running"_ns
+                       : "the HWInference sandbox is NOT running"_ns);
+
+  RunMacTestWindowServer(child);
+  RunMacTestAudioAPI(child);
+
+  // Positive controls. A deny-probe that fails for the wrong reason (a path
+  // that does not exist, a syscall that errors for an unrelated cause) looks
+  // exactly like a working sandbox, so pin down that this process can still
+  // read what the policy grants it.
+  child->ErrnoTest("hwinference_read_allowed_system"_ns, true, [] {
+    int fd = open("/System/Library/CoreServices/SystemVersion.plist", O_RDONLY);
+    if (fd >= 0) {
+      close(fd);
+    }
+    return fd;
+  });
+  child->ErrnoTest("hwinference_read_allowed_devurandom"_ns, true, [] {
+    int fd = open("/dev/urandom", O_RDONLY);
+    if (fd >= 0) {
+      close(fd);
+    }
+    return fd;
+  });
+
+  // Negative probes. ErrnoValueTest rather than ErrnoTest: the exact errno
+  // is the difference between "the sandbox denied this" (EPERM) and "the
+  // path was wrong" (ENOENT), and only the former proves anything.
+  const char* home = getenv("HOME");
+  if (home) {
+    // Created by the parent before the run, so an ENOENT here would be a
+    // setup failure rather than a denial.
+    nsCString readPath(home);
+    readPath.Append("/.mozilla_gpu_sandbox_read_test");
+    std::string path(readPath.get());
+    bool exists = access(path.c_str(), F_OK) == 0;
+    if (exists) {
+      child->ErrnoValueTest("hwinference_read_denied_home"_ns, EPERM, [path] {
+        int fd = open(path.c_str(), O_RDONLY);
+        if (fd >= 0) {
+          close(fd);
+        }
+        return fd;
+      });
+    } else {
+      child->SendReportTestResults(
+          "hwinference_read_denied_home"_ns, false,
+          "setup failure: $HOME probe file missing"_ns);
+    }
+
+    nsCString writePath(home);
+    writePath.Append("/hwinference_sbox_writetest.tmp");
+    child->ErrnoValueTest("hwinference_write_denied_home"_ns, EPERM,
+                          [p = std::string(writePath.get())] {
+                            int fd = open(p.c_str(), O_CREAT | O_WRONLY, 0600);
+                            if (fd >= 0) {
+                              close(fd);
+                            }
+                            return fd;
+                          });
+  } else {
+    child->SendReportTestResults("hwinference_read_denied_home"_ns, false,
+                                 "HOME environment variable not set"_ns);
+    child->SendReportTestResults("hwinference_write_denied_home"_ns, false,
+                                 "HOME environment variable not set"_ns);
+  }
+
+  child->ErrnoValueTest("hwinference_write_denied_tmp"_ns, EPERM, [] {
+    int fd =
+        open("/tmp/hwinference_sbox_writetest.tmp", O_CREAT | O_WRONLY, 0600);
+    if (fd >= 0) {
+      close(fd);
+    }
+    return fd;
+  });
+
+  // Nothing in the inference path talks to the network, and a model that
+  // could reach it would be an exfiltration channel straight out of the
+  // sandbox. socket() is not a mediated operation on macOS, so probe the
+  // outbound connect the policy is actually supposed to stop.
+  child->ErrnoValueTest("hwinference_connect_denied_inet"_ns, EPERM, [] {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+      return fd;
+    }
+    // Non-blocking: a permitted connect returns EINPROGRESS immediately
+    // rather than hanging until the network times out, which is the
+    // difference between this failing in seconds and hanging out a CI
+    // timeout on the run where the sandbox is off.
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(80);
+    addr.sin_addr.s_addr = htonl(0x08080808);  // 8.8.8.8
+    int rv = connect(fd, (struct sockaddr*)&addr, sizeof(addr));
+    int saved = errno;
+    close(fd);
+    errno = saved;
+    return rv;
+  });
+#else
+  child->ReportNoTests();
+#endif  // XP_MACOSX
+}
+
 void RunTestsUtilityMediaService(SandboxTestingChild* child,
                                  ipc::SandboxingKind aSandbox) {
   MOZ_ASSERT(child, "No SandboxTestingChild*?");

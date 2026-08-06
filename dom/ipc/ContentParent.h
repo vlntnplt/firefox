@@ -1140,6 +1140,12 @@ class ContentParent final : public PContentParent,
   mozilla::ipc::IPCResult RecvCreateAudioIPCConnection(
       CreateAudioIPCConnectionResolver&& aResolver);
 
+  mozilla::ipc::IPCResult RecvRequestHWInferenceConnection(
+      Endpoint<PHWInferenceManagerParent>&& aEndpoint,
+      RequestHWInferenceConnectionResolver&& aResolver);
+
+  mozilla::ipc::IPCResult RecvReleaseHWInferenceConnection();
+
   already_AddRefed<extensions::PExtensionsParent> AllocPExtensionsParent();
 
 #ifdef MOZ_WEBRTC
@@ -1535,6 +1541,12 @@ class ContentParent final : public PContentParent,
   // track the identity and other relevant information about the content process
   // they're attached to.
   const RefPtr<ThreadsafeContentParentHandle> mThreadsafeHandle;
+
+  // Only this content process' share of the HWInference keep-alives, so
+  // ActorDestroy can release what it leaves behind. Other consumers, parent
+  // process included, hold theirs directly on UtilityProcessManager and are
+  // not counted here.
+  uint32_t mHWInferenceKeepAlives = 0;
 
   // The process starts in the LAUNCHING state, and transitions to
   // ALIVE once it can accept IPC messages.  It remains ALIVE only

@@ -14,6 +14,7 @@ with Files("**"):
 
 DIRS += [
     "actors",
+    "ipc",
     "security",
     "tests",
 ]
@@ -29,16 +30,37 @@ BROWSER_CHROME_MANIFESTS += [
     "tests/browser_eval/eval.toml",
 ]
 
-XPIDL_SOURCES += ["nsIMLUtils.idl"]
+XPIDL_SOURCES += [
+    "nsIMLModelDownloadGate.idl",
+    "nsIMLModelHub.idl",
+    "nsIMLModelResolver.idl",
+    "nsIMLUtils.idl",
+]
 
-UNIFIED_SOURCES += ["MLUtils.cpp"]
-EXPORTS.mozilla.ml += ["MLUtils.h"]
+MOZ_SRC_FILES += [
+    "MLModelHubService.sys.mjs",
+]
+
+UNIFIED_SOURCES += [
+    "MLUtils.cpp",
+]
+
+EXPORTS.mozilla.ml += [
+    "MLUtils.h",
+]
 
 with Files("docs/**"):
     SCHEDULES.exclusive = ["docs"]
 
 XPCOM_MANIFESTS += [
     "components.conf",
+]
+
+LOCAL_INCLUDES += [
+    "/dom/base",
+    "/dom/file/ipc",
+    "/dom/ipc",
+    "/ipc/glue",
 ]
 
 XPIDL_MODULE = "ml"

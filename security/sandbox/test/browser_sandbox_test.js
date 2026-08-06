@@ -22,10 +22,37 @@ function test() {
   if (platform === "WINNT" || platform === "Darwin") {
     processTypes.push("utility:1");
   }
+  // HW_INFERENCE. Its index is whatever the build put before it: on macOS
+  // that is GENERIC_UTILITY, APPLE_MEDIA, and PKCS11_MODULE, the last of
+  // which only exists on Nightly. Naming a kind past COUNT is refused by the
+  // parent, which would hang the run rather than fail it.
+  if (platform === "Darwin") {
+    processTypes.push(AppConstants.NIGHTLY_BUILD ? "utility:3" : "utility:2");
+  }
+
+  // Results are fire-and-forget: a child that never runs a probe reports
+  // nothing, and nothing is not a failure. So for the HWInference set the
+  // parent holds the list of ids that must arrive and asserts it at the end,
+  // otherwise a child that bails early -- or a policy tight enough to break
+  // the reporting channel itself -- reads as a clean run.
+  const expectedHWInferenceTests =
+    platform === "Darwin"
+      ? [
+          "hwinference_sandbox_check",
+          "hwinference_read_allowed_system",
+          "hwinference_read_allowed_devurandom",
+          "hwinference_read_denied_home",
+          "hwinference_write_denied_home",
+          "hwinference_write_denied_tmp",
+          "hwinference_connect_denied_inet",
+        ]
+      : [];
+  const seenTests = new Set();
 
   // A callback called after each test-result.
   let sandboxTestResult = (subject, topic, data) => {
     let { testid, passed, message } = JSON.parse(data);
+    seenTests.add(testid);
     ok(
       passed,
       "Test " + testid + (passed ? " passed: " : " failed: ") + message
@@ -45,6 +72,10 @@ function test() {
         if (homeTestFile.isFile()) {
           homeTestFile.remove(false);
         }
+      }
+
+      for (const testid of expectedHWInferenceTests) {
+        ok(seenTests.has(testid), `HWInference sandbox test ran: ${testid}`);
       }
 
       Services.obs.removeObserver(sandboxTestResult, "sandbox-test-result");

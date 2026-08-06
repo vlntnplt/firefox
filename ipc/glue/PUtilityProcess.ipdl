@@ -9,6 +9,7 @@ include PrefsTypes;
 include protocol PProfiler;
 include protocol PUtilityMediaService;
 include protocol PJSOracle;
+include protocol PHWInference;
 
 #if defined(XP_WIN)
 include protocol PWindowsUtils;
@@ -127,6 +128,8 @@ child:
   */
   async UnblockUntrustedModulesThread();
 #endif  // defined(XP_WIN)
+
+  async StartHWInferenceService(Endpoint<PHWInferenceChild> aEndpoint);
 
 #if defined(MOZ_SANDBOX) && defined(MOZ_DEBUG) && defined(ENABLE_TESTS)
   async InitSandboxTesting(Endpoint<PSandboxTestingChild> aEndpoint);

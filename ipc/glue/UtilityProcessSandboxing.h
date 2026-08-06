@@ -33,8 +33,13 @@ enum SandboxingKind : uint64_t {
   PKCS11_MODULE,
 #endif  // NIGHTLY_BUILD && !MOZ_NO_SMART_CARDS
 
+// Inference is served by the llama.cpp backend, which is not built on
+// Android. Android also binds a single utility service per process type, so
+// it cannot host the HWInference process alongside another utility kind.
+#ifndef ANDROID
+  HW_INFERENCE,
+#endif
   COUNT,
-
 };
 
 bool IsUtilitySandboxEnabled(const char* envVar, SandboxingKind aKind);
