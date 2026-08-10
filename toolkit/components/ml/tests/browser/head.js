@@ -655,10 +655,117 @@ class PeakMemoryTracker {
   }
 }
 /**
+ * Short, stable tags used to name per-backend metrics. Kept separate from the
+ * backend identifiers so metric names stay readable in perfherder and don't
+ * change if a backend is renamed.
+ *
+ * @type {Record<string, string>}
+ */
+const BACKEND_TAGS = {
+  "onnx-native": "NATIVE",
+  onnx: "WASM",
+};
+
+/**
+ * Metric recording whether the native onnxruntime loaded on this machine.
+ * Emitted once per perfTest invocation so a run can be interpreted without
+ * having to know the platform: 1 = native available, 0 = not.
+ */
+const NATIVE_AVAILABLE_METRIC = "native-available";
+
+/**
+ * Resolves which ONNX backends a perf test should measure.
+ *
+ * A feature that requests "best-onnx" (or requests "onnx-native" and carries
+ * its own fallback) will run on EITHER backend in the wild, so measuring only
+ * one of them tells us nothing about what a meaningful share of the fleet
+ * experiences. By default this returns every ONNX backend that can actually
+ * run here, so a single perf job produces a native-vs-wasm comparison on
+ * platforms that bundle the runtime, and wasm-only numbers on platforms that
+ * don't -- without any per-platform skip-if.
+ *
+ * Override with the MOZ_ML_BACKENDS environment variable (comma separated,
+ * e.g. "onnx" or "onnx-native,onnx") to pin a run to specific backends.
+ *
+ * @param {object} [opts]
+ * @param {string[]} [opts.candidates] - Backends to consider, most preferred
+ *   first. Defaults to the full ONNX matrix.
+ * @returns {Promise<string[]>} Concrete backends to measure, never empty.
+ */
+async function resolveBackendMatrix({
+  candidates = ["onnx-native", "onnx"],
+} = {}) {
+  const override = Services.env.get("MOZ_ML_BACKENDS");
+  if (override) {
+    const requested = override
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+    info(`Backend matrix pinned by MOZ_ML_BACKENDS: ${requested.join(", ")}`);
+    return requested;
+  }
+
+  const nativeAvailable =
+    await EngineProcess.requestIsNativeOnnxRuntimeAvailable();
+
+  const matrix = candidates.filter(
+    backend => backend !== "onnx-native" || nativeAvailable
+  );
+
+  info(
+    `Backend matrix: ${matrix.join(", ")} ` +
+      `(native onnxruntime ${nativeAvailable ? "available" : "unavailable"}, ` +
+      `build bundles it: ${AppConstants.MOZ_ONNX_RUNTIME})`
+  );
+
+  return matrix;
+}
+
+/**
+ * Runs a performance test across every applicable ONNX backend and reports the
+ * results for perfherder.
+ *
+ * When `backends` resolves to more than one entry, metric names are tagged with
+ * the backend (e.g. "SMART-TAB-TOPIC-NATIVE-model-run-latency" alongside
+ * "SMART-TAB-TOPIC-WASM-model-run-latency") so both series are tracked
+ * independently and can be compared directly. With a single backend the tag is
+ * still applied, so metric names are stable regardless of platform.
+ *
+ * @param {object} config - See perfTestSingleBackend, plus:
+ * @param {string[]} [config.backends] - Concrete backends to measure. Defaults
+ *   to the full available ONNX matrix. Pass an explicit list for tests whose
+ *   backend is not negotiable (e.g. llama.cpp).
+ */
+async function perfTest({ backends, ...config }) {
+  const matrix = backends ?? (await resolveBackendMatrix());
+  const nativeAvailable =
+    await EngineProcess.requestIsNativeOnnxRuntimeAvailable();
+
+  // Emitted unconditionally so the report tooling can tell "native was not
+  // measured because it is unavailable here" from "native was not measured
+  // because the test did not ask for it".
+  reportMetrics({
+    [`${config.name.toUpperCase()}-${NATIVE_AVAILABLE_METRIC}`]: [
+      nativeAvailable ? 1 : 0,
+    ],
+  });
+
+  for (const backend of matrix) {
+    const tag = BACKEND_TAGS[backend] ?? backend.toUpperCase();
+    info(`Running ${config.name} on backend ${backend}`);
+    await perfTestSingleBackend({
+      ...config,
+      name: `${config.name}-${tag}`,
+      options: { ...config.options, backend },
+    });
+  }
+}
+
+/**
  * Runs a performance test for the given name, options, and arguments and
  * reports the results for perfherder.
  */
-async function perfTest({
+async function perfTestSingleBackend({
   name,
   options,
   request,

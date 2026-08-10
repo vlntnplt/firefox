@@ -53,6 +53,17 @@ export var AppConstants = Object.freeze({
 
   MOZ_UPDATER: @MOZ_UPDATER_BOOL@,
 
+  // Whether this build bundles the native onnxruntime shared library. False
+  // means the "onnx-native" backend can never work here, and any fallback to
+  // the wasm backend is expected rather than a failure. See
+  // toolkit/moz.configure and taskcluster/kinds/toolchain/onnx.yml.
+  MOZ_ONNX_RUNTIME:
+#ifdef ONNX_RUNTIME
+  true,
+#else
+  false,
+#endif
+
   MOZ_WEBRTC: @MOZ_WEBRTC_BOOL@,
 
   MOZ_WIDGET_GTK:

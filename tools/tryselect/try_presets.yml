@@ -415,6 +415,25 @@ mochitest-bc:
         - "'browser-chrome !standalone !tsan !asan !msix !spi !a11y !swr | 'linux"
     selector: fuzzy
 
+onnx-perf:
+    selector: fuzzy
+    description: >-
+        Run the ml-* perftests on every desktop platform (Linux, macOS,
+        Windows), rather than Linux only like the "ai-perf" preset.
+
+        Each job measures every ONNX backend available on its platform, so this
+        yields a native-vs-wasm comparison where the native onnxruntime is
+        bundled and wasm-only numbers where it is not. Platform coverage is the
+        point: which backend a feature actually gets is a per-platform
+        property.
+
+        Turn the resulting push into a markdown report with:
+        ./mach python toolkit/components/ml/tests/tools/ml_perf_report.py
+        -- --revision <rev>
+    query:
+        - "^perftest 'ml-"
+    full: true
+
 os-integration:
     selector: fuzzy
     description: >-

@@ -152,3 +152,71 @@ Once this is done, try it out with:
 ```
 
 You should then see the results in treeherder.
+
+## Backends: measuring native ONNX and WASM
+
+Most features request the `best-onnx` backend, which resolves to `onnx-native`
+where the platform bundles `libonnxruntime` and silently falls back to the WASM
+`onnx` backend everywhere else. Measuring only one of the two therefore tells
+you nothing about what a meaningful share of the fleet actually runs.
+
+`perfTest()` handles this for you. By default it probes the runtime once and
+runs your test on **every ONNX backend available on the machine**, tagging the
+metric names so both series are tracked independently:
+
+```
+SMART-TAB-TOPIC-NATIVE-model-run-latency
+SMART-TAB-TOPIC-WASM-model-run-latency
+SMART-TAB-TOPIC-native-available          # 1 or 0
+```
+
+Because the tag is always applied, metric names are stable regardless of
+platform, and a missing series is unambiguous: cross-reference
+`<NAME>-native-available` to tell "native is not available here" from "the test
+never asked for native".
+
+Do not set `backend` in your `PipelineOptions` — `perfTest()` overrides it per
+iteration. For a test whose backend is genuinely fixed (llama.cpp, OpenAI,
+static embeddings), pin it instead:
+
+```javascript
+await perfTest({ name, options, request, backends: ["llama.cpp"] });
+```
+
+To pin a whole run to one backend, for example to reproduce a WASM-only
+platform on a machine that has the native runtime:
+
+```bash
+MOZ_ML_BACKENDS=onnx ./mach perftest <test.js> \
+    --hooks toolkit/components/ml/tests/tools/hooks_local_hub.py \
+    --mochitest-extra-args headless
+```
+
+### Where the runtime actually loads
+
+`browser_ml_ort_availability_probe.js` is a **regular** mochitest, deliberately
+without any `skip-if`, so it runs on every CI configuration — including the
+asan, tsan, debug, x86 and Android jobs that the native ONNX tests exclude. It
+asserts that `AppConstants.MOZ_ONNX_RUNTIME` (what the build claims) matches
+`InferenceSession.isAvailable()` (what a real `dlopen` does), and emits one
+machine-readable `ML_ORT_PROBE` line per job.
+
+If it fails on a configuration, that is a finding. Do not add a `skip-if`.
+
+### Getting a report out of a try push
+
+```bash
+./mach try perf --single-run --full --artifact
+./mach python toolkit/components/ml/tests/tools/ml_perf_report.py \
+    -- --revision <rev> --output ml-perf-report.md
+```
+
+The report contains the availability matrix across every configuration that
+ran, a native-vs-WASM comparison table per feature wherever both were measured,
+and an explicit list of features that ran on only one backend together with the
+reason. The same tool reads local logs, which is the quickest way to check your
+test before pushing:
+
+```bash
+./mach python toolkit/components/ml/tests/tools/ml_perf_report.py -- --log <logfile>
+```

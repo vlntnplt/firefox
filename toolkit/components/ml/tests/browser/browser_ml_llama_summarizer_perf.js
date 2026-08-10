@@ -192,6 +192,8 @@ async function run_summarizer_with_perf({
     options,
     request,
     trackPeakMemory,
+    // Not an ONNX consumer: pin the backend so the matrix does not apply.
+    backends: ["llama.cpp"],
   });
 }
 
