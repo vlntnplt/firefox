@@ -87,7 +87,10 @@ add_task(async function test_ml_pdfjs_alt_text() {
     taskName: "moz-image-to-text",
     featureId: "pdfjs-alt-text",
     engineId: "pdfjs",
-    modelId: "Mozilla/distilvit",
+    // Lowercase, matching the moz-image-to-text engine configuration: the
+    // tokenizer and processor ids default to it, and the model hub is served
+    // from a case-sensitive filesystem in CI.
+    modelId: "mozilla/distilvit",
     modelHubUrlTemplate: "{model}/{revision}",
     modelRevision: "main",
     dtype: "q8",
@@ -103,7 +106,7 @@ add_task(async function test_ml_pdfjs_alt_text() {
 
   // Alt text is generated on demand when the user opens the alt-text dialog,
   // so the engine is usually cold on first use.
-  await perfTest({
+  await runMLPerfTest({
     name: "pdfjs-alt-text",
     options,
     request,

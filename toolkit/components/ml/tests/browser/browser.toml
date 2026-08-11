@@ -69,12 +69,6 @@ skip-if = [
   "verify",
 ]
 
-# Deliberately has NO skip-if: this is the one test that tells us, per CI
-# configuration, whether the native onnxruntime actually loads. Adding a
-# skip-if here defeats its purpose -- if it fails on a configuration, that is
-# a finding, not a reason to exclude it.
-["browser_ml_ort_availability_probe.js"]
-
 ["browser_ml_native_ort_availability.js"]
 support-files = [
   "ml_native_ort_available_stub.worker.mjs",
@@ -87,6 +81,12 @@ support-files = [
 ["browser_ml_openai.js"]
 
 ["browser_ml_opfs.js"]
+
+# Deliberately has NO skip-if: this is the one test that tells us, per CI
+# configuration, whether the native onnxruntime actually loads. Adding a
+# skip-if here defeats its purpose -- if it fails on a configuration, that is
+# a finding, not a reason to exclude it.
+["browser_ml_ort_availability_probe.js"]
 
 ["browser_ml_pipeline.js"]
 

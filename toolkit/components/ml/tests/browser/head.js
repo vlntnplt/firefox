@@ -369,7 +369,17 @@ async function initializeEngine(pipelineOptions, prefs = null) {
   });
   info("Get the engine process");
   const startTime = performance.now();
-  const engine = await createEngine(new PipelineOptions(pipelineOptions));
+  let engine;
+  try {
+    engine = await createEngine(new PipelineOptions(pipelineOptions));
+  } catch (error) {
+    // runInference's try/finally only covers a successfully created engine, so
+    // an initialization failure would otherwise leave the pushed prefs and the
+    // engine process behind and break every subsequent run in the file.
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+    throw error;
+  }
   const e2eInitTime = performance.now() - startTime;
 
   info("Get Pipeline Options");
@@ -667,25 +677,19 @@ const BACKEND_TAGS = {
 };
 
 /**
- * Metric recording whether the native onnxruntime loaded on this machine.
- * Emitted once per perfTest invocation so a run can be interpreted without
- * having to know the platform: 1 = native available, 0 = not.
- */
-const NATIVE_AVAILABLE_METRIC = "native-available";
-
-/**
  * Resolves which ONNX backends a perf test should measure.
  *
- * A feature that requests "best-onnx" (or requests "onnx-native" and carries
- * its own fallback) will run on EITHER backend in the wild, so measuring only
- * one of them tells us nothing about what a meaningful share of the fleet
- * experiences. By default this returns every ONNX backend that can actually
- * run here, so a single perf job produces a native-vs-wasm comparison on
- * platforms that bundle the runtime, and wasm-only numbers on platforms that
- * don't -- without any per-platform skip-if.
+ * In CI, every ML perf task pins a single backend through the MOZ_ML_BACKENDS
+ * environment variable (comma separated, e.g. "onnx"), set in
+ * taskcluster/kinds/perftest/*.yml. One job measures one backend, so a backend
+ * that cannot run fails its own job without costing any other backend's
+ * numbers. The override wins over everything, including a test-provided
+ * candidate list: the task name is the contract for what the job measures.
  *
- * Override with the MOZ_ML_BACKENDS environment variable (comma separated,
- * e.g. "onnx" or "onnx-native,onnx") to pin a run to specific backends.
+ * Without the override -- a local `mach perftest` run -- this returns the
+ * most preferred candidate that can run here: native where the runtime loads,
+ * the wasm fallback otherwise. Set MOZ_ML_BACKENDS=onnx-native,onnx to
+ * measure both in one session.
  *
  * @param {object} [opts]
  * @param {string[]} [opts.candidates] - Backends to consider, most preferred
@@ -708,15 +712,21 @@ async function resolveBackendMatrix({
   const nativeAvailable =
     await EngineProcess.requestIsNativeOnnxRuntimeAvailable();
 
-  const matrix = candidates.filter(
-    backend => backend !== "onnx-native" || nativeAvailable
-  );
+  const matrix = candidates
+    .filter(backend => backend !== "onnx-native" || nativeAvailable)
+    .slice(0, 1);
 
   info(
     `Backend matrix: ${matrix.join(", ")} ` +
       `(native onnxruntime ${nativeAvailable ? "available" : "unavailable"}, ` +
       `build bundles it: ${AppConstants.MOZ_ONNX_RUNTIME})`
   );
+
+  if (!matrix.length) {
+    throw new Error(
+      `No backend to measure: none of [${candidates.join(", ")}] can run here`
+    );
+  }
 
   return matrix;
 }
@@ -725,47 +735,76 @@ async function resolveBackendMatrix({
  * Runs a performance test across every applicable ONNX backend and reports the
  * results for perfherder.
  *
- * When `backends` resolves to more than one entry, metric names are tagged with
- * the backend (e.g. "SMART-TAB-TOPIC-NATIVE-model-run-latency" alongside
- * "SMART-TAB-TOPIC-WASM-model-run-latency") so both series are tracked
- * independently and can be compared directly. With a single backend the tag is
- * still applied, so metric names are stable regardless of platform.
+ * Metric names are tagged with the backend (e.g.
+ * "SMART-TAB-TOPIC-NATIVE-model-run-latency", or the WASM equivalent) so each
+ * backend is a separate perfherder series and the two can be compared
+ * directly. The tag is applied even when only one backend runs, so series
+ * names do not depend on where the test ran.
  *
- * @param {object} config - See perfTestSingleBackend, plus:
- * @param {string[]} [config.backends] - Concrete backends to measure. Defaults
- *   to the full available ONNX matrix. Pass an explicit list for tests whose
- *   backend is not negotiable (e.g. llama.cpp).
+ * @param {object} config - See runMLPerfTestOnBackend, plus:
+ * @param {string[]} [config.backends] - Backend candidates for runs where
+ *   MOZ_ML_BACKENDS is not set. Pass an explicit list for tests whose backend
+ *   is not negotiable (e.g. llama.cpp).
  */
-async function perfTest({ backends, ...config }) {
-  const matrix = backends ?? (await resolveBackendMatrix());
-  const nativeAvailable =
-    await EngineProcess.requestIsNativeOnnxRuntimeAvailable();
-
-  // Emitted unconditionally so the report tooling can tell "native was not
-  // measured because it is unavailable here" from "native was not measured
-  // because the test did not ask for it".
-  reportMetrics({
-    [`${config.name.toUpperCase()}-${NATIVE_AVAILABLE_METRIC}`]: [
-      nativeAvailable ? 1 : 0,
-    ],
+async function runMLPerfTest({ backends, ...config }) {
+  await runMLPerfTestForEachBackend({
+    name: config.name,
+    backends,
+    run: ({ backend, tag }) =>
+      runMLPerfTestOnBackend({
+        ...config,
+        name: `${config.name}-${tag}`,
+        options: { ...config.options, backend },
+      }),
   });
+}
+
+/**
+ * Runs `run` once per applicable ONNX backend.
+ *
+ * Tests that drive a whole feature rather than one pipeline (MLSuggest, smart
+ * tab clustering, ...) cannot use runMLPerfTest(), because they own their engine
+ * creation and metric naming. They call this directly instead, pass `backend`
+ * down into whatever options they build, and prefix their metric names with
+ * `tag`.
+ *
+ * A backend that cannot run fails the test. In CI each job is pinned to one
+ * backend via MOZ_ML_BACKENDS, so the failure turns that job orange without
+ * costing any other backend's numbers -- and a green job is a job that
+ * measured what its name says. Backends a test can never run are excluded
+ * where the jobs are scheduled (taskcluster/kinds/perftest/*.yml), with the
+ * reason next to the exclusion.
+ *
+ * @param {object} config
+ * @param {string} config.name - Feature name, used for logging.
+ * @param {string[]} [config.backends] - Backend candidates for runs where
+ *   MOZ_ML_BACKENDS is not set, most preferred first. Defaults to the full
+ *   ONNX matrix.
+ * @param {function({backend: string, tag: string}): Promise} config.run -
+ *   Runs and reports the measurements for one backend.
+ */
+async function runMLPerfTestForEachBackend({ name, backends, run }) {
+  const matrix = await resolveBackendMatrix(
+    backends ? { candidates: backends } : {}
+  );
 
   for (const backend of matrix) {
     const tag = BACKEND_TAGS[backend] ?? backend.toUpperCase();
-    info(`Running ${config.name} on backend ${backend}`);
-    await perfTestSingleBackend({
-      ...config,
-      name: `${config.name}-${tag}`,
-      options: { ...config.options, backend },
-    });
+    info(`Running ${name} on backend ${backend}`);
+    await run({ backend, tag });
   }
+
+  Assert.ok(
+    true,
+    `${name} measured every backend in the matrix (${matrix.join(", ")})`
+  );
 }
 
 /**
  * Runs a performance test for the given name, options, and arguments and
  * reports the results for perfherder.
  */
-async function perfTestSingleBackend({
+async function runMLPerfTestOnBackend({
   name,
   options,
   request,

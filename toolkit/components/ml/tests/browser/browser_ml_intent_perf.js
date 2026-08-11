@@ -8,7 +8,7 @@ http://creativecommons.org/publicdomain/zero/1.0/ */
 // This feature sits on the critical path of every Smart Window prompt: its
 // verdict decides whether the prompt is routed to search or to chat, so its
 // latency is user-visible before anything else happens. It requests
-// "best-onnx", so perfTest measures it on every ONNX backend the platform
+// "best-onnx", so runMLPerfTest measures it on every ONNX backend the platform
 // provides.
 //
 // Two models are exercised because getIntentModelInfoForLocale() picks between
@@ -85,7 +85,7 @@ async function runIntentModel({ perfName, featureId, modelId }) {
   // Cold start matters more here than for most features: the engine is created
   // lazily inside getPromptIntent() on the first prompt of a session, so the
   // first user interaction pays the full initialization cost.
-  await perfTest({
+  await runMLPerfTest({
     name: perfName,
     options,
     request,

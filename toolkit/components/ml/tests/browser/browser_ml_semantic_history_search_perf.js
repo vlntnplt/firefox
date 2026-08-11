@@ -54,7 +54,6 @@ const CUSTOM_EMBEDDER_OPTIONS = {
   modelRevision: "main",
   numThreads: 2,
   timeoutMS: -1,
-  backend: "onnx-native",
 };
 
 const ROOT_URL =
@@ -213,6 +212,7 @@ async function getCpuTimeFromProcInfo() {
 
 async function prepareSemanticSearchTest({
   rowLimit,
+  backend,
   testFlag = true,
   concurrentInferenceFlag = false,
 }) {
@@ -267,8 +267,8 @@ async function prepareSemanticSearchTest({
     canUseSemanticStub.restore();
   });
 
-  // Ensures dtype/revision is consistent for the test
-  semanticManager.embedder.options = CUSTOM_EMBEDDER_OPTIONS;
+  // Ensures dtype/revision/backend is consistent for the test
+  semanticManager.embedder.options = { ...CUSTOM_EMBEDDER_OPTIONS, backend };
   await semanticManager.embedder.ensureEngine();
 
   const conn = await semanticManager.getConnection();
@@ -299,8 +299,10 @@ async function runInferenceAndCollectMetrics({
   searchQuery,
   searchQueries,
   journal,
+  tag,
   concurrentInferenceFlag = false,
 }) {
+  const prefix = `SEMANTIC-${tag}`;
   // Use a single searchQuery or alternate through a list of queries in searchQueries
   // Ideally numIterations is a multiple of the length of searchQueries
   let numQueries = searchQueries && searchQueries.length;
@@ -338,26 +340,26 @@ async function runInferenceAndCollectMetrics({
 
     for (const [metricName, value] of Object.entries(metrics)) {
       const safeValue = value > 0 ? value : 0;
-      journal[`SEMANTIC-${metricName}`] =
-        journal[`SEMANTIC-${metricName}`] || [];
-      journal[`SEMANTIC-${metricName}`].push(safeValue);
+      journal[`${prefix}-${metricName}`] =
+        journal[`${prefix}-${metricName}`] || [];
+      journal[`${prefix}-${metricName}`].push(safeValue);
 
       if (metricName === MODEL_RUN_LATENCY) {
         embeddingLatency = safeValue;
       }
     }
 
-    journal[`SEMANTIC-${SEARCH_LATENCY}`] =
-      journal[`SEMANTIC-${SEARCH_LATENCY}`] || [];
-    journal[`SEMANTIC-${SEARCH_LATENCY}`].push(duration - embeddingLatency);
+    journal[`${prefix}-${SEARCH_LATENCY}`] =
+      journal[`${prefix}-${SEARCH_LATENCY}`] || [];
+    journal[`${prefix}-${SEARCH_LATENCY}`].push(duration - embeddingLatency);
 
-    journal[`SEMANTIC-${INFERENCE_LATENCY}`] =
-      journal[`SEMANTIC-${INFERENCE_LATENCY}`] || [];
-    journal[`SEMANTIC-${INFERENCE_LATENCY}`].push(duration);
+    journal[`${prefix}-${INFERENCE_LATENCY}`] =
+      journal[`${prefix}-${INFERENCE_LATENCY}`] || [];
+    journal[`${prefix}-${INFERENCE_LATENCY}`].push(duration);
 
-    journal[`SEMANTIC-${TOTAL_MEMORY_USAGE}`] =
-      journal[`SEMANTIC-${TOTAL_MEMORY_USAGE}`] || [];
-    journal[`SEMANTIC-${TOTAL_MEMORY_USAGE}`].push(memUsage);
+    journal[`${prefix}-${TOTAL_MEMORY_USAGE}`] =
+      journal[`${prefix}-${TOTAL_MEMORY_USAGE}`] || [];
+    journal[`${prefix}-${TOTAL_MEMORY_USAGE}`].push(memUsage);
   }
 
   const endCpu = Math.floor(await getCpuTimeFromProcInfo());
@@ -380,7 +382,10 @@ async function cleanupSemanticSearchTest({ semanticManager, conn, cleanup }) {
   return updateTime;
 }
 
-async function runShortAndLongQueryPerfTest(concurrentInferenceFlag) {
+async function runShortAndLongQueryPerfTest(
+  concurrentInferenceFlag,
+  { backend, tag }
+) {
   const rowLimit = 500;
   const numIterations = 20;
   const mode = concurrentInferenceFlag ? "CONCURRENT" : "SEQUENTIAL";
@@ -388,6 +393,7 @@ async function runShortAndLongQueryPerfTest(concurrentInferenceFlag) {
 
   const setupResult = await prepareSemanticSearchTest({
     rowLimit,
+    backend,
     concurrentInferenceFlag,
   });
 
@@ -397,19 +403,47 @@ async function runShortAndLongQueryPerfTest(concurrentInferenceFlag) {
 
   const { semanticManager, conn, vecDBFileSize, cleanup } = setupResult;
 
+  try {
+    await measureSemanticSearch({
+      semanticManager,
+      conn,
+      cleanup,
+      vecDBFileSize,
+      numIterations,
+      concurrentInferenceFlag,
+      tag,
+    });
+  } catch (error) {
+    // The happy path tears down inside measureSemanticSearch; on failure the
+    // engine, database and prefs would otherwise leak into the next backend.
+    await cleanupSemanticSearchTest({ semanticManager, conn, cleanup });
+    throw error;
+  }
+}
+
+async function measureSemanticSearch({
+  semanticManager,
+  conn,
+  cleanup,
+  vecDBFileSize,
+  numIterations,
+  concurrentInferenceFlag,
+  tag,
+}) {
   const journalShort = {};
   await runInferenceAndCollectMetrics({
     semanticManager,
     numIterations,
     searchQuery: "health tips",
     journal: journalShort,
+    tag,
     concurrentInferenceFlag,
   });
 
   const journalShortPrefixed = Object.fromEntries(
     Object.entries(journalShort).map(([k, v]) => [`SHORT-${k}`, v])
   );
-  journalShortPrefixed["SEMANTIC-VECTOR_DB_DISK_SIZE"] = [vecDBFileSize];
+  journalShortPrefixed[`SEMANTIC-${tag}-VECTOR_DB_DISK_SIZE`] = [vecDBFileSize];
   info(`Short query journal = ${JSON.stringify(journalShortPrefixed)}`);
   reportMetrics(journalShortPrefixed);
 
@@ -427,6 +461,7 @@ async function runShortAndLongQueryPerfTest(concurrentInferenceFlag) {
       "Oscar winners best picture",
     ],
     journal: journalLongMultiple,
+    tag,
     concurrentInferenceFlag,
   });
   const journalLongMultiplePrefixed = Object.fromEntries(
@@ -446,6 +481,7 @@ async function runShortAndLongQueryPerfTest(concurrentInferenceFlag) {
     numIterations,
     searchQuery: "best recipe with nutritional value and taste that kids like",
     journal: journalLong,
+    tag,
     concurrentInferenceFlag,
   });
   const updateTime = await cleanupSemanticSearchTest({
@@ -456,16 +492,37 @@ async function runShortAndLongQueryPerfTest(concurrentInferenceFlag) {
   const journalLongPrefixed = Object.fromEntries(
     Object.entries(journalLong).map(([k, v]) => [`LONG-${k}`, v])
   );
-  journalLongPrefixed["LONG-SEMANTIC-UPDATE_TASK_LATENCY"] = [updateTime];
-  journalLongPrefixed["LONG-SEMANTIC-VECTOR_DB_DISK_SIZE"] = [vecDBFileSize];
+  journalLongPrefixed[`LONG-SEMANTIC-${tag}-UPDATE_TASK_LATENCY`] = [
+    updateTime,
+  ];
+  journalLongPrefixed[`LONG-SEMANTIC-${tag}-VECTOR_DB_DISK_SIZE`] = [
+    vecDBFileSize,
+  ];
   info(`Long query journal = ${JSON.stringify(journalLongPrefixed)}`);
   reportMetrics(journalLongPrefixed);
 }
 
+// Local-run default only -- in CI each job pins its backend through
+// MOZ_ML_BACKENDS, which overrides this list, and the wasm variant runs in
+// its own session. One backend per session is a hard constraint here:
+// cleanupSemanticSearchTest() deletes the Places database files and closes
+// its connection, which the setup cannot recover from, so a second pass
+// through the matrix hangs waiting for a
+// "places-semantichistorymanager-update-complete" that can never fire.
+const SEMANTIC_BACKENDS = ["onnx-native"];
+
 add_task(async function test_short_and_long_query_perf() {
-  await runShortAndLongQueryPerfTest(false);
+  await runMLPerfTestForEachBackend({
+    name: "SEMANTIC",
+    backends: SEMANTIC_BACKENDS,
+    run: backendInfo => runShortAndLongQueryPerfTest(false, backendInfo),
+  });
 });
 
 add_task(async function test_concurrent_short_and_long_query_perf() {
-  await runShortAndLongQueryPerfTest(true);
+  await runMLPerfTestForEachBackend({
+    name: "SEMANTIC-CONCURRENT",
+    backends: SEMANTIC_BACKENDS,
+    run: backendInfo => runShortAndLongQueryPerfTest(true, backendInfo),
+  });
 });

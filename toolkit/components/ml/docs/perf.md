@@ -55,7 +55,7 @@ add_task(async function test_ml_generic_pipeline() {
   };
 
   const args = ["The quick brown fox jumps over the lazy dog."];
-  await perfTest("example", options, args);
+  await runMLPerfTest("example", options, args);
 });
 ```
 
@@ -73,8 +73,6 @@ Available git-based models from the YAML:
 - mozilla-ner -> path-prefix: onnx-models/Mozilla/distilbert-uncased-NER-LoRA/main/
 - mozilla-intent -> path-prefix: onnx-models/Mozilla/mobilebert-uncased-finetuned-LoRA-intent-classifier/main/
 - mozilla-autofill -> path-prefix: onnx-models/Mozilla/tinybert-uncased-autofill/main/
-- distilbart-cnn-12-6 -> path-prefix: onnx-models/Mozilla/distilbart-cnn-12-6/main/
-- qwen2.5-0.5-instruct -> path-prefix: onnx-models/Mozilla/Qwen2.5-0.5B-Instruct/main/
 - mozilla-smart-tab-topic -> path-prefix: onnx-models/Mozilla/smart-tab-topic/main/
 - mozilla-smart-tab-emb -> path-prefix: onnx-models/Mozilla/smart-tab-embedding/main/
 
@@ -111,7 +109,13 @@ To add the test in the CI you need to add an entry in
 - `taskcluster/kinds/perftest/windows11.yml`
 - `taskcluster/kinds/perftest/macos.yml`
 
-With a unique name that starts with `ml-perf`
+With a unique name that starts with `ml-perf`.
+
+A test that measures an ONNX model gets **two** entries per platform file, one
+per backend: `<name>-wasm` holding the full definition (and a YAML anchor),
+and `<name>-native` merging it with `<<:` to override the treeherder symbol
+and set `MOZ_ML_BACKENDS: onnx-native`. Copy an existing pair such as
+`ml-perf-autofill-wasm` / `ml-perf-autofill-native`.
 
 Example for Linux:
 
@@ -160,28 +164,89 @@ where the platform bundles `libonnxruntime` and silently falls back to the WASM
 `onnx` backend everywhere else. Measuring only one of the two therefore tells
 you nothing about what a meaningful share of the fleet actually runs.
 
-`perfTest()` handles this for you. By default it probes the runtime once and
-runs your test on **every ONNX backend available on the machine**, tagging the
-metric names so both series are tracked independently:
+In CI, every ONNX perf task exists twice: `<task>-native` and `<task>-wasm`,
+each pinning one backend through the `MOZ_ML_BACKENDS` environment variable in
+`taskcluster/kinds/perftest/*.yml`. One job measures one backend, so a backend
+that cannot run **fails its own job** — orange in Treeherder, no soft-error
+metric to cross-reference — without costing the other backend's numbers. A
+green job is a job that measured what its name says.
+
+Metric names carry the backend tag, so each backend is its own perfherder
+series and the two can be compared directly:
 
 ```
 SMART-TAB-TOPIC-NATIVE-model-run-latency
 SMART-TAB-TOPIC-WASM-model-run-latency
-SMART-TAB-TOPIC-native-available          # 1 or 0
 ```
 
-Because the tag is always applied, metric names are stable regardless of
-platform, and a missing series is unambiguous: cross-reference
-`<NAME>-native-available` to tell "native is not available here" from "the test
-never asked for native".
+Locally, without `MOZ_ML_BACKENDS`, `runMLPerfTest()` probes the runtime once
+and measures the most preferred backend that can run: native where the runtime
+loads, the wasm fallback otherwise. To measure both in one session, or to
+reproduce a specific CI job, set the variable yourself:
 
-Do not set `backend` in your `PipelineOptions` — `perfTest()` overrides it per
+```bash
+MOZ_ML_BACKENDS=onnx-native,onnx ./mach perftest <test.js> ...
+```
+
+Do not set `backend` in your `PipelineOptions` — `runMLPerfTest()` overrides it per
 iteration. For a test whose backend is genuinely fixed (llama.cpp, OpenAI,
 static embeddings), pin it instead:
 
 ```javascript
-await perfTest({ name, options, request, backends: ["llama.cpp"] });
+await runMLPerfTest({ name, options, request, backends: ["llama.cpp"] });
 ```
+
+`MOZ_ML_BACKENDS` overrides even a pinned list: the CI task name is the
+contract for what its job measures.
+
+### Tests that drive a feature rather than a pipeline
+
+`runMLPerfTest()` owns engine creation, so it only fits a test that measures one
+pipeline. A test that drives a whole feature (MLSuggest, semantic history
+search, smart tab clustering) calls `runMLPerfTestForEachBackend()` directly,
+passes `backend` down into whatever options it builds, and prefixes its own
+metric names with `tag`:
+
+```javascript
+add_task(async function test_my_feature() {
+  await runMLPerfTestForEachBackend({ name: "MY-FEATURE", run: measureMyFeature });
+});
+
+async function measureMyFeature({ backend, tag }) {
+  MyFeature.OPTIONS = { ...MY_OPTIONS, backend };
+  // ...
+  reportMetrics({ [`MY-FEATURE-${tag}-model-run-latency`]: latencies });
+}
+```
+
+Watch out for features that carry their own native→wasm fallback (MLSuggest
+does): pin the fallback options to the same backend, otherwise a native failure
+quietly reports wasm numbers under the `NATIVE` tag.
+
+Declare the metric names in `perfherder_metrics` **without** the feature
+prefix. mozperftest keeps a subtest only if a declared name appears in it as a
+substring, and the backend tag sits between the feature name and the metric, so
+`AUTOFILL-model-run-latency` no longer matches `AUTOFILL-NATIVE-model-run-latency`
+while `model-run-latency` does.
+
+### When a backend cannot run a model
+
+The job fails. There is no soft-failure path: mozperftest stops before
+emitting `PERFHERDER_DATA` when a test fails, and since the job only measures
+that one backend, there are no other numbers to protect — the orange job *is*
+the report.
+
+If a backend can **never** run a given model, do not schedule that variant:
+drop it from the kind.yml with a comment saying why, and add the same reason
+to `DECLARED_SKIPS` in `ml_perf_report.py` so the report shows the hole as
+deliberate instead of flagging it. An undeclared hole is treated as a bug.
+
+Two known native gaps to expect if you add a test using them: the native
+backend cannot load models that ship their weights as external data
+(`use_external_data_format`, i.e. a `.onnx_data` file — it has no way to hand
+those bytes to the runtime), and text-to-speech fails with
+`Unsupported device: "wasm"` because the vocoder is loaded with the WASM
+default device.
 
 To pin a whole run to one backend, for example to reproduce a WASM-only
 platform on a machine that has the native runtime:
@@ -206,17 +271,19 @@ If it fails on a configuration, that is a finding. Do not add a `skip-if`.
 ### Getting a report out of a try push
 
 ```bash
-./mach try perf --single-run --full --artifact
+./mach try preset onnx-perf
 ./mach python toolkit/components/ml/tests/tools/ml_perf_report.py \
     -- --revision <rev> --output ml-perf-report.md
 ```
 
-The report contains the availability matrix across every configuration that
-ran, a native-vs-WASM comparison table per feature wherever both were measured,
-and an explicit list of features that ran on only one backend together with the
-reason. The same tool reads local logs, which is the quickest way to check your
-test before pushing:
+The report leads with a coverage verdict: every scheduled ML job must have
+reported metrics, and every feature must have both a NATIVE and a WASM series
+wherever it ran. Anything that violates either rule is listed first, before
+any number — a failed job, a green job with no data, or a variant that was
+never scheduled. The native-vs-WASM comparison tables come after. The same
+tool reads local logs, which is the quickest way to check your test before
+pushing:
 
 ```bash
-./mach python toolkit/components/ml/tests/tools/ml_perf_report.py -- --log <logfile>
+./mach python toolkit/components/ml/tests/tools/ml_perf_report.py -- --logs <logfile>
 ```
