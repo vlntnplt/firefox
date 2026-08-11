@@ -66,6 +66,8 @@ suites:
             "browser_ml_suggest_feature_perf.js": ""
             "browser_ml_suggest_inference.js": ""
             "browser_ml_autofill_perf.js": ""
+            "browser_ml_intent_perf.js": ""
+            "browser_ml_pdfjs_alt_text_perf.js": ""
             "browser_ml_summarizer_perf.js": ""
             "ML Smart Tab Clustering": ""
             "browser_ml_smart_tab_perf.js": ""

@@ -730,6 +730,24 @@ browser_ml_engine_perf.js
 
 **Template test for latency for ml models**
 
+browser_ml_intent_perf.js
+=========================
+
+:owner: GenAI Team
+:name: browser_ml_intent_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Latency for the AI Window intent classification models**
+
 browser_ml_llama_smollm2_smoke.js
 =================================
 
@@ -764,6 +782,24 @@ browser_ml_llama_summarizer_perf.js
  --try-platform linux, mac, win
 
 **Summarization latency and memory for the SmolLM2 and Qwen3 models on llama.cpp**
+
+browser_ml_pdfjs_alt_text_perf.js
+=================================
+
+:owner: GenAI Team
+:name: browser_ml_pdfjs_alt_text_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:latency,unit:ms,shouldAlert:False, name:memory,unit:MiB,shouldAlert:False, name:tokenSpeed,unit:tokens/s,shouldAlert:False,lowerIsBetter:False, name:charactersSpeed,unit:chars/s,shouldAlert:False,lowerIsBetter:False
+ --verbose
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**Latency for the PDF.js alt-text (image-to-text) model**
 
 browser_ml_smart_tab_perf.js
 ============================

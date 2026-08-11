@@ -27,6 +27,12 @@ skip-if = [
   "true", #  Bug 1952456
 ]
 
+["browser_ml_intent_perf.js"]
+disabled = "Disabled as we want to run this only as perftest, not regular CI"
+
+["browser_ml_pdfjs_alt_text_perf.js"]
+disabled = "Disabled as we want to run this only as perftest, not regular CI"
+
 ["browser_ml_security_perf.js"]
 disabled = "Disabled as we want to run this only as perftest, not regular CI"
 

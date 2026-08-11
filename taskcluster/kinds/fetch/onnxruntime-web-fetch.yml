@@ -37,6 +37,33 @@ mozilla-intent:
         path-prefix: "onnx-models/Mozilla/mobilebert-uncased-finetuned-LoRA-intent-classifier/main/"
         artifact-name: mobilebert-uncased-finetuned-LoRA-intent-classifier.tar.zst
 
+query-intent:
+    description: AI Window intent classification model (default locales)
+    fetch:
+        type: git
+        repo: https://huggingface.co/Mozilla/mobilebert-query-intent-detection
+        revision: f37f03073eb286317abdcf1fc681548327f43281
+        path-prefix: "onnx-models/Mozilla/mobilebert-query-intent-detection/main/"
+        artifact-name: mobilebert-query-intent-detection.tar.zst
+
+query-intent-en-fr:
+    description: AI Window intent classification model (used when Region.home is FR)
+    fetch:
+        type: git
+        repo: https://huggingface.co/Mozilla/query-intent-detection-en-fr
+        revision: e60425cc9e5c0c1eb9faaa4b73a7092d741165f2
+        path-prefix: "onnx-models/Mozilla/query-intent-detection-en-fr/main/"
+        artifact-name: query-intent-detection-en-fr.tar.zst
+
+mozilla-distilvit:
+    description: PDF.js alt-text image-to-text model
+    fetch:
+        type: git
+        repo: https://huggingface.co/Mozilla/distilvit
+        revision: e78ec2faa49fb577dfcc39752eed18f5eaa264c9
+        path-prefix: "onnx-models/Mozilla/distilvit/main/"
+        artifact-name: distilvit.tar.zst
+
 mozilla-autofill:
     description: autofill model
     fetch:
