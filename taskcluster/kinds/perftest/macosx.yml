@@ -514,6 +514,55 @@ ml-perf-suggest-inf:
             --hooks toolkit/components/ml/tests/tools/hooks_local_hub.py
             toolkit/components/ml/tests/browser/browser_ml_suggest_inference.js
 
+ml-perf-intent:
+    fetches:
+        fetch:
+            - ort.jsep.wasm
+            - query-intent
+            - query-intent-en-fr
+    description: Run AI Window intent classification models
+    treeherder:
+        symbol: perftest(ml-perf-intent)
+        tier: 2
+    attributes:
+        batch: false
+        cron: false
+    run-on-projects: [autoland, mozilla-central]
+    run:
+        command: >-
+            mkdir -p $MOZ_FETCHES_DIR/../artifacts &&
+            cd $MOZ_FETCHES_DIR &&
+            python3 python/mozperftest/mozperftest/runner.py
+            --mochitest-binary ${MOZ_FETCHES_DIR}/target.dmg
+            --flavor mochitest
+            --output $MOZ_FETCHES_DIR/../artifacts
+            --hooks toolkit/components/ml/tests/tools/hooks_local_hub.py
+            toolkit/components/ml/tests/browser/browser_ml_intent_perf.js
+
+ml-perf-pdfjs-alt-text:
+    fetches:
+        fetch:
+            - ort.jsep.wasm
+            - mozilla-distilvit
+    description: Run PDF.js alt-text image-to-text model
+    treeherder:
+        symbol: perftest(ml-perf-pdfjs-alt-text)
+        tier: 2
+    attributes:
+        batch: false
+        cron: false
+    run-on-projects: [autoland, mozilla-central]
+    run:
+        command: >-
+            mkdir -p $MOZ_FETCHES_DIR/../artifacts &&
+            cd $MOZ_FETCHES_DIR &&
+            python3 python/mozperftest/mozperftest/runner.py
+            --mochitest-binary ${MOZ_FETCHES_DIR}/target.dmg
+            --flavor mochitest
+            --output $MOZ_FETCHES_DIR/../artifacts
+            --hooks toolkit/components/ml/tests/tools/hooks_local_hub.py
+            toolkit/components/ml/tests/browser/browser_ml_pdfjs_alt_text_perf.js
+
 ml-perf-autofill:
     fetches:
         fetch:
