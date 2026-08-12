@@ -106,14 +106,6 @@ const perfMetadata = {
   },
 };
 
-for (let metric of METRICS) {
-  perfMetadata.options.default.perfherder_metrics.push({
-    name: metric,
-    unit: metric.includes("latency") ? "ms" : "MiB",
-    shouldAlert: false,
-  });
-}
-
 requestLongerTimeout(10);
 
 async function runEngineWithMetrics(

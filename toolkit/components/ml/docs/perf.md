@@ -73,8 +73,6 @@ Available git-based models from the YAML:
 - mozilla-ner -> path-prefix: onnx-models/Mozilla/distilbert-uncased-NER-LoRA/main/
 - mozilla-intent -> path-prefix: onnx-models/Mozilla/mobilebert-uncased-finetuned-LoRA-intent-classifier/main/
 - mozilla-autofill -> path-prefix: onnx-models/Mozilla/tinybert-uncased-autofill/main/
-- distilbart-cnn-12-6 -> path-prefix: onnx-models/Mozilla/distilbart-cnn-12-6/main/
-- qwen2.5-0.5-instruct -> path-prefix: onnx-models/Mozilla/Qwen2.5-0.5B-Instruct/main/
 - mozilla-smart-tab-topic -> path-prefix: onnx-models/Mozilla/smart-tab-topic/main/
 - mozilla-smart-tab-emb -> path-prefix: onnx-models/Mozilla/smart-tab-embedding/main/
 

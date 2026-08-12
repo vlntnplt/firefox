@@ -39,7 +39,7 @@ const perfMetadata = {
         },
         {
           name: "inference-total-memory-usage",
-          unit: "ms",
+          unit: "MiB",
           shouldAlert: false,
         },
       ],

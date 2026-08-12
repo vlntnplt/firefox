@@ -16,7 +16,6 @@ TALOS_LINUX_1804_TESTS = {
 
 # Perftest jobs that must remain on linux1804
 PERFTEST_LINUX_1804_TESTS = {
-    "ml-summarizer-perf",
     "ml-perf-autofill",
     "ml-perf-smart-tab-cluster",
     "ml-perf-suggest-inf",
@@ -25,7 +24,6 @@ PERFTEST_LINUX_1804_TESTS = {
     "ml-multi-perf",
     "ml-perf",
     "ml-perf-smart-tab",
-    "ml-perf-speecht5-tts",
     "ml-perf-suggest-ft",
     "ml-security-perf",
     "tr8ns-perf-basememory",
