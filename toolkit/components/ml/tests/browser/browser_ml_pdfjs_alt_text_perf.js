@@ -104,7 +104,7 @@ add_task(async function test_ml_pdfjs_alt_text() {
 
   // Alt text is generated on demand when the user opens the alt-text dialog,
   // so the engine is usually cold on first use.
-  await perfTest({
+  await runMLPerfTest({
     name: "pdfjs-alt-text",
     options,
     request,

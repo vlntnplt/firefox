@@ -77,7 +77,7 @@ async function runIntentModel({ perfName, featureId, modelId }) {
   // Cold start matters more here than for most features: the engine is created
   // lazily inside getPromptIntent() on the first prompt of a session, so the
   // first user interaction pays the full initialization cost.
-  await perfTest({
+  await runMLPerfTest({
     name: perfName,
     options,
     request,

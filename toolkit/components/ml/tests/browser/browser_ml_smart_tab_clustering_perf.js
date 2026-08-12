@@ -58,7 +58,7 @@ function generateSamples(labels, embeddings, n) {
   };
 }
 
-async function generateEmbeddings(textList) {
+async function generateEmbeddings(textList, backend) {
   const options = new PipelineOptions({
     taskName: "feature-extraction",
     modelId: "Mozilla/smart-tab-embedding",
@@ -66,6 +66,7 @@ async function generateEmbeddings(textList) {
     modelRevision: "main",
     dtype: "q8",
     timeoutMS: -1,
+    backend,
   });
   const requestInfo = {
     inputArgs: textList,
@@ -84,7 +85,7 @@ async function generateEmbeddings(textList) {
   return output;
 }
 
-async function runTopicModel(texts, keywords = []) {
+async function runTopicModel(texts, keywords = [], backend) {
   const stgManager = new SmartTabGroupingManager();
 
   const options = new PipelineOptions({
@@ -94,6 +95,7 @@ async function runTopicModel(texts, keywords = []) {
     modelRevision: "main",
     dtype: "q8",
     timeoutMS: 2 * 60 * 1000,
+    backend,
   });
   const requestInfo = {
     inputArgs: stgManager.createModelInput(keywords, texts),
@@ -126,14 +128,21 @@ function makeUrlTab(url, label, { groupId = null } = {}) {
   };
 }
 
+// Keyed "SINGLE-TAB-<measurement>-<tag>"; reported after all backends ran.
 const singleTabMetrics = {};
-singleTabMetrics["SINGLE-TAB-LATENCY"] = [];
-singleTabMetrics["SINGLE-TAB-LOGISTIC-REGRESSION-LATENCY"] = [];
-singleTabMetrics["SINGLE-TAB-TOPIC-LATENCY"] = [];
-// measure latency with domain feature
-singleTabMetrics["SINGLE-TAB-LR-WITH-DOMAIN-LATENCY"] = [];
+
+function pushMetric(metrics, key, value) {
+  (metrics[key] = metrics[key] || []).push(value);
+}
 
 add_task(async function test_clustering_nearest_neighbors() {
+  await runMLPerfTestForEachBackend({
+    name: "STG-NEAREST-NEIGHBORS",
+    run: runNearestNeighbors,
+  });
+});
+
+async function runNearestNeighbors({ backend, tag }) {
   const modelHubRootUrl = Services.env.get("MOZ_MODELS_HUB");
   const { cleanup } = await perfSetup({
     prefs: [["browser.ml.modelHubRootUrl", modelHubRootUrl]],
@@ -146,7 +155,7 @@ add_task(async function test_clustering_nearest_neighbors() {
     "_generateEmbeddings"
   );
   generateEmbeddingsStub.callsFake(async textList => {
-    return await generateEmbeddings(textList);
+    return await generateEmbeddings(textList, backend);
   });
 
   const labelsPath = `gen_set_2_labels.tsv`;
@@ -162,7 +171,11 @@ add_task(async function test_clustering_nearest_neighbors() {
     thresholdMills: 275,
   });
   const endTime = performance.now();
-  singleTabMetrics["SINGLE-TAB-LATENCY"].push(endTime - startTime);
+  pushMetric(
+    singleTabMetrics,
+    `SINGLE-TAB-LATENCY-${tag}`,
+    endTime - startTime
+  );
   const titles = similarTabs.map(s => s.label);
   Assert.equal(
     titles.length,
@@ -186,9 +199,16 @@ add_task(async function test_clustering_nearest_neighbors() {
   generateEmbeddingsStub.restore();
   await EngineProcess.destroyMLEngine();
   await cleanup();
-});
+}
 
 add_task(async function test_clustering_logistic_regression() {
+  await runMLPerfTestForEachBackend({
+    name: "STG-LOGISTIC-REGRESSION",
+    run: runLogisticRegression,
+  });
+});
+
+async function runLogisticRegression({ backend, tag }) {
   const modelHubRootUrl = Services.env.get("MOZ_MODELS_HUB");
   const { cleanup } = await perfSetup({
     prefs: [["browser.ml.modelHubRootUrl", modelHubRootUrl]],
@@ -201,7 +221,7 @@ add_task(async function test_clustering_logistic_regression() {
     "_generateEmbeddings"
   );
   generateEmbeddingsStub.callsFake(async textList => {
-    return await generateEmbeddings(textList);
+    return await generateEmbeddings(textList, backend);
   });
 
   const labelsPath = `gen_set_2_labels.tsv`;
@@ -216,7 +236,9 @@ add_task(async function test_clustering_logistic_regression() {
     groupLabel: "Travel Planning",
   });
   const endTime = performance.now();
-  singleTabMetrics["SINGLE-TAB-LOGISTIC-REGRESSION-LATENCY"].push(
+  pushMetric(
+    singleTabMetrics,
+    `SINGLE-TAB-LOGISTIC-REGRESSION-LATENCY-${tag}`,
     endTime - startTime
   );
   const titles = similarTabs.map(s => s.label);
@@ -237,106 +259,19 @@ add_task(async function test_clustering_logistic_regression() {
   generateEmbeddingsStub.restore();
   await EngineProcess.destroyMLEngine();
   await cleanup();
-});
+}
 
 // test domain feature for Logistic Regression
 add_task(
   async function test_clustering_logistic_regression_domain_preference() {
-    const modelHubRootUrl = Services.env.get("MOZ_MODELS_HUB");
-    const { cleanup } = await perfSetup({
-      prefs: [["browser.ml.modelHubRootUrl", modelHubRootUrl]],
+    await runMLPerfTestForEachBackend({
+      name: "STG-LR-WITH-DOMAIN",
+      run: runLogisticRegressionWithDomain,
     });
-
-    const stgManager = new SmartTabGroupingManager();
-
-    let generateEmbeddingsStub = sinon.stub(
-      SmartTabGroupingManager.prototype,
-      "_generateEmbeddings"
-    );
-    generateEmbeddingsStub.callsFake(async textList => {
-      return await generateEmbeddings(textList);
-    });
-
-    const sharedTitle = "Smart Tab Grouping deep dive";
-
-    const anchor0 = makeUrlTab(
-      "https://docs.google.com/document/d/1-smart-tab-grouping-deep-dive/edit",
-      sharedTitle,
-      { groupId: "stg-group" }
-    );
-    const anchor1 = makeUrlTab(
-      "https://docs.google.com/document/d/1-smart-tab-grouping-deep-dive-2/edit",
-      sharedTitle,
-      { groupId: "stg-group" }
-    );
-
-    const candidateSameDomain = makeUrlTab(
-      "https://docs.google.com/document/d/1-smart-tab-grouping-deep-dive-3/edit",
-      sharedTitle
-    );
-    const candidateOtherDomain = makeUrlTab(
-      "https://example.com/smart-tab-grouping-deep-dive-3",
-      sharedTitle
-    );
-
-    const unrelated = makeUrlTab(
-      "https://www.youtube.com/watch?v=xyz",
-      "Cute cat compilation 2025"
-    );
-
-    const allTabs = [
-      anchor0,
-      anchor1,
-      candidateSameDomain,
-      candidateOtherDomain,
-      unrelated,
-    ];
-
-    const groupedIndices = [0, 1];
-    const alreadyGroupedIndices = [];
-    const groupLabel = sharedTitle;
-
-    const startTime = performance.now();
-    const similarTabs = await stgManager.findSimilarTabsLogisticRegression({
-      allTabs,
-      groupedIndices,
-      alreadyGroupedIndices,
-      groupLabel,
-    });
-    const endTime = performance.now();
-
-    singleTabMetrics["SINGLE-TAB-LR-WITH-DOMAIN-LATENCY"].push(
-      endTime - startTime
-    );
-
-    Assert.greaterOrEqual(
-      similarTabs.length,
-      1,
-      "Logistic regression with domain should return at least one candidate"
-    );
-
-    const first = similarTabs[0];
-
-    Assert.equal(
-      first.linkedBrowser.currentURI.spec,
-      candidateSameDomain.linkedBrowser.currentURI.spec,
-      "Candidate sharing the anchors' base domain should be ranked first when text and group label match"
-    );
-
-    const titles = similarTabs.map(t => t.label);
-    Assert.ok(
-      !titles.includes("Cute cat compilation 2025"),
-      "An obviously unrelated tab should not be selected"
-    );
-
-    generateEmbeddingsStub.restore();
-    await EngineProcess.destroyMLEngine();
-    await cleanup();
   }
 );
 
-/// test a trickier example with subdomains
-add_task(async function test_clustering_nn_vs_lr_realistic_example() {
+async function runLogisticRegressionWithDomain({ backend, tag }) {
   const modelHubRootUrl = Services.env.get("MOZ_MODELS_HUB");
   const { cleanup } = await perfSetup({
     prefs: [["browser.ml.modelHubRootUrl", modelHubRootUrl]],
@@ -349,7 +284,110 @@ add_task(async function test_clustering_nn_vs_lr_realistic_example() {
     "_generateEmbeddings"
   );
   generateEmbeddingsStub.callsFake(async textList => {
-    return await generateEmbeddings(textList);
+    return await generateEmbeddings(textList, backend);
+  });
+
+  const sharedTitle = "Smart Tab Grouping deep dive";
+
+  const anchor0 = makeUrlTab(
+    "https://docs.google.com/document/d/1-smart-tab-grouping-deep-dive/edit",
+    sharedTitle,
+    { groupId: "stg-group" }
+  );
+  const anchor1 = makeUrlTab(
+    "https://docs.google.com/document/d/1-smart-tab-grouping-deep-dive-2/edit",
+    sharedTitle,
+    { groupId: "stg-group" }
+  );
+
+  const candidateSameDomain = makeUrlTab(
+    "https://docs.google.com/document/d/1-smart-tab-grouping-deep-dive-3/edit",
+    sharedTitle
+  );
+  const candidateOtherDomain = makeUrlTab(
+    "https://example.com/smart-tab-grouping-deep-dive-3",
+    sharedTitle
+  );
+
+  const unrelated = makeUrlTab(
+    "https://www.youtube.com/watch?v=xyz",
+    "Cute cat compilation 2025"
+  );
+
+  const allTabs = [
+    anchor0,
+    anchor1,
+    candidateSameDomain,
+    candidateOtherDomain,
+    unrelated,
+  ];
+
+  const groupedIndices = [0, 1];
+  const alreadyGroupedIndices = [];
+  const groupLabel = sharedTitle;
+
+  const startTime = performance.now();
+  const similarTabs = await stgManager.findSimilarTabsLogisticRegression({
+    allTabs,
+    groupedIndices,
+    alreadyGroupedIndices,
+    groupLabel,
+  });
+  const endTime = performance.now();
+
+  pushMetric(
+    singleTabMetrics,
+    `SINGLE-TAB-LR-WITH-DOMAIN-LATENCY-${tag}`,
+    endTime - startTime
+  );
+
+  Assert.greaterOrEqual(
+    similarTabs.length,
+    1,
+    "Logistic regression with domain should return at least one candidate"
+  );
+
+  const first = similarTabs[0];
+
+  Assert.equal(
+    first.linkedBrowser.currentURI.spec,
+    candidateSameDomain.linkedBrowser.currentURI.spec,
+    "Candidate sharing the anchors' base domain should be ranked first when text and group label match"
+  );
+
+  const titles = similarTabs.map(t => t.label);
+  Assert.ok(
+    !titles.includes("Cute cat compilation 2025"),
+    "An obviously unrelated tab should not be selected"
+  );
+
+  generateEmbeddingsStub.restore();
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+}
+
+/// test a trickier example with subdomains
+add_task(async function test_clustering_nn_vs_lr_realistic_example() {
+  await runMLPerfTestForEachBackend({
+    name: "STG-NN-VS-LR",
+    run: runNearestNeighborsVsLr,
+  });
+});
+
+async function runNearestNeighborsVsLr({ backend }) {
+  const modelHubRootUrl = Services.env.get("MOZ_MODELS_HUB");
+  const { cleanup } = await perfSetup({
+    prefs: [["browser.ml.modelHubRootUrl", modelHubRootUrl]],
+  });
+
+  const stgManager = new SmartTabGroupingManager();
+
+  let generateEmbeddingsStub = sinon.stub(
+    SmartTabGroupingManager.prototype,
+    "_generateEmbeddings"
+  );
+  generateEmbeddingsStub.callsFake(async textList => {
+    return await generateEmbeddings(textList, backend);
   });
 
   const anchor0 = makeUrlTab(
@@ -424,9 +462,17 @@ add_task(async function test_clustering_nn_vs_lr_realistic_example() {
   generateEmbeddingsStub.restore();
   await EngineProcess.destroyMLEngine();
   await cleanup();
-});
+}
 
 add_task(async function test_topic_model() {
+  await runMLPerfTestForEachBackend({
+    name: "STG-TOPIC",
+    run: runTopicModelTask,
+  });
+  reportMetrics(singleTabMetrics);
+});
+
+async function runTopicModelTask({ backend, tag }) {
   const modelHubRootUrl = Services.env.get("MOZ_MODELS_HUB");
   const { cleanup } = await perfSetup({
     prefs: [["browser.ml.modelHubRootUrl", modelHubRootUrl]],
@@ -442,22 +488,27 @@ add_task(async function test_topic_model() {
     { input: "The Best Trail Running Shoes", output: " Trail Running Shoes" },
     { input: "Top Web Sites Across the Web", output: " Web Sites" },
   ];
-  for (const text of texts) {
-    const startTime = performance.now();
-    const output = await runTopicModel([text.input]);
-    Assert.equal(
-      output[0],
-      text.output,
-      "Output from topic model should match expected"
-    );
-    const endTime = performance.now();
-    singleTabMetrics["SINGLE-TAB-TOPIC-LATENCY"].push(endTime - startTime);
+  try {
+    for (const text of texts) {
+      const startTime = performance.now();
+      const output = await runTopicModel([text.input], [], backend);
+      Assert.equal(
+        output[0],
+        text.output,
+        "Output from topic model should match expected"
+      );
+      const endTime = performance.now();
+      pushMetric(
+        singleTabMetrics,
+        `SINGLE-TAB-TOPIC-LATENCY-${tag}`,
+        endTime - startTime
+      );
+    }
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
   }
-
-  reportMetrics(singleTabMetrics);
-  await EngineProcess.destroyMLEngine();
-  await cleanup();
-});
+}
 
 const N_TABS = [5];
 const methods = [
@@ -467,13 +518,15 @@ const methods = [
 ];
 const nTabMetrics = {};
 
-for (let method of methods) {
-  for (let n of N_TABS) {
-    nTabMetrics[`${method}-${n}-TABS-latency`] = [];
-  }
-}
-
 add_task(async function test_n_clustering() {
+  await runMLPerfTestForEachBackend({
+    name: "STG-N-CLUSTERING",
+    run: runNClustering,
+  });
+  reportMetrics(nTabMetrics);
+});
+
+async function runNClustering({ backend, tag }) {
   const modelHubRootUrl = Services.env.get("MOZ_MODELS_HUB");
   const { cleanup } = await perfSetup({
     prefs: [["browser.ml.modelHubRootUrl", modelHubRootUrl]],
@@ -486,7 +539,7 @@ add_task(async function test_n_clustering() {
     "_generateEmbeddings"
   );
   generateEmbeddingsStub.callsFake(async textList => {
-    return await generateEmbeddings(textList);
+    return await generateEmbeddings(textList, backend);
   });
 
   const labelsPath = `gen_set_2_labels.tsv`;
@@ -518,15 +571,15 @@ add_task(async function test_n_clustering() {
           });
         }
         let endTime = performance.now();
-        const key = `${method}-${n}-TABS-latency`;
-        if (key in nTabMetrics) {
-          nTabMetrics[key].push(endTime - startTime);
-        }
+        pushMetric(
+          nTabMetrics,
+          `${method}-${n}-TABS-latency-${tag}`,
+          endTime - startTime
+        );
         await EngineProcess.destroyMLEngine();
       }
     }
   }
-  reportMetrics(nTabMetrics);
   generateEmbeddingsStub.restore();
   await cleanup();
-});
+}

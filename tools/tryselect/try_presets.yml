@@ -405,6 +405,18 @@ media-full:
     intersect_query:
         - "'debug | '-asan | '-tsan"
 
+ml-perf:
+    selector: fuzzy
+    description: >-
+        Run the ml-* perftests on every desktop platform, rather than Linux
+        only like "ai-perf". ONNX tests run as one job per backend
+        (-native/-wasm task variants). Compare the results with:
+        ./mach python toolkit/components/ml/tests/tools/ml_compare_onnx_wasm.py
+        -- --revision <rev>
+    query:
+        - "^perftest 'ml-"
+    full: true
+
 mochitest-bc:
     description: >-
         Runs mochitest-browser-chrome on all Desktop platforms in both opt
