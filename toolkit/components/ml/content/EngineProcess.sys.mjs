@@ -18,6 +18,13 @@
 export const DEFAULT_ENGINE_ID = "default-engine";
 
 /**
+ * Set once the native ONNX runtime availability has been reported to telemetry,
+ * keeping the one-off probe to a single run per profile.
+ */
+const ONNX_AVAILABILITY_REPORTED_PREF =
+  "browser.ml.onnxNativeAvailabilityReported";
+
+/**
  * Supported backends.
  */
 export const BACKENDS = Object.freeze({
@@ -1162,6 +1169,19 @@ export class EngineProcess {
    */
   static #nativeOnnxRuntimeAvailabilityPromise = null;
 
+  static #nativeOnnxRuntimeAvailabilityReportSettled = Promise.withResolvers();
+
+  /**
+   * Resolves once `maybeReportNativeOnnxRuntimeAvailability` has settled at
+   * least once, whether or not it recorded anything. Lets tests order
+   * themselves after the `browser-idle-startup` invocation of the report.
+   *
+   * @returns {Promise<void>}
+   */
+  static get nativeOnnxRuntimeAvailabilityReportSettled() {
+    return EngineProcess.#nativeOnnxRuntimeAvailabilityReportSettled.promise;
+  }
+
   /**
    * Get a reference to all running "inference" processes.
    *
@@ -1200,6 +1220,49 @@ export class EngineProcess {
     }
 
     return EngineProcess.#getEngineActor({ actorName: "MLEngine" });
+  }
+
+  /**
+   * Probes and reports the native ONNX runtime availability to telemetry, at
+   * most once per profile. Registered as a `browser-idle-startup` entry.
+   *
+   * First run of this probe spawns an inference process and calls `requestIsNativeOnnxRuntimeAvailable`
+   * to determine availability, and sets browser.ml.onnxNativeAvailabilityReported to true.
+   *
+   * Subsequent runs check browser.ml.onnxNativeAvailabilityReported to make sure the probe is only ever run once.
+   *
+   * @returns {Promise<void>}
+   */
+  static async maybeReportNativeOnnxRuntimeAvailability() {
+    try {
+      if (
+        !Services.prefs.getBoolPref("browser.ml.enable") ||
+        Services.prefs.getBoolPref(ONNX_AVAILABILITY_REPORTED_PREF)
+      ) {
+        return;
+      }
+
+      const resultPromise = EngineProcess.requestIsNativeOnnxRuntimeAvailable();
+      const availabilityPromise =
+        EngineProcess.#nativeOnnxRuntimeAvailabilityPromise;
+      const available = await resultPromise;
+
+      // A definitive result stays cached, while a failed probe clears the
+      // cached promise to allow retries, which tells a real `unavailable`
+      // apart from a `probe_error`.
+      let label = "probe_error";
+      if (
+        EngineProcess.#nativeOnnxRuntimeAvailabilityPromise ===
+        availabilityPromise
+      ) {
+        label = available ? "available" : "unavailable";
+      }
+
+      Services.prefs.setBoolPref(ONNX_AVAILABILITY_REPORTED_PREF, true);
+      Glean.firefoxAiRuntime.onnxNativeAvailability[label].add(1);
+    } finally {
+      EngineProcess.#nativeOnnxRuntimeAvailabilityReportSettled.resolve();
+    }
   }
 
   /**

@@ -2352,6 +2352,10 @@ pref("browser.ml.linkPreview.supportedLocales", "en");
 
 pref("browser.ml.pageAssist.enabled", false);
 
+// Set once the native ONNX runtime availability has been reported to telemetry,
+// so that the one-off probe behind it runs at most once per profile.
+pref("browser.ml.onnxNativeAvailabilityReported", false);
+
 // Smart Window Feature
 pref("browser.smartwindow.enabled", false);
 // Default endpoint for preset models
