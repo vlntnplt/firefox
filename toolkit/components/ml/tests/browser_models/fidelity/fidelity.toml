@@ -21,6 +21,7 @@ support-files = [
   "mlsuggest_trace.json",
   "smart_intent_trace.json",
   "smarttab_topic_trace.json",
+  "smartwindow_topic_trace.json",
 ]
 
 ["browser_ml_fidelity_embeddings.js"]
@@ -34,3 +35,5 @@ support-files = [
 ["browser_ml_fidelity_smart_intent.js"]
 
 ["browser_ml_fidelity_smarttab_topic.js"]
+
+["browser_ml_fidelity_smartwindow_topic.js"]
