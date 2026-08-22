@@ -1,0 +1,309 @@
+{
+  "schema_version": 1,
+  "models": {
+    "intent": {
+      "model_id": "mozilla/mobilebert-query-intent-detection",
+      "revision": "v0.4.0"
+    },
+    "intent_en_fr": {
+      "model_id": "mozilla/query-intent-detection-en-fr",
+      "revision": "v0.1.2"
+    }
+  },
+  "reference": {
+    "runtime": "firefox",
+    "backend": "onnx-native",
+    "device": "cpu",
+    "dtype": "fp32",
+    "note": "produced by driving IntentClassifier.getPromptIntent at fp32, so the trace measures the cost of the q8 weights that ship. Examples whose search probability sits within 0.3 of the 0.8 threshold getPromptIntent applies were rejected, so the recorded intent is usable as an oracle."
+  },
+  "tolerances": {
+    "kld_max": {
+      "intent": 0.1,
+      "intent_en_fr": 0.05
+    },
+    "result_accuracy_min": 1.0
+  },
+  "examples": [
+    {
+      "id": "en.weather",
+      "input": {
+        "query": "weather in toronto",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [-4.655242, -1.974431]
+        }
+      },
+      "result": "search"
+    },
+    {
+      "id": "en.headphones",
+      "input": {
+        "query": "best noise cancelling headphones",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [-4.540659, -2.316209]
+        }
+      },
+      "result": "search"
+    },
+    {
+      "id": "en.timezone",
+      "input": {
+        "query": "san francisco time zone",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [-5.747749, -2.658276]
+        }
+      },
+      "result": "search"
+    },
+    {
+      "id": "en.recipe",
+      "input": {
+        "query": "sourdough starter recipe",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [-1.882704, -3.95364]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "en.convert",
+      "input": {
+        "query": "convert 100 usd to eur",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [-0.813516, -3.904726]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "en.explain",
+      "input": {
+        "query": "explain quantum entanglement in simple terms",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [0.879456, -3.449903]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "en.haiku",
+      "input": {
+        "query": "write a haiku about a rainy afternoon",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [-0.552752, -5.150112]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "en.rewrite",
+      "input": {
+        "query": "rewrite this paragraph to sound more formal",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [0.953738, -5.973616]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "en.python",
+      "input": {
+        "query": "python list comprehension syntax",
+        "region": "US"
+      },
+      "outputs": {
+        "intent": {
+          "dims": [1, 2],
+          "logits": [-3.46983, -3.937739]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "fr.connexion",
+      "input": {
+        "query": "facebook connexion",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, 2.623]
+        }
+      },
+      "result": "search"
+    },
+    {
+      "id": "fr.actualites",
+      "input": {
+        "query": "le monde actualités",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, 3.639293]
+        }
+      },
+      "result": "search"
+    },
+    {
+      "id": "fr.essence",
+      "input": {
+        "query": "prix du carburant aujourd hui",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, 3.932116]
+        }
+      },
+      "result": "search"
+    },
+    {
+      "id": "fr.restaurant",
+      "input": {
+        "query": "meilleur restaurant italien à lyon",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, 2.296116]
+        }
+      },
+      "result": "search"
+    },
+    {
+      "id": "fr.recette",
+      "input": {
+        "query": "recette tarte tatin facile",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, -3.346828]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "fr.horaires",
+      "input": {
+        "query": "horaires train paris marseille",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, -0.909595]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "fr.codepostal",
+      "input": {
+        "query": "code postal bordeaux",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, -1.487115]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "fr.cartegrise",
+      "input": {
+        "query": "faire une carte grise en ligne",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, -5.778777]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "fr.explique",
+      "input": {
+        "query": "explique-moi la relativité générale simplement",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, -4.64403]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "fr.redige",
+      "input": {
+        "query": "rédige un courriel poli pour annuler un rendez-vous",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, -4.740737]
+        }
+      },
+      "result": "chat"
+    },
+    {
+      "id": "enfr.explain",
+      "input": {
+        "query": "explain quantum entanglement in simple terms",
+        "region": "FR"
+      },
+      "outputs": {
+        "intent_en_fr": {
+          "dims": [1, 2],
+          "logits": [0, -1.700245]
+        }
+      },
+      "result": "chat"
+    }
+  ]
+}

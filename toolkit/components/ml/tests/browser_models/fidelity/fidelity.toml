@@ -19,6 +19,7 @@ support-files = [
   "formfill_trace.json",
   "formfill_unified_trace.json",
   "mlsuggest_trace.json",
+  "smart_intent_trace.json",
   "smarttab_topic_trace.json",
 ]
 
@@ -29,5 +30,7 @@ support-files = [
 ["browser_ml_fidelity_formfill_unified.js"]
 
 ["browser_ml_fidelity_mlsuggest.js"]
+
+["browser_ml_fidelity_smart_intent.js"]
 
 ["browser_ml_fidelity_smarttab_topic.js"]
