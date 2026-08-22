@@ -90,6 +90,8 @@ export class MLEngineWorker {
   /**
    * @param {ArrayBuffer} wasm
    * @param {object} options received as an object, converted to a PipelineOptions instance
+   * @returns {Promise<?{options: object, effective: object}>} How the backend
+   *   resolved the options, or null for backends that do not report it.
    */
   async initializeEngine(wasm, options) {
     this.#sessionId = lazy.generateUUID();
@@ -101,6 +103,7 @@ export class MLEngineWorker {
         // once pipeline is fully initialized.
         await this.notifyModelDownloadComplete();
       });
+    return this.#pipeline.getResolvedOptions?.() ?? null;
   }
   /**
    * Run the worker.
@@ -124,6 +127,13 @@ export class MLEngineWorker {
         ? data => self.callMainThread("onInferenceProgress", [data])
         : null
     );
+  }
+
+  /**
+   * @returns {?object} The model output of the last run, if it was recorded.
+   */
+  takeModelOutput() {
+    return this.#pipeline?.takeModelOutput?.() ?? null;
   }
 
   /**

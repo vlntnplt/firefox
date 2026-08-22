@@ -1044,6 +1044,32 @@ export class MLEngine {
   engineStatus = "uninitialized";
 
   /**
+   * How the backend resolved the options this engine was created with, in the
+   * same vocabulary the caller used to request them. Null until the engine is
+   * ready, and for backends that do not report it.
+   *
+   * @type {?{options: object, effective: object}}
+   */
+  resolvedOptions = null;
+
+  /**
+   * Set by tests to record every request and response engines serve, so a test
+   * can observe what a feature asked its engines without creating engines of
+   * its own alongside the feature's.
+   *
+   * @type {boolean}
+   */
+  static recordRuns = false;
+
+  /**
+   * Requests and responses this engine served, populated only while
+   * MLEngine.recordRuns is set.
+   *
+   * @type {Array<{request: object, response: object}>}
+   */
+  recordedRuns = [];
+
+  /**
    * Whether this engine is currently registered as an "ipc:content-shutdown"
    * observer. Used to avoid removing an observer that was never added, which
    * would throw NS_ERROR_ILLEGAL_VALUE.
@@ -1399,14 +1425,23 @@ export class MLEngine {
           if (data.resolvedBackend) {
             this.pipelineOptions.backend = data.resolvedBackend;
           }
+          // How the backend resolved every option, for callers that need to
+          // check what was actually served rather than what was requested.
+          this.resolvedOptions = data.resolvedOptions ?? null;
           newPortResolvers.resolve();
         }
 
         break;
       }
       case "EnginePort:RunResponse": {
-        const { response, error, requestId, resourcesBefore, resourcesAfter } =
-          data;
+        const {
+          response,
+          modelOutput,
+          error,
+          requestId,
+          resourcesBefore,
+          resourcesAfter,
+        } = data;
         const request = this.#requests.get(requestId);
         if (request) {
           if (error) {
@@ -1426,6 +1461,9 @@ export class MLEngine {
               // Attach resource metrics from the child process
               validatedResponse.resourcesBefore = resourcesBefore;
               validatedResponse.resourcesAfter = resourcesAfter;
+              // Hangs off the per-request context rather than the engine, so
+              // interleaved runs cannot pick up each other's output.
+              request.modelOutput = modelOutput ?? null;
               request.resolve(validatedResponse);
             }
           }
@@ -1588,13 +1626,26 @@ export class MLEngine {
       {
         type: "EnginePort:Run",
         requestId,
-        request: validatedRequest,
+        // A recorded run keeps the model's output too: a top-1 label and
+        // score cannot be compared across configurations when the argmax
+        // differs.
+        request: MLEngine.recordRuns
+          ? { ...validatedRequest, recordModelOutput: true }
+          : validatedRequest,
         engineRunOptions: { enableInferenceProgress: false },
       },
       transferables
     );
 
     const result = await resolvers.promise;
+
+    if (MLEngine.recordRuns) {
+      this.recordedRuns.push({
+        request: validatedRequest,
+        response: result,
+        modelOutput: resolvers.modelOutput ?? null,
+      });
+    }
 
     this.telemetry.recordEngineRun({
       beforeRun,

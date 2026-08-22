@@ -604,15 +604,51 @@ async function checkGPUSupport() {
 /**
  * Represents a pipeline for processing machine learning tasks.
  */
+// Options this backend reads. Anything outside it belongs to another backend
+// and is reported as dropped rather than served.
+const ONNX_OPTION_KEYS = [
+  "engineId",
+  "featureId",
+  "taskName",
+  "modelHub",
+  "modelHubRootUrl",
+  "modelHubUrlTemplate",
+  "timeoutMS",
+  "modelId",
+  "modelRevision",
+  "tokenizerId",
+  "tokenizerRevision",
+  "processorId",
+  "processorRevision",
+  "logLevel",
+  "device",
+  "dtype",
+  "numThreads",
+  "executionPriority",
+  "useExternalDataFormat",
+  "backend",
+];
+
 export class ONNXPipeline {
   #mlEngineWorker = null;
   #model = null;
+
+  /** @type {Array<{session: string, outputs: object}>} */
+  #modelOutput = [];
+
+  #recordModelOutput = false;
   #tokenizer = null;
   #processor = null;
   #pipelineFunction = null;
   #genericPipelineFunction = null;
   #isReady = false;
   #config = null;
+
+  /** @type {?string} Device actually handed to transformers.js. */
+  #resolvedDevice = null;
+
+  /** @type {object} Session options actually handed to onnxruntime. */
+  #resolvedSessionOptions = {};
   #metrics = null;
   #errorFactory = null;
   #modelConfig = null;
@@ -776,7 +812,83 @@ export class ONNXPipeline {
       }
     }
     this.#config = config;
+    this.#resolvedDevice = device;
+    this.#resolvedSessionOptions = session_options;
     lazy.console.debug("Pipeline initialized");
+  }
+
+  /**
+   * Reports the options as the pipeline actually resolved them, in the same
+   * vocabulary the caller used to request them. Callers compare this against
+   * what they asked for: a key they set that comes back different (or absent)
+   * was not served.
+   *
+   * `effective` carries the values that have no counterpart in the option
+   * vocabulary because the backend derives them: the device string handed to
+   * transformers.js and the onnxruntime session options.
+   *
+   * @returns {{options: object, effective: object}}
+   */
+  getResolvedOptions() {
+    const keys = [...ONNX_OPTION_KEYS];
+    if (this.#config?.backend === WASM_BACKEND) {
+      keys.push("runtimeFilename");
+    }
+
+    const options = {};
+    for (const key of keys) {
+      const value = this.#config?.[key];
+      if (value === undefined || typeof value === "function") {
+        continue;
+      }
+      options[key] = value;
+    }
+    return {
+      options,
+      effective: {
+        device: this.#resolvedDevice,
+        sessionOptions: { ...this.#resolvedSessionOptions },
+      },
+    };
+  }
+
+  /**
+   * Records what the model returns before the task head reduces it. The
+   * transformers.js pipelines run the session themselves and hand back only a
+   * post-processed result -- a top-1 label and score -- which is not
+   * comparable across configurations when the argmax differs. Wrapping the
+   * session is the only place the raw output is still available.
+   *
+   * @param {object} model - A transformers.js model holding the session.
+   */
+  #wrapSessionForRecording(model) {
+    // A model can hold several sessions under names of its own choosing, and
+    // run each of them more than once: a seq2seq has encoder_model and
+    // decoder_model_merged, and generation calls the decoder once per token.
+    for (const [name, session] of Object.entries(model?.sessions ?? {})) {
+      if (!session?.run || session._mozModelOutputWrapped) {
+        continue;
+      }
+      const original = session.run.bind(session);
+      session.run = async (...args) => {
+        const output = await original(...args);
+        if (!this.#recordModelOutput) {
+          return output;
+        }
+        const outputs = {};
+        for (const [key, tensor] of Object.entries(output)) {
+          if (tensor?.data && tensor?.dims) {
+            outputs[key] = {
+              data: Array.from(tensor.data),
+              dims: [...tensor.dims],
+            };
+          }
+        }
+        this.#modelOutput.push({ session: name, outputs });
+        return output;
+      };
+      session._mozModelOutputWrapped = true;
+    }
   }
 
   async #metricsSnapShot({ name, snapshot = {} }) {
@@ -885,6 +997,7 @@ export class ONNXPipeline {
           lazy.console.debug("Initializing pipeline");
           try {
             this.#genericPipelineFunction = await this.#genericPipelineFunction;
+            this.#wrapSessionForRecording(this.#genericPipelineFunction?.model);
             this.#isReady = true;
           } catch (error) {
             lazy.console.debug("Error initializing pipeline", error);
@@ -901,6 +1014,7 @@ export class ONNXPipeline {
                 this.#processor,
                 this.#modelConfig,
               ]);
+            this.#wrapSessionForRecording(this.#model);
             this.#isReady = true;
           } catch (error) {
             lazy.console.debug("Error initializing pipeline", error);
@@ -934,8 +1048,21 @@ export class ONNXPipeline {
    * @param {?function(ProgressAndStatusCallbackParams):void} inferenceProgressCallback A function to call to indicate inference progress.
    * @returns {Promise<object>} The result object from the pipeline execution.
    */
+  /**
+   * Returns every session run the last request made, in order, before the task
+   * head reduced them, and clears them. Null unless the run asked for it.
+   *
+   * @returns {?Array<{session: string, outputs: object}>}
+   */
+  takeModelOutput() {
+    const output = this.#modelOutput;
+    this.#modelOutput = [];
+    return output.length ? output : null;
+  }
+
   async run(request, requestId, inferenceProgressCallback = null) {
     lazy.console.debug("Running task: ", this.#config.taskName);
+    this.#recordModelOutput = !!request.recordModelOutput;
 
     /** @type {PipelineMetrics} */
     const metrics = {

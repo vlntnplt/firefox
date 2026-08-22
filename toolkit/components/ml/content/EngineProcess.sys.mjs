@@ -47,6 +47,56 @@ export const WASM_BACKENDS = [BACKENDS.onnx];
 
 /**
  * @constant
+ * @type {Array<string>}
+ * @description Every option a caller may set and the pipeline may serve. This
+ *              is the single source of truth for the option vocabulary: it
+ *              drives PipelineOptions.updateOptions, PipelineOptions.getOptions
+ *              and the resolved-options report emitted by the backends. An
+ *              option absent from this list is silently dropped, so adding a
+ *              knob to a backend means adding it here too.
+ */
+export const PIPELINE_OPTION_KEYS = Object.freeze([
+  "engineId",
+  "featureId",
+  "taskName",
+  "modelHub",
+  "modelHubRootUrl",
+  "modelHubUrlTemplate",
+  "timeoutMS",
+  "modelId",
+  "modelRevision",
+  "flowId",
+  "tokenizerId",
+  "tokenizerRevision",
+  "processorId",
+  "processorRevision",
+  "logLevel",
+  "runtimeFilename",
+  "device",
+  "dtype",
+  "numThreads",
+  "executionPriority",
+  "useExternalDataFormat",
+  "kvCacheDtype",
+  "numContext",
+  "numBatch",
+  "numUbatch",
+  "flashAttn",
+  "useMmap",
+  "useMlock",
+  "numThreadsDecoding",
+  "modelFile",
+  "backend",
+  "baseURL",
+  "apiKey",
+  "staticEmbeddingsOptions",
+  "serviceType",
+  "purpose",
+  "extraHeaders",
+]);
+
+/**
+ * @constant
  * @type {string}
  * @description Matches filenames with subdirectories, starting with alphanumeric or underscore,
                 and optionally ending with a dot followed by a 2-9 letter extension.
@@ -893,45 +943,7 @@ export class PipelineOptions {
    * @throws {Error} Throws an error if an invalid option is provided.
    */
   updateOptions(options) {
-    const allowedKeys = [
-      "engineId",
-      "featureId",
-      "taskName",
-      "modelHub",
-      "modelHubRootUrl",
-      "modelHubUrlTemplate",
-      "timeoutMS",
-      "modelId",
-      "modelRevision",
-      "flowId",
-      "tokenizerId",
-      "tokenizerRevision",
-      "processorId",
-      "processorRevision",
-      "logLevel",
-      "runtimeFilename",
-      "device",
-      "dtype",
-      "numThreads",
-      "executionPriority",
-      "useExternalDataFormat",
-      "kvCacheDtype",
-      "numContext",
-      "numBatch",
-      "numUbatch",
-      "flashAttn",
-      "useMmap",
-      "useMlock",
-      "numThreadsDecoding",
-      "modelFile",
-      "backend",
-      "baseURL",
-      "apiKey",
-      "staticEmbeddingsOptions",
-      "serviceType",
-      "purpose",
-      "extraHeaders",
-    ];
+    const allowedKeys = PIPELINE_OPTION_KEYS;
 
     if (options instanceof PipelineOptions) {
       options = options.getOptions();
@@ -1042,45 +1054,11 @@ export class PipelineOptions {
    * @returns {object} An object with the current options.
    */
   getOptions() {
-    return {
-      engineId: this.engineId,
-      featureId: this.featureId,
-      taskName: this.taskName,
-      modelHub: this.modelHub,
-      modelHubRootUrl: this.modelHubRootUrl,
-      modelHubUrlTemplate: this.modelHubUrlTemplate,
-      timeoutMS: this.timeoutMS,
-      modelId: this.modelId,
-      modelRevision: this.modelRevision,
-      flowId: this.flowId,
-      tokenizerId: this.tokenizerId,
-      tokenizerRevision: this.tokenizerRevision,
-      processorId: this.processorId,
-      processorRevision: this.processorRevision,
-      logLevel: this.logLevel,
-      runtimeFilename: this.runtimeFilename,
-      device: this.device,
-      dtype: this.dtype,
-      numThreads: this.numThreads,
-      executionPriority: this.executionPriority,
-      useExternalDataFormat: this.useExternalDataFormat,
-      kvCacheDtype: this.kvCacheDtype,
-      numContext: this.numContext,
-      numBatch: this.numBatch,
-      numUbatch: this.numUbatch,
-      flashAttn: this.flashAttn,
-      useMmap: this.useMmap,
-      useMlock: this.useMlock,
-      numThreadsDecoding: this.numThreadsDecoding,
-      modelFile: this.modelFile,
-      backend: this.backend,
-      baseURL: this.baseURL,
-      apiKey: this.apiKey,
-      staticEmbeddingsOptions: this.staticEmbeddingsOptions,
-      serviceType: this.serviceType,
-      purpose: this.purpose,
-      extraHeaders: this.extraHeaders,
-    };
+    const options = {};
+    for (const key of PIPELINE_OPTION_KEYS) {
+      options[key] = this[key];
+    }
+    return options;
   }
 
   /**
