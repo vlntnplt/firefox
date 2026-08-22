@@ -34,6 +34,7 @@ HWInference
 api
 notifications
 models
+fidelity
 perf
 extensions
 ```
