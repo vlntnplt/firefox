@@ -639,6 +639,10 @@ static const struct PropItems {
     {"hasSSE4_2", mozilla::supports_sse4_2},
     {"hasAVX", mozilla::supports_avx},
     {"hasAVX2", mozilla::supports_avx2},
+    {"hasFMA3", mozilla::supports_fma3},
+    {"hasAVXVNNI", mozilla::supports_avxvnni},
+    {"hasAVX512F", mozilla::supports_avx512f},
+    {"hasAVX512VNNI", mozilla::supports_avx512vnni},
     {"hasAES", mozilla::supports_aes},
     // ARM-specific bits.
     {"hasEDSP", mozilla::supports_edsp},

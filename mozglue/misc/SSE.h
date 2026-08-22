@@ -32,6 +32,8 @@
  *    mozilla::supports_sse4_2
  *    mozilla::supports_avx
  *    mozilla::supports_avx2
+ *    mozilla::supports_avx512f
+ *    mozilla::supports_avx512vnni
  *    mozilla::supports_aes
  *    mozilla::supports_sha
  *    mozilla::supports_sha512
@@ -250,6 +252,14 @@ extern bool MFBT_DATA avx2_enabled;
 #  if !defined(MOZILLA_PRESUME_AVXVNNI)
 extern bool MFBT_DATA avxvnni_enabled;
 #  endif
+
+#  if !defined(MOZILLA_PRESUME_AVX512F)
+extern bool MFBT_DATA avx512f_enabled;
+#  endif
+
+#  if !defined(MOZILLA_PRESUME_AVX512VNNI)
+extern bool MFBT_DATA avx512vnni_enabled;
+#  endif
 #  if !defined(MOZILLA_PRESUME_AES)
 extern bool MFBT_DATA aes_enabled;
 #  endif
@@ -397,6 +407,26 @@ inline bool supports_avxvnni() { return true; }
 inline bool supports_avxvnni() { return sse_private::avxvnni_enabled; }
 #else
 inline bool supports_avxvnni() { return false; }
+#endif
+
+#if defined(MOZILLA_PRESUME_AVX512F)
+#  define MOZILLA_MAY_SUPPORT_AVX512F 1
+inline bool supports_avx512f() { return true; }
+#elif defined(MOZILLA_SSE_HAVE_CPUID_DETECTION)
+#  define MOZILLA_MAY_SUPPORT_AVX512F 1
+inline bool supports_avx512f() { return sse_private::avx512f_enabled; }
+#else
+inline bool supports_avx512f() { return false; }
+#endif
+
+#if defined(MOZILLA_PRESUME_AVX512VNNI)
+#  define MOZILLA_MAY_SUPPORT_AVX512VNNI 1
+inline bool supports_avx512vnni() { return true; }
+#elif defined(MOZILLA_SSE_HAVE_CPUID_DETECTION)
+#  define MOZILLA_MAY_SUPPORT_AVX512VNNI 1
+inline bool supports_avx512vnni() { return sse_private::avx512vnni_enabled; }
+#else
+inline bool supports_avx512vnni() { return false; }
 #endif
 
 #if defined(MOZILLA_PRESUME_AES)
