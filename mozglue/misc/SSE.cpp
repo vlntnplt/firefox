@@ -237,6 +237,44 @@ MOZ_RUNINIT bool avx2_enabled = has_avx() && has_cpuid_bits(7u, ebx, (1u << 5));
 MOZ_RUNINIT bool avxvnni_enabled = has_cpuid_bits_ex(7u, eax, (1u << 4));
 #  endif
 
+#  if !defined(MOZILLA_PRESUME_AVX512F) || !defined(MOZILLA_PRESUME_AVX512VNNI)
+static bool has_avx512f() {
+#    if defined(MOZILLA_PRESUME_AVX512F)
+  return true;
+#    else
+  const unsigned OSXSAVE = 1u << 27;
+  const unsigned XSAVE = 1u << 26;
+
+  // AVX-512 needs the AVX state plus the three ZMM-related XCR0 bits, so a
+  // CPU that reports AVX512F is still unusable if the OS did not enable them.
+  const unsigned XMM_STATE = 1u << 1;
+  const unsigned YMM_STATE = 1u << 2;
+  const unsigned OPMASK_STATE = 1u << 5;
+  const unsigned ZMM_HI256_STATE = 1u << 6;
+  const unsigned HI16_ZMM_STATE = 1u << 7;
+  const unsigned AVX512_STATE =
+      XMM_STATE | YMM_STATE | OPMASK_STATE | ZMM_HI256_STATE | HI16_ZMM_STATE;
+
+  const unsigned AVX512F = 1u << 16;  // leaf 7 subleaf 0, ebx
+
+  return has_cpuid_bits(1u, ecx, OSXSAVE | XSAVE) &&
+         (xgetbv(0) & AVX512_STATE) == AVX512_STATE &&
+         has_cpuid_bits(7u, ebx, AVX512F);
+#    endif  // MOZILLA_PRESUME_AVX512F
+}
+#  endif  // !MOZILLA_PRESUME_AVX512F || !MOZILLA_PRESUME_AVX512VNNI
+
+#  if !defined(MOZILLA_PRESUME_AVX512F)
+MOZ_RUNINIT bool avx512f_enabled = has_avx512f();
+#  endif
+
+#  if !defined(MOZILLA_PRESUME_AVX512VNNI)
+// leaf 7 subleaf 0, ecx bit 11. Distinct from AVX-VNNI above, which is the
+// VEX-encoded form on 128/256-bit vectors.
+MOZ_RUNINIT bool avx512vnni_enabled =
+    has_avx512f() && has_cpuid_bits(7u, ecx, (1u << 11));
+#  endif
+
 #  if !defined(MOZILLA_PRESUME_AES)
 MOZ_RUNINIT bool aes_enabled = has_cpuid_bits(1u, ecx, (1u << 25));
 #  endif
