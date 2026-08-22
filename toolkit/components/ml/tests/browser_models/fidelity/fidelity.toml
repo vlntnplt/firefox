@@ -15,10 +15,13 @@ environment = ["MOZ_ALLOW_EXTERNAL_ML_HUB=true"]
 
 support-files = [
   "head.js",
+  "embeddings_trace.json",
   "formfill_trace.json",
   "formfill_unified_trace.json",
   "mlsuggest_trace.json",
 ]
+
+["browser_ml_fidelity_embeddings.js"]
 
 ["browser_ml_fidelity_formfill.js"]
 
