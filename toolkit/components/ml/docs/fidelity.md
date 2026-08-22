@@ -83,6 +83,22 @@ and `previous` or `next` for its neighbours.
 carries that text around inside the browser is a transport detail and stays out
 of the trace.
 
+A feature can ship several models for the same task and pick between them at
+runtime. The Smart Window intent classifier picks by home region, so each of
+its examples carries the region it was recorded under and the model that
+served it:
+
+```json
+{ "id": "fr.essence", "region": "FR", "model": "intent_en_fr",
+  "query": "prix du carburant aujourd hui",
+  "output": { "dims": [1, 2], "logits": ["..."] },
+  "intent": "search" }
+```
+
+The test sets the region and lets the feature choose, and fails if the other
+model answers, so which region reaches which model is checked rather than
+assumed.
+
 ## Choosing examples
 
 An evaluation set wants hard, ambiguous inputs. A fidelity trace wants the

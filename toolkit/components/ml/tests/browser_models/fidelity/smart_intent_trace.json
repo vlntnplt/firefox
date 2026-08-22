@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "models": {
+    "intent": {
+      "model_id": "mozilla/mobilebert-query-intent-detection",
+      "revision": "v0.4.0"
+    },
+    "intent_en_fr": {
+      "model_id": "mozilla/query-intent-detection-en-fr",
+      "revision": "v0.1.2"
+    }
+  },
+  "reference": {
+    "runtime": "firefox onnx-native",
+    "device": "cpu",
+    "dtype": "float32",
+    "note": "produced by driving IntentClassifier.getPromptIntent at fp32, so the trace measures the cost of the q8 weights that ship. Examples whose search probability sits within 0.3 of the 0.8 threshold getPromptIntent applies were rejected, so the recorded intent is usable as an oracle."
+  },
+  "tolerances": {
+    "kld_max": {
+      "intent": 0.15,
+      "intent_en_fr": 0.05
+    },
+    "intent_accuracy_min": 1.0
+  },
+  "examples": [
+    {
+      "id": "en.weather",
+      "region": "US",
+      "model": "intent",
+      "query": "weather in toronto",
+      "output": {
+        "dims": [1, 2],
+        "logits": [-4.655242, -1.974431]
+      },
+      "intent": "search"
+    },
+    {
+      "id": "en.headphones",
+      "region": "US",
+      "model": "intent",
+      "query": "best noise cancelling headphones",
+      "output": {
+        "dims": [1, 2],
+        "logits": [-4.540659, -2.316209]
+      },
+      "intent": "search"
+    },
+    {
+      "id": "en.timezone",
+      "region": "US",
+      "model": "intent",
+      "query": "san francisco time zone",
+      "output": {
+        "dims": [1, 2],
+        "logits": [-5.747749, -2.658276]
+      },
+      "intent": "search"
+    },
+    {
+      "id": "en.recipe",
+      "region": "US",
+      "model": "intent",
+      "query": "sourdough starter recipe",
+      "output": {
+        "dims": [1, 2],
+        "logits": [-1.882704, -3.95364]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "en.convert",
+      "region": "US",
+      "model": "intent",
+      "query": "convert 100 usd to eur",
+      "output": {
+        "dims": [1, 2],
+        "logits": [-0.813516, -3.904726]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "en.explain",
+      "region": "US",
+      "model": "intent",
+      "query": "explain quantum entanglement in simple terms",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0.879456, -3.449903]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "en.haiku",
+      "region": "US",
+      "model": "intent",
+      "query": "write a haiku about a rainy afternoon",
+      "output": {
+        "dims": [1, 2],
+        "logits": [-0.552752, -5.150112]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "en.rewrite",
+      "region": "US",
+      "model": "intent",
+      "query": "rewrite this paragraph to sound more formal",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0.953738, -5.973616]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "en.python",
+      "region": "US",
+      "model": "intent",
+      "query": "python list comprehension syntax",
+      "output": {
+        "dims": [1, 2],
+        "logits": [-3.46983, -3.937739]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "fr.connexion",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "facebook connexion",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, 2.623]
+      },
+      "intent": "search"
+    },
+    {
+      "id": "fr.actualites",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "le monde actualités",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, 3.639293]
+      },
+      "intent": "search"
+    },
+    {
+      "id": "fr.essence",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "prix du carburant aujourd hui",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, 3.932116]
+      },
+      "intent": "search"
+    },
+    {
+      "id": "fr.restaurant",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "meilleur restaurant italien à lyon",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, 2.296116]
+      },
+      "intent": "search"
+    },
+    {
+      "id": "fr.recette",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "recette tarte tatin facile",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, -3.346828]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "fr.horaires",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "horaires train paris marseille",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, -0.909595]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "fr.codepostal",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "code postal bordeaux",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, -1.487115]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "fr.cartegrise",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "faire une carte grise en ligne",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, -5.778777]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "fr.explique",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "explique-moi la relativité générale simplement",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, -4.64403]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "fr.redige",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "rédige un courriel poli pour annuler un rendez-vous",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, -4.740737]
+      },
+      "intent": "chat"
+    },
+    {
+      "id": "enfr.explain",
+      "region": "FR",
+      "model": "intent_en_fr",
+      "query": "explain quantum entanglement in simple terms",
+      "output": {
+        "dims": [1, 2],
+        "logits": [0, -1.700245]
+      },
+      "intent": "chat"
+    }
+  ]
+}
