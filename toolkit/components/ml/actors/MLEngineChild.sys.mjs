@@ -136,6 +136,7 @@ export class MLEngineChild extends JSProcessActorChild {
             type: "EnginePort:EngineReady",
             error: null,
             resolvedBackend: currentEngineDispatcher.pipelineOptions?.backend,
+            resolvedOptions: currentEngineDispatcher.resolvedOptions,
           });
           return;
         }
@@ -167,6 +168,7 @@ export class MLEngineChild extends JSProcessActorChild {
         // The parent's requested backend may resolve to a more specific
         // one, e.g. "best-onnx" will resolve to "onnx" or "onnx-native".
         resolvedBackend: dispatcher.pipelineOptions?.backend,
+        resolvedOptions: dispatcher.resolvedOptions,
       });
     } catch (error) {
       port.postMessage({
@@ -383,6 +385,9 @@ class EngineDispatcher {
   /** @type {PipelineOptions | null} */
   pipelineOptions = null;
 
+  /** @type {?{options: object, effective: object}} */
+  #resolvedOptions = null;
+
   /** @type {EngineStatus} */
   #status;
 
@@ -578,10 +583,20 @@ class EngineDispatcher {
   }
 
   /**
+   * How the backend resolved the options for this engine, or null when the
+   * engine is not ready or the backend does not report it.
+   *
+   * @returns {?{options: object, effective: object}}
+   */
+  get resolvedOptions() {
+    return this.#resolvedOptions;
+  }
+
+  /**
    * Wait for the engine to be ready.
    */
   async isReady() {
-    await this.#engine;
+    this.#resolvedOptions = (await this.#engine)?.resolvedOptions ?? null;
   }
 
   /**
@@ -649,6 +664,9 @@ class EngineDispatcher {
               type: "EnginePort:RunResponse",
               requestId,
               response,
+              modelOutput: request?.recordModelOutput
+                ? await engine.takeModelOutput()
+                : null,
               error: null,
               resourcesBefore,
               resourcesAfter,
@@ -752,6 +770,9 @@ class InferenceEngine {
   /** @type {?BasePromiseWorker} */
   #worker;
 
+  /** @type {?{options: object, effective: object}} */
+  resolvedOptions = null;
+
   /**
    * Initialize the worker.
    *
@@ -826,20 +847,28 @@ class InferenceEngine {
     const args = [wasm, pipelineOptions];
     const closure = {};
     const transferables = wasm instanceof ArrayBuffer ? [wasm] : [];
-    await worker.post("initializeEngine", args, closure, transferables);
+    const resolvedOptions = await worker.post(
+      "initializeEngine",
+      args,
+      closure,
+      transferables
+    );
     ChromeUtils.addProfilerMarker(
       "MLEngineChild",
       { startTime },
       `Initialize engine`
     );
-    return new InferenceEngine(worker);
+    return new InferenceEngine(worker, resolvedOptions);
   }
 
   /**
    * @param {BasePromiseWorker} worker
+   * @param {?{options: object, effective: object}} resolvedOptions - How the
+   *   backend resolved the options it was given.
    */
-  constructor(worker) {
+  constructor(worker, resolvedOptions = null) {
     this.#worker = worker;
+    this.resolvedOptions = resolvedOptions;
   }
 
   /**
@@ -856,6 +885,14 @@ class InferenceEngine {
       );
     }
     return this.#worker.post("run", [request, requestId, engineRunOptions]);
+  }
+
+  /**
+   * @returns {Promise<?object>} The model output of the last run, if it was
+   *   recorded. Kept off the response, whose shape callers depend on.
+   */
+  takeModelOutput() {
+    return this.#worker ? this.#worker.post("takeModelOutput") : null;
   }
 
   async terminate() {
