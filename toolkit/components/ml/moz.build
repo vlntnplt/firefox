@@ -34,6 +34,7 @@ BROWSER_CHROME_MANIFESTS += [
     "tests/browser/perftest.toml",
     "tests/browser_eval/eval.toml",
     "tests/browser_models/browser_models.toml",
+    "tests/browser_models/fidelity/fidelity.toml",
 ]
 
 XPIDL_SOURCES += [

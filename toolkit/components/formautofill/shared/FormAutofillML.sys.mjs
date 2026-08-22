@@ -38,7 +38,7 @@ const EMBEDDING_DIM = 384;
 // plus its two neighbors) into a field type.
 
 // Encoder engine: stock feature-extraction, one pooled vector per field.
-const FormFill_Encoder_Config = {
+export const FormFill_Encoder_Config = {
   taskName: "feature-extraction",
   featureId: "formfill-encoder",
   engineId: FEATURES["formfill-encoder"].engineId,
@@ -47,7 +47,7 @@ const FormFill_Encoder_Config = {
 };
 
 // Head engine: custom `moz-formfill-head` pipeline, scores windowed features.
-const FormFill_Head_Config = {
+export const FormFill_Head_Config = {
   taskName: "moz-formfill-head",
   featureId: "formfill-head",
   engineId: FEATURES["formfill-head"].engineId,
@@ -68,7 +68,7 @@ const FormFill_Head_Config = {
  * @returns {[string, string, string]} A tuple containing the current, previous,
  *   and next field strings, in that order.
  */
-function splitContext(mlData) {
+export function splitContext(mlData) {
   const cur = [];
   const prev = [];
   const next = [];

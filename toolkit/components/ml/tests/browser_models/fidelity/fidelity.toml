@@ -1,0 +1,24 @@
+[DEFAULT]
+subsuite = "ml-models"
+
+# Same external hosts as browser_models.toml: these tests download the models
+# that ship, from the hub that ships them.
+prefs = [
+  "network.socket.allowed_nonlocal_domains=firefox.settings.services.mozilla.com,firefox-settings-attachments.cdn.mozilla.net,content-signature-2.cdn.mozilla.net,model-hub.mozilla.org",
+  "services.settings.server=https://firefox.settings.services.mozilla.com/v2",
+  "browser.ml.enable=true",
+  "browser.ml.modelHubRootUrl=https://model-hub.mozilla.org/",
+  "browser.ml.logLevel=Error",
+]
+
+environment = ["MOZ_ALLOW_EXTERNAL_ML_HUB=true"]
+
+support-files = [
+  "head.js",
+  "formfill_trace.json",
+  "formfill_unified_trace.json",
+]
+
+["browser_ml_fidelity_formfill.js"]
+
+["browser_ml_fidelity_formfill_unified.js"]
