@@ -17,8 +17,11 @@ support-files = [
   "head.js",
   "formfill_trace.json",
   "formfill_unified_trace.json",
+  "mlsuggest_trace.json",
 ]
 
 ["browser_ml_fidelity_formfill.js"]
 
 ["browser_ml_fidelity_formfill_unified.js"]
+
+["browser_ml_fidelity_mlsuggest.js"]
