@@ -119,9 +119,12 @@ trained against.
 ## What CI does with it
 
 Fidelity tests live in `toolkit/components/ml/tests/browser_models/fidelity/`,
-one per feature, named `browser_ml_fidelity_<feature>.js` with its trace
-alongside as `<feature>_trace.json`. Anything reusable across features is in
-`head.js`. They run in the `mochitest-browser-chrome-ml-models` suite, which
+one per model slot, named `browser_ml_fidelity_<slot>.js` with its trace
+alongside as `<slot>_trace.json`. A slot is what a trace pins: a feature's code
+path together with the models Remote Settings ships for it. The tab strip and
+Smart Window run the same topic-model code against separate slots, so a bump on
+one side leaves the other where it was and each gets its own test. Anything
+reusable across features is in `head.js`. They run in the `mochitest-browser-chrome-ml-models` suite, which
 downloads real models from the model hub.
 
 It runs the shipped configuration on whatever the machine resolves to. Coverage
@@ -227,6 +230,10 @@ rotated while a near-tie changed sides.
   consumer is affected today, they all compare with a scale-invariant cosine,
   so the embeddings test reports the magnitude check with `todo` rather than
   asserting it.
+- The Smart Window topic model publishes no fp32 export, so its trace records
+  the quantized weights that ship as its own reference. It still measures
+  runtime and platform, and still fails a model bump that lands without a new
+  trace, but it cannot separate what quantization costs.
 - The trace ships as a test support file. It belongs next to the models in the
   model repository, so that it is versioned and fetched with them.
 - Coverage is not declared. The autofill trace exercises 17 of 66 labels, and
