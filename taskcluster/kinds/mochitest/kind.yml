@@ -652,13 +652,27 @@ tasks:
             name: mochitest-browser-chrome-ml-models
         treeherder-symbol: M(bc-ml)
         schedules-component: mochitest-browser-chrome-ml-models
-        loopback-video: true
+        # Model fidelity depends on which kernels ONNX Runtime dispatches to,
+        # which is decided by the CPU. Cloud pools are one machine spec per
+        # pool, so these run on physical hardware instead: the docker pools
+        # would only ever report a single result per ISA family. macOS and
+        # Windows-on-ARM platforms already map to their own pool.
+        worker-type:
+            by-test-platform:
+                linux2404-64-shippable/opt: t-linux-talos-2404
+                windows11-64-24h2-shippable/opt: win11-64-24h2-hw
+                windows11-64-24h2-hw-ref-shippable/opt: win11-64-24h2-hw-ref
+                default: default
+        # Shippable opt only: sanitizer variants (asan/tsan) abort on upstream
+        # ggml UB in the native llama.cpp backend.
         run-on-projects:
             by-test-platform:
-                # Shippable Linux opt only. The `.*` glob previously also
-                # matched sanitizer variants (asan/tsan), which abort on
-                # upstream ggml UB in the native llama.cpp backend.
                 linux2404-64-shippable/opt: ['mozilla-central']
+                macosx1015-64-shippable-qr/opt: ['mozilla-central']
+                macosx1500-aarch64-shippable/opt: ['mozilla-central']
+                windows11-64-24h2-shippable/opt: ['mozilla-central']
+                windows11-64-24h2-hw-ref-shippable/opt: ['mozilla-central']
+                windows11-aarch64-25h2-shippable/opt: ['mozilla-central']
                 default: []
         max-run-time: 1800
         mozharness:

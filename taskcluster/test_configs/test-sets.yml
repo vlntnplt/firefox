@@ -317,6 +317,7 @@ windows32-tests:
 
 windows-aarch64-tests:
     - cppunittest
+    - mochitest-browser-chrome-ml-models
 
 windows10-2009-tests:
     - cppunittest
@@ -342,6 +343,7 @@ windows11-64-2009-ccov-tests:
 windows11-24h2-tests:
     - crashtest
     - jsreftest
+    - mochitest-browser-chrome-ml-models
     - reftest
 
 windows11-25h2-tests:
@@ -430,6 +432,7 @@ windows-talos:
 
 windows-ref-hw-tests:
     - browsertime-video-playback-latency
+    - mochitest-browser-chrome-ml-models
     - mochitest-media
 
 talos-xperf:
@@ -490,6 +493,7 @@ macosx1500-aarch64-tests:
     - mochitest-a11y
     - mochitest-browser-a11y
     - mochitest-browser-chrome
+    - mochitest-browser-chrome-ml-models
     - mochitest-browser-media
     - mochitest-browser-translations
     - mochitest-chrome
@@ -546,6 +550,7 @@ macosx1015-64-qr-tests:
     - cppunittest
     - crashtest
     - jittest
+    - mochitest-browser-chrome-ml-models
     - mochitest-media
     - mochitest-webgl1-core
     - mochitest-webgl1-ext
