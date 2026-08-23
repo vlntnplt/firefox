@@ -705,13 +705,30 @@ tasks:
             name: mochitest-browser-chrome-ml-models
         treeherder-symbol: M(bc-ml)
         schedules-component: mochitest-browser-chrome-ml-models
-        loopback-video: true
+        # Which kernels ONNX Runtime dispatches to depends on the CPU, and each
+        # cloud pool is a single machine specification. Hardware pools cover
+        # several CPUs. macOS and Windows-on-ARM platforms already map to
+        # hardware pools.
+        worker-type:
+            by-test-platform:
+                linux2404-64-shippable/opt: t-linux-talos-2404
+                windows11-64-24h2-shippable/opt: win11-64-24h2-hw
+                windows11-64-24h2-hw-ref-shippable/opt: win11-64-24h2-hw-ref
+                default: default
+        # Tier 2: the suite reads live Remote Settings and downloads models
+        # from model-hub.mozilla.org. A model bump or a CDN failure fails it
+        # with no change in the tree to back out.
+        tier: 2
+        # Shippable opt only: sanitizer variants (asan/tsan) abort on upstream
+        # ggml UB in the native llama.cpp backend.
         run-on-projects:
             by-test-platform:
-                # Shippable Linux opt only. The `.*` glob previously also
-                # matched sanitizer variants (asan/tsan), which abort on
-                # upstream ggml UB in the native llama.cpp backend.
                 linux2404-64-shippable/opt: ['mozilla-central']
+                macosx1015-64-shippable-qr/opt: ['mozilla-central']
+                macosx1500-aarch64-shippable/opt: ['mozilla-central']
+                windows11-64-24h2-shippable/opt: ['mozilla-central']
+                windows11-64-24h2-hw-ref-shippable/opt: ['mozilla-central']
+                windows11-aarch64-25h2-shippable/opt: ['mozilla-central']
                 default: []
         max-run-time: 1800
         mozharness:
