@@ -418,6 +418,7 @@ async function selectFeatureConfig(feature, opts = {}) {
  * @returns {Promise<{engine: openAIEngine, parameters: inferenceParams}>}
  */
 export async function buildEngineForFeature(feature, opts = {}) {
+  const startTime = ChromeUtils.now();
   const mainConfig = await selectFeatureConfig(feature, opts);
 
   let parameters = mainConfig.parameters ?? {};
@@ -466,6 +467,11 @@ export async function buildEngineForFeature(feature, opts = {}) {
     apiKey,
   });
 
+  ChromeUtils.addProfilerMarker(
+    "SmartWindow",
+    { startTime },
+    "PromptLoader:build_engine"
+  );
   return { engine, parameters };
 }
 
