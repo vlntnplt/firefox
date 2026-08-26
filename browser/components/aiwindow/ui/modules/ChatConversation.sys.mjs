@@ -738,16 +738,25 @@ export class ChatConversation extends Conversation {
    *   to the conversation engine's model.
    */
   async loadSystemPrompt(opts = {}) {
-    const { prompt: body, version } = await lazy.loadPrompt(
-      MODEL_FEATURES.CHAT,
-      { ...opts, model: opts.model ?? this.engine?.model }
-    );
+    const startTime = ChromeUtils.now();
+    try {
+      const { prompt: body, version } = await lazy.loadPrompt(
+        MODEL_FEATURES.CHAT,
+        { ...opts, model: opts.model ?? this.engine?.model }
+      );
 
-    return this.setSystemMessage({
-      type: SYSTEM_PROMPT_TYPE.TEXT,
-      body,
-      ...(version && { version }),
-    });
+      return this.setSystemMessage({
+        type: SYSTEM_PROMPT_TYPE.TEXT,
+        body,
+        ...(version && { version }),
+      });
+    } finally {
+      ChromeUtils.addProfilerMarker(
+        "SmartWindow",
+        { startTime },
+        "ChatConversation:load_system_prompt"
+      );
+    }
   }
 
   /**
@@ -856,24 +865,33 @@ export class ChatConversation extends Conversation {
    * @param {Function} [opts.getRealTimeMapping]
    */
   async injectRealTimeContext(userMessage, opts = {}) {
-    const { contextMentions, getRealTimeMapping } = opts;
-    const realTimePrompt = await lazy.buildBrowserContextPrompt(
-      this.engine?.model,
-      {
-        ...(getRealTimeMapping && { getRealTimeMapping }),
-        contextMentions,
-        securityProperties: this.securityProperties,
+    const startTime = ChromeUtils.now();
+    try {
+      const { contextMentions, getRealTimeMapping } = opts;
+      const realTimePrompt = await lazy.buildBrowserContextPrompt(
+        this.engine?.model,
+        {
+          ...(getRealTimeMapping && { getRealTimeMapping }),
+          contextMentions,
+          securityProperties: this.securityProperties,
+        }
+      );
+      if (!realTimePrompt || !userMessage?.content) {
+        return;
       }
-    );
-    if (!realTimePrompt || !userMessage?.content) {
-      return;
+      if (realTimePrompt === this.#lastBrowserContext) {
+        return;
+      }
+      userMessage.content.userContext ??= {};
+      userMessage.content.userContext.realTimeContext = realTimePrompt;
+      this.#lastBrowserContext = realTimePrompt;
+    } finally {
+      ChromeUtils.addProfilerMarker(
+        "SmartWindow",
+        { startTime },
+        "ChatConversation:inject_realtime_context"
+      );
     }
-    if (realTimePrompt === this.#lastBrowserContext) {
-      return;
-    }
-    userMessage.content.userContext ??= {};
-    userMessage.content.userContext.realTimeContext = realTimePrompt;
-    this.#lastBrowserContext = realTimePrompt;
   }
 
   /**
@@ -902,20 +920,29 @@ export class ChatConversation extends Conversation {
     constructMemories = constructRelevantMemoriesContextMessage,
     messageCount = DEFAULT_RELEVANT_MEMORIES_MESSAGE_COUNT
   ) {
-    const memoriesContext = await constructMemories(
-      prompt,
-      this.#getPreviousRelevantMemories(messageCount),
-      this.engine?.model
-    );
-    if (memoriesContext == null) {
-      return;
-    }
-    this.securityProperties.setPrivateData();
-    if (userMessage?.content) {
-      userMessage.content.userContext ??= {};
-      userMessage.content.userContext.memoriesContext =
-        memoriesContext.message.content;
-      userMessage.content.relevantMemories = memoriesContext.relevantMemories;
+    const startTime = ChromeUtils.now();
+    try {
+      const memoriesContext = await constructMemories(
+        prompt,
+        this.#getPreviousRelevantMemories(messageCount),
+        this.engine?.model
+      );
+      if (memoriesContext == null) {
+        return;
+      }
+      this.securityProperties.setPrivateData();
+      if (userMessage?.content) {
+        userMessage.content.userContext ??= {};
+        userMessage.content.userContext.memoriesContext =
+          memoriesContext.message.content;
+        userMessage.content.relevantMemories = memoriesContext.relevantMemories;
+      }
+    } finally {
+      ChromeUtils.addProfilerMarker(
+        "SmartWindow",
+        { startTime },
+        "ChatConversation:inject_memories_context"
+      );
     }
   }
 
