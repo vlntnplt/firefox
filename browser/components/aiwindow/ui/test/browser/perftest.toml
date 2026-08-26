@@ -1,0 +1,11 @@
+[DEFAULT]
+prefs = [
+  "browser.newtab.preload=false",
+  "browser.search.suggest.enabled=false",
+  "browser.urlbar.suggest.searches=false",
+  "browser.smartwindow.endpoint=http://localhost:0/v1",
+]
+support-files = ["head.js"]
+
+["browser_smartwindow_first_turn_perf.js"]
+disabled = "Run only via ./mach perftest, not regular CI"
