@@ -6,6 +6,9 @@
 const { MemoriesSchedulers } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/memories/MemoriesSchedulers.sys.mjs"
 );
+const { MemoryStore } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
+);
 
 add_setup(async function () {
   await SpecialPowers.pushPrefEnv({
@@ -147,5 +150,64 @@ describe("MemoriesSchedulers scheduling from AIWindow", () => {
 
       Assert.ok(stub.notCalled, "not called when firstrun is set to false");
     });
+  });
+});
+
+describe("Memories embeddings warmup from AIWindow", () => {
+  let warmupStub;
+  let schedulersStub;
+
+  beforeEach(async () => {
+    warmupStub = sinon.stub(MemoryStore, "warmup").resolves();
+    schedulersStub = sinon.stub(MemoriesSchedulers, "maybeRunAndSchedule");
+    await SpecialPowers.pushPrefEnv({
+      set: [["browser.smartwindow.tos.consentTime", 123]],
+    });
+    AIWindow.uninit();
+    AIWindow.init(window);
+  });
+
+  afterEach(async () => {
+    warmupStub.restore();
+    schedulersStub.restore();
+    if (AIWindow.isAIWindowActive(window)) {
+      AIWindow.toggleAIWindow(window, false);
+    }
+    await SpecialPowers.popPrefEnv();
+  });
+
+  it("calls warmup when toggling to AI Window", () => {
+    AIWindow.toggleAIWindow(window, true);
+
+    Assert.ok(warmupStub.calledOnce, "warmup called once on toggle");
+  });
+
+  it("does not call warmup without ToS consent", async () => {
+    await SpecialPowers.pushPrefEnv({
+      set: [["browser.smartwindow.tos.consentTime", 0]],
+    });
+
+    AIWindow.toggleAIWindow(window, true);
+
+    Assert.ok(warmupStub.notCalled, "warmup not called without consent");
+    await SpecialPowers.popPrefEnv();
+  });
+
+  it("calls warmup when the memory store changes while an AI Window is active", () => {
+    AIWindow.toggleAIWindow(window, true);
+    warmupStub.resetHistory();
+
+    Services.obs.notifyObservers(null, MemoryStore.MEMORY_STORE_CHANGED);
+
+    Assert.ok(warmupStub.calledOnce, "warmup called on store change");
+  });
+
+  it("does not call warmup on store change without an active AI Window", () => {
+    Services.obs.notifyObservers(null, MemoryStore.MEMORY_STORE_CHANGED);
+
+    Assert.ok(
+      warmupStub.notCalled,
+      "warmup not called without an active AI Window"
+    );
   });
 });

@@ -30,6 +30,10 @@ const PREF_SEMANTIC_HISTORY_SMARTWINDOW_FEATURE_GATE =
 const PREF_AUTO_TAB_GROUPING = "browser.smartwindow.autoTabGrouping.enabled";
 const PREF_FIRSTRUN_HAS_COMPLETED = "browser.smartwindow.firstrun.hasCompleted";
 
+// Mirrors MemoryStore.MEMORY_STORE_CHANGED; a literal avoids loading that
+// module in non-AI windows.
+const MEMORY_STORE_CHANGED = "memory-store-changed";
+
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   getAllModelsData:
@@ -133,7 +137,10 @@ export const AIWindow = {
       // window initialized first (e.g. on startup), the first AI window
       // would never start the memories schedulers. Defer until delayed startup
       // so MemoriesManager sees this window as ready before starting the schedulers.
-      win.delayedStartupPromise.then(() => this._startSchedulers());
+      win.delayedStartupPromise.then(() => {
+        this._startSchedulers();
+        this.warmupMemories();
+      });
     }
 
     if (this._initialized) {
@@ -148,6 +155,7 @@ export const AIWindow = {
     ChromeUtils.defineLazyGetter(AIWindow, "chatStore", () => lazy.ChatStore);
     Services.obs.addObserver(this, lazy.ONLOGOUT_NOTIFICATION);
     Services.obs.addObserver(this, "tabstrip-orientation-change");
+    Services.obs.addObserver(this, MEMORY_STORE_CHANGED);
     lazy.SmartWindowTelemetry.init();
     lazy.getAllModelsData(); // loads model data into cache for about:preferences
     lazy.NimbusFeatures.smartWindow.onUpdate(this.onNimbusUpdate);
@@ -187,6 +195,7 @@ export const AIWindow = {
     }
     Services.obs.removeObserver(this, lazy.ONLOGOUT_NOTIFICATION);
     Services.obs.removeObserver(this, "tabstrip-orientation-change");
+    Services.obs.removeObserver(this, MEMORY_STORE_CHANGED);
 
     lazy.PlacesUtils.observers.removeListener(
       ["page-removed", "history-cleared"],
@@ -209,7 +218,22 @@ export const AIWindow = {
       this._onAccountLogout();
     } else if (topic === "tabstrip-orientation-change") {
       this._onTabstripOrientationChange();
+    } else if (topic === MEMORY_STORE_CHANGED) {
+      this.warmupMemories();
     }
+  },
+
+  /**
+   * Fire-and-forget warmup of the memories embeddings engine and corpus cache
+   * so a chat's first turn doesn't pay the model load. Gated on ToS consent
+   * and an active AI window; MemoryStore.warmup no-ops on an empty store and
+   * never rejects.
+   */
+  warmupMemories() {
+    if (!lazy.AIWindowAccountAuth.hasToSConsent || !this.hasActiveAIWindows()) {
+      return;
+    }
+    lazy.MemoryStore.warmup();
   },
 
   // Switches all active AI Windows back to classic mode when the user signs out
@@ -822,6 +846,7 @@ export const AIWindow = {
         }
 
         this._startSchedulers();
+        this.warmupMemories();
 
         this._markActiveStart(win);
         this.recordOpenWindowTelemetry(trigger, win);
