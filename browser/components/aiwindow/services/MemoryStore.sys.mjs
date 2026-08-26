@@ -377,6 +377,9 @@ export const MemoryStore = {
   memoryEmbeddingsCache: null,
   memoryCacheKey: null,
 
+  // Single-flight guard for corpus embedding builds; truthy while one runs
+  _embedInFlight: null,
+
   /**
    * Initialize the store: set up JSONFile and load from disk.
    *
@@ -715,6 +718,81 @@ export const MemoryStore = {
   },
 
   /**
+   * Ensures the embeddings generator exists and the corpus embeddings cache
+   * matches `memories`, re-embedding on cache-key mismatch. Single-flight:
+   * concurrent callers wait for the in-flight build, then re-check against
+   * their own snapshot.
+   *
+   * @param {Array<object>} memories  Live memories, in getMemories() order
+   * @returns {Promise<Array<Array<number>>>}
+   *          Embeddings index-aligned with `memories`; pair results from this
+   *          array, not the mutable cache fields.
+   */
+  async _ensureMemoryEmbeddings(memories) {
+    if (!this.embeddingsGenerator) {
+      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
+    }
+
+    while (this._embedInFlight) {
+      await this._embedInFlight;
+    }
+
+    const currentCacheKey = this.computeMemoriesHash(memories);
+    if (this.memoryEmbeddingsCache && this.memoryCacheKey === currentCacheKey) {
+      return this.memoryEmbeddingsCache;
+    }
+
+    this._embedInFlight = (async () => {
+      const memoryTexts = memories.map(m => {
+        const summary = m.memory_summary?.toLowerCase() || "";
+        const reasoning = m.reasoning?.toLowerCase() || "";
+        const tags = m.tags?.join(" ").toLowerCase() || "";
+        return [tags, summary, reasoning]
+          .filter(part => part?.trim())
+          .join(". ")
+          .toLowerCase();
+      });
+      const startTime = ChromeUtils.now();
+      const result = await this.embeddingsGenerator.embedMany(memoryTexts);
+      ChromeUtils.addProfilerMarker(
+        "SmartWindow",
+        { startTime },
+        `MemoryStore:embed_memories(${memoryTexts.length})`
+      );
+      const embeddings = result.output || result;
+      this.memoryEmbeddingsCache = embeddings;
+      this.memoryCacheKey = currentCacheKey;
+      return embeddings;
+    })();
+    try {
+      return await this._embedInFlight;
+    } finally {
+      this._embedInFlight = null;
+    }
+  },
+
+  /**
+   * Pre-creates the embeddings engine and the corpus embeddings cache so the
+   * send path only pays the query embedding, and recreates the engine if the
+   * inference process died. No-op on an empty store. Never rejects; the lazy
+   * path in getRelevantMemories stays the fallback.
+   *
+   * @returns {Promise<void>}
+   */
+  async warmup() {
+    try {
+      const memories = await this.getMemories({ includeSoftDeleted: false });
+      if (!memories.length) {
+        return;
+      }
+      await this._ensureMemoryEmbeddings(memories);
+      await this.embeddingsGenerator.ensureEngine();
+    } catch (e) {
+      lazy.console.warn("MemoryStore.warmup failed", e);
+    }
+  },
+
+  /**
    * Fetches relevant memories for a given user message using semantic similarity.
    * Uses embeddings and cosine similarity for fast, accurate memory retrieval.
    *
@@ -736,30 +814,7 @@ export const MemoryStore = {
       return [];
     }
 
-    // Lazy initialize embeddings generator
-    if (!this.embeddingsGenerator) {
-      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
-    }
-
-    // Re-embed memories only if cache is invalid
-    const currentCacheKey = this.computeMemoriesHash(memories);
-    if (
-      !this.memoryEmbeddingsCache ||
-      this.memoryCacheKey !== currentCacheKey
-    ) {
-      const memoryTexts = memories.map(m => {
-        const summary = m.memory_summary?.toLowerCase() || "";
-        const reasoning = m.reasoning?.toLowerCase() || "";
-        const tags = m.tags?.join(" ").toLowerCase() || "";
-        return [tags, summary, reasoning]
-          .filter(part => part?.trim())
-          .join(". ")
-          .toLowerCase();
-      });
-      const result = await this.embeddingsGenerator.embedMany(memoryTexts);
-      this.memoryEmbeddingsCache = result.output || result;
-      this.memoryCacheKey = currentCacheKey;
-    }
+    const memoryEmbeddings = await this._ensureMemoryEmbeddings(memories);
 
     const queryResult = await this.embeddingsGenerator.embed(
       message.toLowerCase()
@@ -771,7 +826,7 @@ export const MemoryStore = {
     }
 
     // Calculate cosine similarity
-    const similarities = this.memoryEmbeddingsCache.map((memEmb, idx) => ({
+    const similarities = memoryEmbeddings.map((memEmb, idx) => ({
       ...memories[idx],
       similarity: cosSim(queryEmbedding, memEmb),
     }));

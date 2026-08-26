@@ -1227,6 +1227,272 @@ add_task(async function test_getRelevantMemories_cache_invalidation() {
   }
 });
 
+/**
+ * Tests that warmup() on an empty store creates neither the embeddings
+ * generator nor the engine.
+ */
+add_task(async function test_warmup_empty_store_is_noop() {
+  await deleteAllMemories();
+  MemoryStore._clearEmbeddingsCache();
+  MemoryStore.embeddingsGenerator = null;
+
+  const sb = sinon.createSandbox();
+  try {
+    const ensureEngineStub = sb
+      .stub(EmbeddingsGenerator.prototype, "ensureEngine")
+      .resolves({});
+    const embedManyStub = sb
+      .stub(EmbeddingsGenerator.prototype, "embedMany")
+      .resolves({ output: [] });
+
+    await MemoryStore.warmup();
+
+    Assert.equal(
+      MemoryStore.embeddingsGenerator,
+      null,
+      "warmup on an empty store should not create the generator"
+    );
+    Assert.equal(
+      ensureEngineStub.callCount,
+      0,
+      "warmup on an empty store should not touch the engine"
+    );
+    Assert.equal(
+      embedManyStub.callCount,
+      0,
+      "warmup on an empty store should not embed anything"
+    );
+  } finally {
+    sb.restore();
+  }
+});
+
+/**
+ * Tests that warmup() embeds the corpus and warms the engine, that repeated
+ * warmups re-check the engine without re-embedding, and that retrieval after
+ * warmup only pays the query embedding.
+ */
+add_task(async function test_warmup_prebuilds_corpus_and_engine() {
+  await deleteAllMemories();
+  MemoryStore._clearEmbeddingsCache();
+  MemoryStore.embeddingsGenerator = null;
+
+  const sb = sinon.createSandbox();
+  try {
+    await addMemories();
+
+    const ensureEngineStub = sb
+      .stub(EmbeddingsGenerator.prototype, "ensureEngine")
+      .resolves({});
+    const embedManyStub = sb
+      .stub(EmbeddingsGenerator.prototype, "embedMany")
+      .callsFake(async texts => ({
+        output: texts.map((_, i) => [i === 0 ? 1 : 0, i === 1 ? 1 : 0, 0]),
+      }));
+    const embedStub = sb
+      .stub(EmbeddingsGenerator.prototype, "embed")
+      .resolves({ output: [[1, 0, 0]] });
+
+    await MemoryStore.warmup();
+    Assert.equal(embedManyStub.callCount, 1, "warmup embeds the corpus once");
+    Assert.equal(
+      embedManyStub.firstCall.args[0].length,
+      TEST_MEMORIES.length,
+      "warmup embeds one text per memory"
+    );
+    Assert.equal(
+      ensureEngineStub.callCount,
+      1,
+      "warmup ensures the engine is up"
+    );
+    Assert.equal(embedStub.callCount, 0, "warmup embeds no query");
+
+    // Repeated warmup must re-check the engine (crash recovery) without
+    // re-embedding.
+    await MemoryStore.warmup();
+    Assert.equal(
+      embedManyStub.callCount,
+      1,
+      "second warmup hits the corpus cache"
+    );
+    Assert.equal(
+      ensureEngineStub.callCount,
+      2,
+      "second warmup re-checks the engine"
+    );
+
+    const results = await MemoryStore.getRelevantMemories(TEST_MESSAGE);
+    Assert.equal(
+      embedManyStub.callCount,
+      1,
+      "retrieval after warmup does not re-embed the corpus"
+    );
+    Assert.equal(embedStub.callCount, 1, "retrieval embeds only the query");
+    Assert.greaterOrEqual(results.length, 1, "retrieval returns results");
+
+    await deleteAllMemories();
+  } finally {
+    sb.restore();
+    MemoryStore._clearEmbeddingsCache();
+  }
+});
+
+/**
+ * Tests that concurrent corpus builds are single-flight: warmup() calls made
+ * while a build is in flight wait for it and share its result.
+ */
+add_task(async function test_warmup_coalesces_concurrent_calls() {
+  await deleteAllMemories();
+  MemoryStore._clearEmbeddingsCache();
+  MemoryStore.embeddingsGenerator = null;
+
+  const sb = sinon.createSandbox();
+  try {
+    await addMemories();
+
+    sb.stub(EmbeddingsGenerator.prototype, "ensureEngine").resolves({});
+    let resolveEmbed = null;
+    const embedManyStub = sb
+      .stub(EmbeddingsGenerator.prototype, "embedMany")
+      .callsFake(
+        texts =>
+          new Promise(resolve => {
+            resolveEmbed = () =>
+              resolve({ output: texts.map((_, i) => [i + 1, 0, 0]) });
+          })
+      );
+
+    const warmups = [
+      MemoryStore.warmup(),
+      MemoryStore.warmup(),
+      MemoryStore.warmup(),
+    ];
+    while (!resolveEmbed) {
+      await new Promise(resolve => Services.tm.dispatchToMainThread(resolve));
+    }
+    resolveEmbed();
+    await Promise.all(warmups);
+
+    Assert.equal(
+      embedManyStub.callCount,
+      1,
+      "concurrent warmups share a single corpus build"
+    );
+
+    await deleteAllMemories();
+  } finally {
+    sb.restore();
+    MemoryStore._clearEmbeddingsCache();
+  }
+});
+
+/**
+ * Tests that retrieval pairs memories with embeddings from its own snapshot
+ * even when a store mutation plus warmup rebuild the corpus cache while the
+ * query embedding is in flight.
+ */
+add_task(
+  async function test_getRelevantMemories_concurrent_rebuild_alignment() {
+    await deleteAllMemories();
+    MemoryStore._clearEmbeddingsCache();
+    MemoryStore.embeddingsGenerator = null;
+
+    const sb = sinon.createSandbox();
+    try {
+      await addMemories();
+
+      sb.stub(EmbeddingsGenerator.prototype, "ensureEngine").resolves({});
+      const embedManyStub = sb
+        .stub(EmbeddingsGenerator.prototype, "embedMany")
+        .callsFake(async texts => ({
+          output: texts.map((_, i) => [i === 0 ? 1 : 0, i === 1 ? 1 : 0, 0]),
+        }));
+      sb.stub(EmbeddingsGenerator.prototype, "embed").callsFake(async () => {
+        // A memory lands and warmup rebuilds the corpus cache while the query
+        // embedding is in flight.
+        await MemoryStore.addMemory({
+          memory_summary: "Collects vintage keyboards",
+          reasoning: "Browses mechanical keyboard forums",
+          sources: ["history"],
+          sensitivity_category: MEMORY_SENSITIVITY_CATEGORY_NOT_SENSITIVE,
+          updated_at: 5000,
+          recent_accessed_counts: { 0: 0 },
+        });
+        await MemoryStore.warmup();
+        return { output: [[1, 0, 0]] };
+      });
+
+      const results = await MemoryStore.getRelevantMemories(TEST_MESSAGE);
+
+      Assert.equal(
+        embedManyStub.callCount,
+        2,
+        "the retrieval build and the mid-flight warmup rebuild both ran"
+      );
+      Assert.greaterOrEqual(results.length, 1, "retrieval returns results");
+      Assert.ok(
+        results.every(
+          r => r.memory_summary && typeof r.similarity === "number"
+        ),
+        "every result pairs a real memory with its similarity"
+      );
+      Assert.ok(
+        results.every(r => r.memory_summary !== "Collects vintage keyboards"),
+        "the memory added mid-retrieval is not misattributed into this snapshot's results"
+      );
+
+      await deleteAllMemories();
+    } finally {
+      sb.restore();
+      MemoryStore._clearEmbeddingsCache();
+    }
+  }
+);
+
+/**
+ * Tests that a failing warmup never rejects and leaves the lazy retrieval
+ * path in getRelevantMemories working.
+ */
+add_task(async function test_warmup_failure_keeps_lazy_path() {
+  await deleteAllMemories();
+  MemoryStore._clearEmbeddingsCache();
+  MemoryStore.embeddingsGenerator = null;
+
+  const sb = sinon.createSandbox();
+  try {
+    await addMemories();
+
+    sb.stub(EmbeddingsGenerator.prototype, "ensureEngine").resolves({});
+    const embedManyStub = sb.stub(EmbeddingsGenerator.prototype, "embedMany");
+    embedManyStub.onFirstCall().rejects(new Error("engine down"));
+    embedManyStub.callsFake(async texts => ({
+      output: texts.map((_, i) => [i === 0 ? 1 : 0, i === 1 ? 1 : 0, 0]),
+    }));
+    sb.stub(EmbeddingsGenerator.prototype, "embed").resolves({
+      output: [[1, 0, 0]],
+    });
+
+    await MemoryStore.warmup();
+
+    const results = await MemoryStore.getRelevantMemories(TEST_MESSAGE);
+    Assert.equal(
+      embedManyStub.callCount,
+      2,
+      "retrieval re-embeds the corpus after the failed warmup"
+    );
+    Assert.greaterOrEqual(
+      results.length,
+      1,
+      "retrieval succeeds via the lazy path after a failed warmup"
+    );
+
+    await deleteAllMemories();
+  } finally {
+    sb.restore();
+    MemoryStore._clearEmbeddingsCache();
+  }
+});
+
 add_task(async function test_getMemories_with_simple_filters() {
   await addMemories();
 
