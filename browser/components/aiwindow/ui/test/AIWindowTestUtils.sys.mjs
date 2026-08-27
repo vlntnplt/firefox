@@ -7,11 +7,16 @@
  * @import { ModelFeature } from "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
  */
 
+/* global content, ContentTaskUtils */
+
 import { BrowserTestUtils } from "resource://testing-common/BrowserTestUtils.sys.mjs";
 import { sinon } from "resource://testing-common/Sinon.sys.mjs";
 import { MLTestUtils } from "resource://testing-common/MLTestUtils.sys.mjs";
 
 import { TestUtils } from "resource://testing-common/TestUtils.sys.mjs";
+import { HttpServer } from "resource://testing-common/httpd.sys.mjs";
+import { NetUtil } from "resource://gre/modules/NetUtil.sys.mjs";
+import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
 import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
 import { ExaSearchProvider } from "moz-src:///browser/components/aiwindow/models/search/SearchProviders.sys.mjs";
 import { MemoryStore } from "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs";
@@ -381,7 +386,17 @@ export class MockMemoriesRetrieval {
   }
 }
 
+function readRequestBody(request) {
+  const stream = request.bodyInputStream;
+  const available = stream.available();
+  return NetUtil.readInputStreamToString(stream, available, {
+    charset: "UTF-8",
+  });
+}
+
 export const AIWindowTestUtils = {
+  AIWINDOW_URL: "chrome://browser/content/aiwindow/aiWindow.html",
+
   async toggleAIWindowPref(SpecialPowers, enabled) {
     await SpecialPowers.pushPrefEnv({
       set: [["browser.smartwindow.enabled", enabled]],
@@ -397,5 +412,398 @@ export const AIWindowTestUtils = {
       openerWindow: null,
       aiWindow,
     });
+  },
+
+  /**
+   * Opens a new AI Window and waits until it is focused and flagged as an AI
+   * window.
+   *
+   * @param {object} SimpleTest - The calling test's SimpleTest global.
+   * @param {object} [options]
+   * @param {string} [options.waitForTabURL] - URL to wait for, or empty string
+   *   to skip waiting.
+   * @returns {Promise<Window>}
+   */
+  async openReadyAIWindow(
+    SimpleTest,
+    { waitForTabURL = AIWindowTestUtils.AIWINDOW_URL } = {}
+  ) {
+    const win = await BrowserTestUtils.openNewBrowserWindow({
+      aiWindow: true,
+      waitForTabURL,
+    });
+    await BrowserTestUtils.waitForMutationCondition(
+      win.document.documentElement,
+      { attributes: true },
+      () => win.document.documentElement.hasAttribute("ai-window")
+    );
+    await SimpleTest.promiseFocus(win);
+    return win;
+  },
+
+  /**
+   * Waits for ai-window, then its shadowRoot, then the loaded #aichat-browser.
+   *
+   * @param {object} browser - The chrome browser element hosting ai-window
+   * @returns {Promise<object>} The aichat browser element
+   */
+  async getAichatBrowser(browser) {
+    const aiWindowEl = await TestUtils.waitForCondition(
+      () => browser.contentDocument?.querySelector("ai-window"),
+      "Wait for ai-window element to exist"
+    );
+
+    await TestUtils.waitForCondition(
+      () => aiWindowEl.shadowRoot,
+      "Wait for ai-window shadowRoot to be ready"
+    );
+
+    const aichatBrowser = await TestUtils.waitForCondition(
+      () => aiWindowEl.shadowRoot.querySelector("#aichat-browser"),
+      "Wait for aichat-browser element"
+    );
+
+    if (aichatBrowser.currentURI?.spec !== "about:aichatcontent") {
+      await BrowserTestUtils.browserLoaded(
+        aichatBrowser,
+        false,
+        "about:aichatcontent"
+      );
+    }
+
+    if (aichatBrowser.currentURI.spec !== "about:aichatcontent") {
+      throw new Error(
+        `aichat-browser loaded ${aichatBrowser.currentURI.spec} instead of about:aichatcontent`
+      );
+    }
+
+    return aichatBrowser;
+  },
+
+  /**
+   * Select an explicit action from the smartbar CTA dropdown menu.
+   *
+   * @param {object} SpecialPowers - The calling test's SpecialPowers global.
+   * @param {object} browser - The browser element
+   * @param {string} action - The action to select
+   */
+  async selectExplicitSmartbarAction(SpecialPowers, browser, action) {
+    await SpecialPowers.spawn(browser, [action], async actionType => {
+      const aiWindow = content.document.querySelector("ai-window");
+      await ContentTaskUtils.waitForMutationCondition(
+        aiWindow.shadowRoot,
+        { childList: true, subtree: true },
+        () => aiWindow.shadowRoot.querySelector("#ai-window-smartbar")
+      );
+      const smartbar = aiWindow.shadowRoot.querySelector("#ai-window-smartbar");
+      const inputCta = smartbar.querySelector("input-cta");
+      const mozButton = inputCta.shadowRoot.querySelector("moz-button");
+
+      await ContentTaskUtils.waitForMutationCondition(
+        mozButton.shadowRoot,
+        { childList: true, subtree: true },
+        () => mozButton.shadowRoot.querySelector("#chevron-button")
+      );
+      const chevronButton =
+        mozButton.shadowRoot.querySelector("#chevron-button");
+      const panelList = inputCta.shadowRoot.querySelector("panel-list");
+      const shownPromise = ContentTaskUtils.waitForEvent(panelList, "shown");
+      chevronButton.click();
+      await shownPromise;
+
+      const actionItem = panelList.querySelector(
+        `panel-item[icon="${actionType}"]`
+      );
+      actionItem.click();
+    });
+  },
+
+  /**
+   * Wait for the smartbar action to be set.
+   *
+   * @param {object} SpecialPowers - The calling test's SpecialPowers global.
+   * @param {object} browser - The browser element
+   * @param {string} expectedAction - The expected action value
+   */
+  async waitForSmartbarAction(SpecialPowers, browser, expectedAction) {
+    await SpecialPowers.spawn(browser, [expectedAction], async action => {
+      const aiWindow = content.document.querySelector("ai-window");
+      await ContentTaskUtils.waitForMutationCondition(
+        aiWindow.shadowRoot,
+        { childList: true, subtree: true },
+        () => aiWindow.shadowRoot.querySelector("#ai-window-smartbar")
+      );
+      const smartbar = aiWindow.shadowRoot.querySelector("#ai-window-smartbar");
+      await ContentTaskUtils.waitForCondition(
+        () => smartbar.smartbarAction === action,
+        `Wait for smartbar action to be "${action}"`
+      );
+    });
+  },
+
+  /**
+   * @typedef {object} MockToolCall
+   * @property {string} name - The tool function name (e.g. "run_search",
+   *   "get_page_content").
+   * @property {string} [args] - JSON-encoded arguments for the tool call.
+   *   Defaults to "{}".
+   */
+
+  /**
+   * @typedef {object} MockOpenAIServerOptions
+   * @property {string[]} [streamChunks] - Array of content strings sent as
+   *   individual SSE chunks in the streaming response. Defaults to
+   *   ["Hello from mock."].
+   * @property {MockToolCall|null} [toolCall] - When non-null, the first
+   *   streaming request that includes tools will respond with this tool call
+   *   instead of text content. A subsequent request containing the tool result
+   *   will receive followupChunks as the response. Defaults to null.
+   * @property {string[]} [followupChunks] - Content chunks sent in the
+   *   streaming response after a tool result is received. Only used when
+   *   toolCall is set. Defaults to ["Tool complete."].
+   * @property {Function} [onRequest] - Callback invoked with the parsed
+   *   request body for every request to /v1/chat/completions.
+   */
+
+  /**
+   * Starts a local HTTP server that mimics the OpenAI chat completions API.
+   *
+   * Handles both streaming (SSE) and non-streaming (JSON) requests to
+   * /v1/chat/completions. When toolCall is configured, the server simulates
+   * a tool-use round-trip: the first request returns the tool call, and the
+   * follow-up request (containing the tool result) returns followupChunks.
+   *
+   * @deprecated - Please use MockEngineManager in AIWindowTestUtils.sys.mjs unless
+   * a test is explicitly needing to test the network layer of the OpenAI chat protocol.
+   *   TODO (Bug 2045844): Remove and replace existing usages across test files.
+   * @param {MockOpenAIServerOptions} [options]
+   * @returns {{ server: HttpServer, port: number }} The running server and
+   *   its port number.
+   */
+  startMockOpenAI({
+    streamChunks = ["Hello from mock."],
+    streamChunkDelayMs = 0,
+    toolCall = null,
+    followupChunks = ["Tool complete."],
+    onRequest,
+  } = {}) {
+    const server = new HttpServer();
+
+    server.registerPathHandler("/v1/chat/completions", (request, response) => {
+      let bodyText = "";
+      if (request.method === "POST") {
+        try {
+          bodyText = readRequestBody(request);
+        } catch (_) {}
+      }
+
+      let body;
+      try {
+        body = JSON.parse(bodyText || "{}");
+      } catch (_) {
+        body = {};
+      }
+
+      onRequest?.(body);
+
+      const wantsStream = !!body.stream;
+      const tools = Array.isArray(body.tools) ? body.tools : [];
+      const askedForTools = tools.length;
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      const hasToolResult = messages.some(m => m && m.role === "tool");
+      const timestamp = Math.floor(Date.now() / 1000);
+
+      const startSSE = () => {
+        response.setStatusLine(request.httpVersion, 200, "OK");
+        response.setHeader(
+          "Content-Type",
+          "text/event-stream; charset=utf-8",
+          false
+        );
+        response.setHeader("Cache-Control", "no-cache", false);
+        response.setHeader("Access-Control-Allow-Origin", "*", false);
+        response.processAsync();
+      };
+
+      const sendSSE = obj => {
+        // Encode data so special §followup:§-type tokens preserves utf-8
+        response.write(
+          Array.from(
+            new TextEncoder().encode(`data: ${JSON.stringify(obj)}\n\n`),
+            b => String.fromCharCode(b)
+          ).join("")
+        );
+      };
+
+      if (wantsStream && toolCall && askedForTools && !hasToolResult) {
+        startSSE();
+
+        sendSSE({
+          id: "chatcmpl-aiwindow-stream-tool-1",
+          object: "chat.completion.chunk",
+          created: timestamp,
+          model: "aiwindow-mock",
+          choices: [
+            {
+              index: 0,
+              delta: {
+                content: "",
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: "call_1",
+                    type: "function",
+                    function: {
+                      name: toolCall.name,
+                      arguments: toolCall.args ?? "{}",
+                    },
+                  },
+                ],
+              },
+              finish_reason: null,
+            },
+          ],
+        });
+
+        sendSSE({
+          id: "chatcmpl-aiwindow-stream-tool-2",
+          object: "chat.completion.chunk",
+          created: timestamp,
+          model: "aiwindow-mock",
+          choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+        });
+
+        response.write("data: [DONE]\n\n");
+        response.finish();
+        return;
+      }
+
+      if (wantsStream && toolCall && askedForTools && hasToolResult) {
+        startSSE();
+
+        followupChunks.forEach((chunk, index) => {
+          sendSSE({
+            id: `chatcmpl-aiwindow-stream-tool-followup-${index}`,
+            object: "chat.completion.chunk",
+            created: timestamp,
+            model: "aiwindow-mock",
+            choices: [
+              {
+                index: 0,
+                delta: { content: chunk },
+                finish_reason:
+                  index === followupChunks.length - 1 ? "stop" : null,
+              },
+            ],
+          });
+        });
+
+        response.write("data: [DONE]\n\n");
+        response.finish();
+        return;
+      }
+
+      if (wantsStream) {
+        startSSE();
+
+        (async () => {
+          for (const [index, chunk] of streamChunks.entries()) {
+            if (streamChunkDelayMs) {
+              await new Promise(resolve =>
+                setTimeout(resolve, streamChunkDelayMs)
+              );
+            }
+            sendSSE({
+              id: `chatcmpl-aiwindow-stream-${index}`,
+              object: "chat.completion.chunk",
+              created: timestamp,
+              model: "aiwindow-mock",
+              choices: [
+                {
+                  index: 0,
+                  delta: { content: chunk },
+                  finish_reason:
+                    index === streamChunks.length - 1 ? "stop" : null,
+                },
+              ],
+            });
+          }
+
+          response.write("data: [DONE]\n\n");
+          response.finish();
+        })();
+        return;
+      }
+
+      // Non-streaming fallback for conversation starters, title generation, etc.
+      response.setStatusLine(request.httpVersion, 200, "OK");
+      response.setHeader("Content-Type", "application/json", false);
+      response.write(
+        JSON.stringify({
+          id: "chatcmpl-aiwindow-non-stream",
+          object: "chat.completion",
+          created: timestamp,
+          model: "aiwindow-mock",
+          choices: [
+            {
+              index: 0,
+              message: { role: "assistant", content: "Mock response" },
+              finish_reason: "stop",
+            },
+          ],
+        })
+      );
+    });
+
+    server.start(-1);
+    return { server, port: server.identity.primaryPort };
+  },
+
+  /**
+   * Stops a running mock OpenAI server.
+   *
+   * @param {HttpServer} server - The server instance returned by
+   *   startMockOpenAI.
+   * @returns {Promise<void>} Resolves when the server has fully stopped.
+   */
+  stopMockOpenAI(server) {
+    return new Promise(resolve => server.stop(resolve));
+  },
+
+  /**
+   * Convenience wrapper that starts a mock OpenAI server, pushes the endpoint
+   * pref, stubs getFxAccountToken, runs a task, then tears everything down.
+   *
+   * Consider using stubEngineNetworkBoundaries (in the functional suite's
+   * head.js) instead for new tests — it additionally stubs openAIEngine.build
+   * to prevent leaked-window issues from background async operations, and its
+   * setup/restore pattern fits beforeEach/afterEach without requiring a
+   * callback wrapper.
+   *
+   * @param {object} SpecialPowers - The calling test's SpecialPowers global.
+   * @param {MockOpenAIServerOptions} serverOptions - Options for the mock
+   *   server.
+   * @param {Function} task - Async callback receiving { port }.
+   */
+  async withServer(SpecialPowers, serverOptions, task) {
+    const { server, port } = AIWindowTestUtils.startMockOpenAI(serverOptions);
+    await SpecialPowers.pushPrefEnv({
+      set: [
+        ["browser.smartwindow.endpoint", `http://localhost:${port}/v1`],
+        ["browser.smartwindow.customEndpoint", `http://localhost:${port}/v1`],
+      ],
+    });
+
+    const getFxAccountTokenStub = sinon
+      .stub(openAIEngine, "getFxAccountToken")
+      .resolves("mock-fxa-token");
+
+    try {
+      await task({ port });
+    } finally {
+      getFxAccountTokenStub.restore();
+      await SpecialPowers.popPrefEnv();
+      await AIWindowTestUtils.stopMockOpenAI(server);
+    }
   },
 };
