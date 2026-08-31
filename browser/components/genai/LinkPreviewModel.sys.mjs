@@ -519,7 +519,6 @@ export const LinkPreviewModel = {
           engineId: this.engineId,
           featureId: this.id,
           modelFile: "smollm2-360m-instruct-q8_0.gguf",
-          modelHubRootUrl: "https://model-hub.mozilla.org",
           modelId: "HuggingFaceTB/SmolLM2-360M-Instruct-GGUF",
           modelRevision: "main",
           numContext,
