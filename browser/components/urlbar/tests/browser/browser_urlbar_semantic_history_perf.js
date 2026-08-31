@@ -156,7 +156,16 @@ function createSemanticManager() {
 add_task(async function test_semantic_history_perf() {
   UrlbarTestUtils.init(this);
   await SpecialPowers.pushPrefEnv({
-    set: [["places.semanticHistory.featureGate", true]],
+    set: [
+      ["places.semanticHistory.featureGate", true],
+      // DO NOT LAND: cut the embedder to one thread. Regresses the
+      // contextual onnx path (mac/win); the static path (linux) ignores
+      // numThreads, which the flat series confirm.
+      [
+        "browser.ml.overridePipelineOptions",
+        '{"simple-text-embedder":{"numThreads":1}}',
+      ],
+    ],
   });
 
   const semanticManager = createSemanticManager();
