@@ -56,6 +56,36 @@ const perfMetadata = {
           unit: "MiB",
           shouldAlert: false,
         },
+        {
+          name: "LINKPREVIEW-engine-creation",
+          unit: "ms",
+          shouldAlert: false,
+        },
+        {
+          name: "LINKPREVIEW-time-to-first-token",
+          unit: "ms",
+          shouldAlert: false,
+        },
+        {
+          name: "LINKPREVIEW-decoding-time",
+          unit: "ms",
+          shouldAlert: false,
+        },
+        {
+          name: "LINKPREVIEW-tokens-per-second",
+          unit: "tokens/s",
+          shouldAlert: false,
+        },
+        {
+          name: "LINKPREVIEW-input-tokens",
+          unit: "tokens",
+          shouldAlert: false,
+        },
+        {
+          name: "LINKPREVIEW-output-tokens",
+          unit: "tokens",
+          shouldAlert: false,
+        },
       ],
       verbose: true,
       manifest: "perftest.toml",
@@ -162,6 +192,7 @@ add_task(async function test_link_preview_keypoints_perf() {
     info,
     Assert,
     metricPrefix: METRIC_PREFIX,
+    featureId: "link-preview",
     scenario: generateKeyPointsOnce,
   });
 });
