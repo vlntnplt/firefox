@@ -133,7 +133,6 @@ const ENGINE_OPTIONS = new Map([
       modelId: "mozilla/static-embeddings",
       modelRevision: "v1.0.0",
       taskName: "static-embeddings",
-      modelHub: "mozilla",
       backend: "static-embeddings",
       supportedDimensions: [32, 64, 128, 256, 512],
       preferredDimension: 512,
