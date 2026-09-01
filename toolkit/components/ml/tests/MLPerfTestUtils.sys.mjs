@@ -87,7 +87,10 @@ function modelHubPrefs() {
 let activeCapture = null;
 
 function captureFor(pipelineOptions) {
-  if (activeCapture && pipelineOptions?.featureId === activeCapture.featureId) {
+  if (
+    activeCapture &&
+    activeCapture.featureIds.includes(pipelineOptions?.featureId)
+  ) {
     return activeCapture;
   }
   return null;
@@ -111,14 +114,20 @@ MLEngineParent.prototype.getEngine = async function (params) {
   }
   const start = ChromeUtils.now();
   const engine = await original.getEngine.call(this, params);
-  capture.engineCreations.push(ChromeUtils.now() - start);
+  capture.engineCreations.push({
+    featureId: params.pipelineOptions.featureId,
+    ms: ChromeUtils.now() - start,
+  });
   return engine;
 };
 
 MLEngine.prototype.run = async function (request) {
   const result = await original.run.call(this, request);
   if (result?.metrics) {
-    captureFor(this.pipelineOptions)?.runMetrics.push(result.metrics);
+    captureFor(this.pipelineOptions)?.runMetrics.push({
+      featureId: this.pipelineOptions.featureId,
+      metrics: result.metrics,
+    });
   }
   return result;
 };
@@ -126,7 +135,10 @@ MLEngine.prototype.run = async function (request) {
 MLEngine.prototype.runWithGenerator = async function* (request) {
   const result = yield* original.runWithGenerator.call(this, request);
   if (result?.metrics) {
-    captureFor(this.pipelineOptions)?.runMetrics.push(result.metrics);
+    captureFor(this.pipelineOptions)?.runMetrics.push({
+      featureId: this.pipelineOptions.featureId,
+      metrics: result.metrics,
+    });
   }
   return result;
 };
@@ -145,20 +157,21 @@ export const MLPerfTestUtils = {
    * duration of the call: creation durations, and for every run that
    * completes, the metrics the backend reports with its final response. A
    * run the feature abandons mid-stream produces no final response and so
-   * no run metrics.
+   * no run metrics. Features deployed as several engines pass every
+   * featureId; captured entries carry the featureId they belong to.
    *
    * @param {() => Promise<Record<string, number>>} scenario - Runs one full
    *   user interaction and resolves with its spans, keyed by span name.
    * @param {object} [options]
-   * @param {string} [options.featureId] - Capture engine internals for this
-   *   feature.
+   * @param {string|string[]} [options.featureId] - Capture engine internals
+   *   for these features.
    * @param {boolean} [options.sampleMemory=false] - Sample the inference
    *   process memory during the scenario. Sampling perturbs it.
    * @param {number} [options.memorySampleIntervalMs=100] - Sampling interval.
    * @returns {Promise<{
    *   spans: Record<string, number>,
-   *   engineCreations: number[],
-   *   runMetrics: object[],
+   *   engineCreations: {featureId: string, ms: number}[],
+   *   runMetrics: {featureId: string, metrics: object}[],
    *   peakMemory: number | undefined,
    * }>} peakMemory is the sampled peak in MiB.
    */
@@ -169,12 +182,13 @@ export const MLPerfTestUtils = {
     if (activeCapture) {
       throw new Error("Another measurement is already in progress");
     }
-    const capture = { featureId, engineCreations: [], runMetrics: [] };
+    const featureIds = featureId ? [].concat(featureId) : [];
+    const capture = { featureIds, engineCreations: [], runMetrics: [] };
     const sampler = sampleMemory
       ? this.startPeakInferenceMemorySampler(memorySampleIntervalMs)
       : null;
 
-    activeCapture = featureId ? capture : null;
+    activeCapture = featureIds.length ? capture : null;
     let spans;
     let peakMemory;
     try {
@@ -237,7 +251,9 @@ export const MLPerfTestUtils = {
    * addRecord maps a measureScenario record to suffixed series: each span by
    * its name, "engine-creation" per engine created, and every numeric metric
    * of each completed run kebab-cased (e.g. timeToFirstToken becomes
-   * "time-to-first-token"). The run vocabulary is the backend's; the test's
+   * "time-to-first-token"). Engine series of a multi-engine feature are
+   * disambiguated by featureTags (featureId to series-name tag, e.g.
+   * "encoder-"). The run vocabulary is the backend's; the test's
    * perfherder_metrics declarations select which series perfherder ingests,
    * since mozperftest drops any series whose name contains no declared
    * metric name, while every series stays in the perfMetrics log line.
@@ -248,13 +264,15 @@ export const MLPerfTestUtils = {
    * @param {Function} config.info - The mochitest info logger.
    * @param {object} config.Assert - The mochitest Assert object.
    * @param {string} config.metricPrefix - Prefix for every series name.
+   * @param {Record<string, string>} [config.featureTags] - Series-name tags
+   *   for the engine series of a multi-engine feature.
    * @returns {{
    *   add: (name: string, value: number) => void,
    *   addRecord: (record: object, suffix: string) => void,
    *   report: () => void,
    * }}
    */
-  createJournal({ info, Assert, metricPrefix }) {
+  createJournal({ info, Assert, metricPrefix, featureTags = {} }) {
     const series = new Map();
 
     return {
@@ -274,13 +292,17 @@ export const MLPerfTestUtils = {
         for (const [name, value] of Object.entries(record.spans)) {
           this.add(`${name}${suffix}`, value);
         }
-        for (const value of record.engineCreations) {
-          this.add(`engine-creation${suffix}`, value);
+        for (const { featureId, ms } of record.engineCreations) {
+          this.add(
+            `${featureTags[featureId] ?? ""}engine-creation${suffix}`,
+            ms
+          );
         }
-        for (const metrics of record.runMetrics) {
+        for (const { featureId, metrics } of record.runMetrics) {
+          const tag = featureTags[featureId] ?? "";
           for (const [field, value] of Object.entries(metrics)) {
             if (Number.isFinite(value)) {
-              this.add(`${kebabCase(field)}${suffix}`, value);
+              this.add(`${tag}${kebabCase(field)}${suffix}`, value);
             }
           }
         }
@@ -324,8 +346,10 @@ export const MLPerfTestUtils = {
    * @param {Function} config.info - The mochitest info logger.
    * @param {object} config.Assert - The mochitest Assert object.
    * @param {string} config.metricPrefix - Prefix for every reported series.
-   * @param {string} [config.featureId] - Capture engine internals for this
-   *   feature (see measureScenario and createJournal.addRecord).
+   * @param {string|string[]} [config.featureId] - Capture engine internals
+   *   for these features (see measureScenario and createJournal.addRecord).
+   * @param {Record<string, string>} [config.featureTags] - Series-name tags
+   *   for the engine series of a multi-engine feature (see createJournal).
    * @param {() => Promise<Record<string, number>>} config.scenario - Runs one
    *   full user interaction and resolves with its spans, keyed by span name.
    * @param {boolean} [config.measureFirstUse=true] - Measure the
@@ -342,6 +366,7 @@ export const MLPerfTestUtils = {
     Assert,
     metricPrefix,
     featureId,
+    featureTags,
     scenario,
     measureFirstUse = true,
     coldIterations = 5,
@@ -349,7 +374,13 @@ export const MLPerfTestUtils = {
     memoryIterations = 3,
     memorySampleIntervalMs = 100,
   }) {
-    const journal = this.createJournal({ info, Assert, metricPrefix });
+    const featureIds = featureId ? [].concat(featureId) : [];
+    const journal = this.createJournal({
+      info,
+      Assert,
+      metricPrefix,
+      featureTags,
+    });
     const restorePrefs = applyPrefs(modelHubPrefs());
     info(
       `MLPerf environment: modelHubRootUrl=${Services.prefs.getStringPref(
@@ -363,11 +394,10 @@ export const MLPerfTestUtils = {
       if (measureFirstUse) {
         await destroyEngines();
         const firstUse = await measure();
-        if (featureId) {
-          Assert.greater(
-            firstUse.engineCreations.length,
-            0,
-            `The first use created an engine for "${featureId}"`
+        for (const id of featureIds) {
+          Assert.ok(
+            firstUse.engineCreations.some(c => c.featureId === id),
+            `The first use created an engine for "${id}"`
           );
         }
         journal.addRecord(firstUse, "-first-use");
@@ -375,7 +405,14 @@ export const MLPerfTestUtils = {
 
       for (let i = 0; i < coldIterations; i++) {
         await destroyEngines();
-        journal.addRecord(await measure(), "-cold");
+        const record = await measure();
+        for (const id of featureIds) {
+          Assert.ok(
+            record.engineCreations.some(c => c.featureId === id),
+            `The cold run created an engine for "${id}"`
+          );
+        }
+        journal.addRecord(record, "-cold");
       }
 
       if (warmIterations) {

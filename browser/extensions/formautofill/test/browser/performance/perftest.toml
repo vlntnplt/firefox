@@ -1,0 +1,7 @@
+[DEFAULT]
+support-files = [
+  "!/browser/extensions/formautofill/test/fixtures/without_autocomplete_address_basic.html",
+]
+
+["browser_formautofill_ml_perf.js"]
+disabled = "Disabled as we want to run this only as a perftest, not in regular CI."
