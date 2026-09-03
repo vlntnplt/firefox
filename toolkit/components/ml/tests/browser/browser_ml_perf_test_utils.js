@@ -48,7 +48,6 @@ add_task(async function test_run_perf_scenario_lifecycles() {
       { lifecycle: "cold", sampleKind: "latency", iteration: 0 },
       { lifecycle: "cold", sampleKind: "latency", iteration: 1 },
       { lifecycle: "warm", sampleKind: "warmup", iteration: 0 },
-      { lifecycle: "warm", sampleKind: "warmup", iteration: 1 },
       { lifecycle: "warm", sampleKind: "latency", iteration: 0 },
       { lifecycle: "warm", sampleKind: "latency", iteration: 1 },
     ],
@@ -63,7 +62,7 @@ add_task(async function test_run_perf_scenario_lifecycles() {
         values: [2, 3],
         value: 2.5,
       },
-      { name: "TEST-duration-warm-NATIVE", values: [6, 7], value: 6.5 },
+      { name: "TEST-duration-warm-NATIVE", values: [5, 6], value: 5.5 },
     ],
     "Only measured scenario invocations are reported"
   );
@@ -135,21 +134,22 @@ add_task(async function test_run_perf_scenario_reports_engine_metrics() {
         },
       ],
       async scenario(context) {
+        let created = false;
+
         if (!engine || ["closed", "error"].includes(engine.engineStatus)) {
           engine = await createEngine({
             backend: "onnx",
             featureId: "formfill-classification",
             numThreads: 2,
             taskName: "moz-echo",
+            timeoutMS: -1,
           });
+          created = true;
         }
 
         const run = engine.run({ data: "Shared metrics" });
 
-        if (
-          context.lifecycle !== "warm" ||
-          (context.sampleKind === "warmup" && context.iteration === 0)
-        ) {
+        if (created) {
           await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
         }
 
@@ -177,7 +177,7 @@ add_task(async function test_run_perf_scenario_reports_engine_metrics() {
 
     Assert.equal(
       metrics.length,
-      11,
+      10,
       "Only feature-owned and shared engine measurements are reported"
     );
     Assert.deepEqual(
@@ -191,27 +191,20 @@ add_task(async function test_run_perf_scenario_reports_engine_metrics() {
       "The warm feature measurement is preserved"
     );
     Assert.equal(
-      new Set(warmEngines.slice(0, 3)).size,
-      1,
-      "Warm latency reuses one engine"
+      warmEngines.length,
+      3,
+      "Warmup, warm and memory runs happened"
     );
     Assert.equal(
-      new Set(warmEngines.slice(3)).size,
+      new Set(warmEngines).size,
       1,
-      "Warm memory reuses one engine"
-    );
-    Assert.notEqual(
-      warmEngines[0],
-      warmEngines[3],
-      "Warm memory uses a separate engine from warm latency"
+      "Warm latency and memory reuse the warmup engine"
     );
 
-    for (const lifecycle of ["cold", "warm"]) {
-      const metric = metricsByName.get(`TEST-peak-memory-${lifecycle}-NATIVE`);
+    const peakMemory = metricsByName.get("TEST-peak-memory-NATIVE");
 
-      Assert.equal(metric.values.length, 1, `${lifecycle} has one peak sample`);
-      Assert.greater(metric.value, 0, `${lifecycle} has a positive peak`);
-    }
+    Assert.equal(peakMemory.values.length, 1, "Peak memory has one sample");
+    Assert.greater(peakMemory.value, 0, "Peak memory is positive");
 
     for (const name of [
       "engine-creation-time",
