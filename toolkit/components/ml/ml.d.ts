@@ -193,6 +193,9 @@ export interface MLPerfEngineConfig {
   /** The feature ID supplied by production engine options. */
   featureId: string;
 
+  /** Component inserted into shared metric names for multi-engine scenarios. */
+  metricName?: string;
+
   /** Number of runs expected from this engine in each invocation. Defaults to one. */
   expectedRuns?: number;
 
@@ -219,6 +222,13 @@ export interface MLPerfObservedRunResult {
 
   /** Inference-process resources immediately after the run. */
   resourcesAfter?: ResourceMeasurement;
+
+  /** Metrics reported by the inference backend. */
+  metrics?: {
+    decodingTime?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+  };
 }
 
 /** A completed engine run observed during a scenario. */
@@ -234,6 +244,39 @@ export interface MLPerfEngineRunObservation extends MLPerfObservedRunResult {
 
   /** The run completion time. */
   end: number;
+
+  /** Time from the generator request to its first generated token in ms. */
+  timeToFirstToken?: number;
+
+  /** Generated-token throughput observed after the first token arrival. */
+  tokensPerSecond?: number;
+
+  /** Time spent decoding generated tokens in ms. */
+  decodingTime?: number;
+
+  /** Number of input tokens processed by the engine. */
+  inputTokens?: number;
+
+  /** Number of output tokens produced by the engine. */
+  outputTokens?: number;
+}
+
+/** Generation measurements recorded for an engine run. */
+export interface MLPerfEngineRunDetails {
+  /** Time from the generator request to its first generated token in ms. */
+  timeToFirstToken?: number;
+
+  /** Generated-token throughput observed after the first token arrival. */
+  tokensPerSecond?: number;
+
+  /** Time spent decoding generated tokens in ms. */
+  decodingTime?: number;
+
+  /** Number of input tokens processed by the engine. */
+  inputTokens?: number;
+
+  /** Number of output tokens produced by the engine. */
+  outputTokens?: number;
 }
 
 /** A scoped controller for observing engine runs during one scenario. */
@@ -350,6 +393,9 @@ export interface RunPerfScenarioConfig extends MLPerfTestHarness {
   /** Prefix applied to every reported measurement series. */
   metricPrefix: string;
 
+  /** Suffix applied to every reported measurement series. */
+  metricSuffix?: string;
+
   /** Runs one production feature interaction. */
   scenario: MLPerfScenario;
 
@@ -365,7 +411,7 @@ export interface RunPerfScenarioConfig extends MLPerfTestHarness {
   /** Number of warm-engine latency samples. */
   warmIterations?: number;
 
-  /** Number of separately sampled cold-engine peak-memory runs. */
+  /** Peak-memory runs for each measured cold and warm lifecycle. */
   memoryIterations?: number;
 
   /** Delay between inference-process memory samples in milliseconds. */
