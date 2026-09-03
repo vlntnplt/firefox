@@ -49,6 +49,11 @@ suites:
             "Full-Page Translations BaseMemory Model": ""
             "Full-Page Translations Tiny Model": ""
 
+    browser/extensions/formautofill/test/browser/performance:
+        description: "Performance tests for Form Autofill on Firefox Desktop"
+        tests:
+            "browser_formautofill_ml_perf.js": ""
+
     dom/serviceworkers/test/performance:
         description: "Performance tests running through Mochitest for Service Workers"
         tests:
