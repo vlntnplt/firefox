@@ -41,12 +41,56 @@ const ONE_MIB = 1024 * 1024;
 /** The number of unreported scenario runs before warm measurements. */
 const WARMUP_ITERATIONS = 2;
 
+/** Series tags for the ONNX backends a CI task can pin. */
+const BACKEND_TAGS = { "onnx-native": "NATIVE", onnx: "WASM" };
+
+/** The ONNX backends a pinned engine may resolve to. */
+const ONNX_BACKENDS = Object.keys(BACKEND_TAGS);
+
 /**
  * The run capture currently attached to MLEngine.
  *
  * @type {MLPerfEngineRunCapture | null}
  */
 let activeEngineRunCapture = null;
+
+/**
+ * Reads the ONNX backend pinned by the MOZ_ML_BACKENDS environment variable,
+ * which CI sets per task so each backend runs as its own job.
+ *
+ * @returns {string | null} The pinned backend.
+ */
+function pinnedBackend() {
+  const backend = Services.env.get("MOZ_ML_BACKENDS");
+
+  if (!backend) {
+    return null;
+  }
+
+  if (backend.includes(",")) {
+    throw new Error("MOZ_ML_BACKENDS pins a single backend per job.");
+  }
+
+  return backend;
+}
+
+/**
+ * Pins every observed engine that lets production choose its ONNX backend to
+ * the given backend when it is created.
+ *
+ * @param {MLPerfEngineConfig[]} engines - The configured engines.
+ * @param {string} backend - The pinned backend.
+ * @returns {MLPerfEngineConfig[]} The engines with the backend override.
+ */
+function pinEngineBackends(engines, backend) {
+  return engines.map(engine => ({
+    ...engine,
+    overrides: {
+      ...engine.overrides,
+      backend: { expectValue: "best-onnx", replaceWith: backend },
+    },
+  }));
+}
 
 /**
  * Calculates the median of a non-empty series.
@@ -693,6 +737,29 @@ function validateEngineConfigs(engines) {
 }
 
 /**
+ * Verifies that every ONNX engine observed on a run resolved to the pinned
+ * backend. Engines on other backends are not pinned and pass through.
+ *
+ * @param {MLPerfAssertions} Assert - The Mochitest assertions.
+ * @param {MLPerfScenarioObservation} observation - The observed scenario.
+ * @param {string} backend - The pinned backend.
+ * @returns {void}
+ */
+function assertPinnedBackend(Assert, observation, backend) {
+  for (const engine of new Set(observation.engineRuns.map(run => run.engine))) {
+    const resolved = engine.pipelineOptions.backend;
+
+    if (ONNX_BACKENDS.includes(resolved)) {
+      Assert.equal(
+        resolved,
+        backend,
+        `${engine.pipelineOptions.featureId} resolved to the pinned backend`
+      );
+    }
+  }
+}
+
+/**
  * Verifies that each configured engine ran the expected number of times.
  *
  * @param {MLPerfAssertions} Assert - The Mochitest assertions.
@@ -763,6 +830,12 @@ function validateIterationCount(name, value) {
  * Model-source setup is owned by the MozPerftest environment. This utility does
  * not replace the production Remote Settings or Model Hub configuration.
  *
+ * When MOZ_ML_BACKENDS pins an ONNX backend, observed engines that let
+ * production choose theirs (`best-onnx`) are created on the pinned backend,
+ * verified to have resolved to it, and every series is suffixed with its tag.
+ * Engines must therefore be created within the measured scenario for the pin
+ * to apply.
+ *
  * Configured engines report creation and run time, before/after inference
  * process memory, and available generated-token measurements.
  *
@@ -803,6 +876,13 @@ async function runPerfScenario({
   validateIterationCount("warmIterations", warmIterations);
   validateIterationCount("memoryIterations", memoryIterations);
 
+  const backend = pinnedBackend();
+  if (backend) {
+    info(`MOZ_ML_BACKENDS pins the ONNX backend to ${backend}`);
+    metricSuffix = BACKEND_TAGS[backend] ?? backend.toUpperCase();
+    engines = pinEngineBackends(engines, backend);
+  }
+
   const enginesByFeatureId = validateEngineConfigs(engines);
   const journal = createJournal({ info, Assert }, metricSuffix);
 
@@ -820,6 +900,10 @@ async function runPerfScenario({
     });
 
     assertExpectedEngineRuns(Assert, observation, engines);
+
+    if (backend) {
+      assertPinnedBackend(Assert, observation, backend);
+    }
 
     return observation;
   };

@@ -3,11 +3,6 @@
 
 "use strict";
 
-Services.scriptloader.loadSubScript(
-  "chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/head.js",
-  this
-);
-
 const { FormAutofillParent } = ChromeUtils.importESModule(
   "resource://autofill/FormAutofillParent.sys.mjs"
 );

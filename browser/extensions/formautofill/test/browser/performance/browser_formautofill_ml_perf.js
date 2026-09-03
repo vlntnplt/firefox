@@ -258,42 +258,25 @@ requestLongerTimeout(10);
 
 /** This test case measures production ML Form Autofill lifecycles. */
 add_task(async function test_formautofill_ml_performance() {
-  await runMLPerfTestForEachBackend({
-    name: "FORM-AUTOFILL-INTEGRATED",
-    backends: ["onnx-native", "onnx"],
-    run: async ({ backend, tag }) => {
-      for (const architecture of ARCHITECTURES) {
-        await SpecialPowers.pushPrefEnv({
-          set: [
-            ["extensions.formautofill.useml.twoHead", architecture.twoHead],
-          ],
-        });
+  for (const architecture of ARCHITECTURES) {
+    await SpecialPowers.pushPrefEnv({
+      set: [["extensions.formautofill.useml.twoHead", architecture.twoHead]],
+    });
 
-        try {
-          await MLPerfTestUtils.runPerfScenario({
-            Assert,
-            info,
-            metricPrefix: `FORM-AUTOFILL-${architecture.name}`,
-            metricSuffix: tag,
-            scenario: runAutofillScenario,
-            engines: architecture.engines.map(engine => ({
-              ...engine,
-              overrides: {
-                backend: {
-                  expectValue: "best-onnx",
-                  replaceWith: backend,
-                },
-              },
-            })),
-            coldIterations: 5,
-            warmIterations: 5,
-            memoryIterations: 5,
-            peakMemorySampleIntervalMs: 50,
-          });
-        } finally {
-          await SpecialPowers.popPrefEnv();
-        }
-      }
-    },
-  });
+    try {
+      await MLPerfTestUtils.runPerfScenario({
+        Assert,
+        info,
+        metricPrefix: `FORM-AUTOFILL-${architecture.name}`,
+        scenario: runAutofillScenario,
+        engines: architecture.engines,
+        coldIterations: 5,
+        warmIterations: 5,
+        memoryIterations: 5,
+        peakMemorySampleIntervalMs: 50,
+      });
+    } finally {
+      await SpecialPowers.popPrefEnv();
+    }
+  }
 });
