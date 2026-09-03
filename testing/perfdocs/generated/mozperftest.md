@@ -290,6 +290,30 @@ browser_urlbar_semantic_history_perf.js
 **User-perceived latency and inference memory for semantic history search, driven through history ingestion and the production urlbar flow**
 
 
+## browser/components/urlbar/tests/quicksuggest/browser
+
+Performance tests for Firefox Suggest on Firefox Desktop
+
+browser_quicksuggest_ml_perf.js
+===============================
+
+:owner: GenAI Team
+:name: browser_quicksuggest_ml_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:MLSUGGEST-suggestion-latency,unit:ms,shouldAlert:False, name:MLSUGGEST-peak-memory,unit:MiB,shouldAlert:False, name:MLSUGGEST-intent-engine-run-time,unit:ms,shouldAlert:False, name:MLSUGGEST-intent-memory-after-run,unit:MiB,shouldAlert:False, name:MLSUGGEST-ner-engine-run-time,unit:ms,shouldAlert:False, name:MLSUGGEST-ner-memory-after-run,unit:MiB,shouldAlert:False
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for ML-backed Firefox Suggest, driven through the production urlbar flow**
+
+
 ## browser/extensions/formautofill/test/browser/performance
 
 Performance tests for Form Autofill on Firefox Desktop

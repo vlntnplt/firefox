@@ -135,6 +135,7 @@ BROWSER_CHROME_MANIFESTS += [
     "tests/browser/searchbar/browser-proton.toml",
     "tests/quicksuggest/browser/browser-nova.toml",
     "tests/quicksuggest/browser/browser-proton.toml",
+    "tests/quicksuggest/browser/perftest.toml",
 ]
 XPCSHELL_TESTS_MANIFESTS += [
     "tests/quicksuggest/unit/xpcshell.toml",
