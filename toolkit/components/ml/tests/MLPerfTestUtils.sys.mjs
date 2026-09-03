@@ -38,9 +38,6 @@ import { TestUtils } from "resource://testing-common/TestUtils.sys.mjs";
 /** The number of bytes in one mebibyte. */
 const ONE_MIB = 1024 * 1024;
 
-/** The number of unreported scenario runs before warm measurements. */
-const WARMUP_ITERATIONS = 2;
-
 /** Series tags for the ONNX backends a CI task can pin. */
 const BACKEND_TAGS = { "onnx-native": "NATIVE", onnx: "WASM" };
 
@@ -782,10 +779,10 @@ function assertExpectedEngineRuns(Assert, observation, engines) {
 }
 
 /**
- * Verifies that a warm invocation reuses the warmed engines.
+ * Verifies that a warm invocation reuses the engines that served the warmup.
  *
  * @param {MLPerfAssertions} Assert - The Mochitest assertions.
- * @param {MLPerfScenarioObservation} warmup - The initial warmup observation.
+ * @param {MLPerfScenarioObservation} warmup - The warmup observation.
  * @param {MLPerfScenarioObservation} observation - The later warm invocation.
  * @param {MLPerfEngineConfig[]} engines - The configured engines.
  * @returns {void}
@@ -821,11 +818,12 @@ function validateIterationCount(name, value) {
 /**
  * Runs and reports a feature scenario across standard ML lifecycles.
  *
- * The first-use scenario is always invoked once and may be reported. Subsequent
- * cold samples recreate the engine process while retaining the profile's
- * downloaded models. Warm samples run after two unreported engine warmups.
- * Peak-memory sampling uses separate cold and warm runs so it cannot perturb
- * reported latency measurements.
+ * The first-use scenario is always invoked once, landing the models, and may
+ * be reported. Cold samples recreate the engine process while retaining the
+ * profile's downloaded models. Warm samples follow one unreported run of the
+ * scenario and measure the engines that served it, which must not have been
+ * torn down since. Peak memory is sampled in separate runs after the latency
+ * samples so the sampler cannot perturb them.
  *
  * Model-source setup is owned by the MozPerftest environment. This utility does
  * not replace the production Remote Settings or Model Hub configuration.
@@ -854,7 +852,7 @@ function validateIterationCount(name, value) {
  *   after the first use.
  * @param {number} [config.warmIterations=0] - Warm-engine latency samples.
  * @param {number} [config.memoryIterations=3] - Separately sampled peak-memory
- *   runs for each measured cold and warm lifecycle.
+ *   runs after the latency samples.
  * @param {number} [config.peakMemorySampleIntervalMs=100] - Delay between memory
  *   samples in milliseconds.
  * @returns {Promise<void>}
@@ -909,43 +907,25 @@ async function runPerfScenario({
   };
 
   /**
-   * Runs the unreported warmups and returns the engines that must be reused.
+   * Runs the scenario once, unreported, so the warm samples that follow
+   * measure engines that have served it and have not been torn down since.
    *
-   * @returns {Promise<MLPerfScenarioObservation>} The initial warmup
-   *   observation.
+   * @returns {Promise<MLPerfScenarioObservation>} The warmup observation,
+   *   whose engines the warm samples must reuse.
    */
-  const runWarmups = async () => {
-    await destroyEngines();
-    const initialWarmup = await measure({
-      lifecycle: "warm",
-      sampleKind: "warmup",
-      iteration: 0,
-    });
-
-    for (let iteration = 1; iteration < WARMUP_ITERATIONS; iteration++) {
-      const warmup = await measure(
-        {
-          lifecycle: "warm",
-          sampleKind: "warmup",
-          iteration,
-        },
-        { captureEngineCreation: false }
-      );
-
-      assertWarmEngineReuse(Assert, initialWarmup, warmup, engines);
-    }
-
-    return initialWarmup;
-  };
+  const warmUp = () =>
+    measure(
+      { lifecycle: "warm", sampleKind: "warmup", iteration: 0 },
+      { captureEngineCreation: false }
+    );
 
   /**
    * Reports one peak inference-process memory observation.
    *
-   * @param {MLPerfLifecycle} lifecycle - The measured engine lifecycle.
    * @param {MLPerfScenarioObservation} observation - The sampled scenario.
    * @returns {void}
    */
-  const addPeakMemoryMeasurement = (lifecycle, observation) => {
+  const addPeakMemoryMeasurement = observation => {
     if (observation.peakMemory === undefined) {
       throw new Error("Peak memory sampling did not return a measurement.");
     }
@@ -955,10 +935,7 @@ async function runPerfScenario({
       0,
       "The memory sampler observed the inference process"
     );
-    journal.add(
-      `${metricPrefix}-peak-memory-${lifecycle}`,
-      observation.peakMemory
-    );
+    journal.add(`${metricPrefix}-peak-memory`, observation.peakMemory);
   };
 
   try {
@@ -997,7 +974,7 @@ async function runPerfScenario({
     }
 
     if (warmIterations) {
-      const initialWarmup = await runWarmups();
+      const warmup = await warmUp();
 
       for (let iteration = 0; iteration < warmIterations; iteration++) {
         const observation = await measure(
@@ -1009,7 +986,7 @@ async function runPerfScenario({
           { captureEngineCreation: false }
         );
 
-        assertWarmEngineReuse(Assert, initialWarmup, observation, engines);
+        assertWarmEngineReuse(Assert, warmup, observation, engines);
         addObservationMeasurements(
           journal,
           metricPrefix,
@@ -1020,43 +997,24 @@ async function runPerfScenario({
       }
     }
 
+    // Peak memory is sampled in separate runs so the sampler cannot perturb
+    // the latency samples. The engines are in whatever state the feature
+    // leaves them in.
     for (let iteration = 0; iteration < memoryIterations; iteration++) {
-      await destroyEngines();
       const observation = await measure(
         {
-          lifecycle: "cold",
+          lifecycle: "warm",
           sampleKind: "memory",
           iteration,
         },
         {
+          captureEngineCreation: false,
           samplePeakMemory: true,
           peakMemorySampleIntervalMs,
         }
       );
 
-      addPeakMemoryMeasurement("cold", observation);
-    }
-
-    if (warmIterations && memoryIterations) {
-      const initialWarmup = await runWarmups();
-
-      for (let iteration = 0; iteration < memoryIterations; iteration++) {
-        const observation = await measure(
-          {
-            lifecycle: "warm",
-            sampleKind: "memory",
-            iteration,
-          },
-          {
-            captureEngineCreation: false,
-            samplePeakMemory: true,
-            peakMemorySampleIntervalMs,
-          }
-        );
-
-        assertWarmEngineReuse(Assert, initialWarmup, observation, engines);
-        addPeakMemoryMeasurement("warm", observation);
-      }
+      addPeakMemoryMeasurement(observation);
     }
   } finally {
     await destroyEngines();

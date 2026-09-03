@@ -83,12 +83,7 @@ const perfMetadata = {
           shouldAlert: true,
         },
         {
-          name: "FORM-AUTOFILL-single-engine-peak-memory-cold",
-          unit: "MiB",
-          shouldAlert: true,
-        },
-        {
-          name: "FORM-AUTOFILL-single-engine-peak-memory-warm",
+          name: "FORM-AUTOFILL-single-engine-peak-memory",
           unit: "MiB",
           shouldAlert: true,
         },
@@ -108,12 +103,7 @@ const perfMetadata = {
           shouldAlert: true,
         },
         {
-          name: "FORM-AUTOFILL-double-engine-peak-memory-cold",
-          unit: "MiB",
-          shouldAlert: true,
-        },
-        {
-          name: "FORM-AUTOFILL-double-engine-peak-memory-warm",
+          name: "FORM-AUTOFILL-double-engine-peak-memory",
           unit: "MiB",
           shouldAlert: true,
         },
