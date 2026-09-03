@@ -88,6 +88,8 @@ support-files = [
 
 ["browser_ml_opfs.js"]
 
+["browser_ml_perf_test_utils.js"]
+
 ["browser_ml_pipeline.js"]
 
 ["browser_ml_privatebrowsing.js"]
