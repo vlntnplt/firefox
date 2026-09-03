@@ -266,6 +266,30 @@ browser_translations_perf_tiny.js
 **Tests the performance of Full Page Translations with a tiny-architecture model**
 
 
+## browser/components/urlbar/tests/browser
+
+Performance tests for urlbar features on Firefox Desktop
+
+browser_urlbar_semantic_history_perf.js
+=======================================
+
+:owner: GenAI Team
+:name: browser_urlbar_semantic_history_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:SEMANTICHISTORY-index-build-latency,unit:ms,shouldAlert:False, name:SEMANTICHISTORY-semantic-result-latency,unit:ms,shouldAlert:False, name:SEMANTICHISTORY-peak-memory,unit:MiB,shouldAlert:False, name:SEMANTICHISTORY-engine-creation-time,unit:ms,shouldAlert:False, name:SEMANTICHISTORY-engine-run-time,unit:ms,shouldAlert:False, name:SEMANTICHISTORY-memory-after-run,unit:MiB,shouldAlert:False
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for semantic history search, driven through history ingestion and the production urlbar flow**
+
+
 ## browser/extensions/formautofill/test/browser/performance
 
 Performance tests for Form Autofill on Firefox Desktop

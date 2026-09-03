@@ -130,6 +130,7 @@ BROWSER_CHROME_MANIFESTS += [
     "tests/browser/browser-proton.toml",
     "tests/browser/browserDisableAPZ.toml",
     "tests/browser/browserSidebarRevamp.toml",
+    "tests/browser/perftest.toml",
     "tests/browser/searchbar/browser-nova.toml",
     "tests/browser/searchbar/browser-proton.toml",
     "tests/quicksuggest/browser/browser-nova.toml",
