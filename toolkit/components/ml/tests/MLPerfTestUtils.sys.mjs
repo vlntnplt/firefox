@@ -8,6 +8,7 @@
  *   EngineFeatureIds,
  *   MLPerfAssertions,
  *   MLPerfEngineConfig,
+ *   MLPerfEngineRunDetails,
  *   MLPerfEngineRunCapture,
  *   MLPerfEngineRunObservation,
  *   MLPerfJournal,
@@ -225,9 +226,10 @@ function startEngineRunCapture(enginesByFeatureId) {
    * @param {number} start - The run start time.
    * @param {MLPerfObservedRunResult | undefined} result - The completed run
    *   result.
+   * @param {MLPerfEngineRunDetails} details - Generation measurements.
    * @returns {void}
    */
-  const recordRun = (engine, config, start, result) => {
+  const recordRun = (engine, config, start, result, details) => {
     engineRuns.push({
       featureId: config.featureId,
       engine,
@@ -235,6 +237,7 @@ function startEngineRunCapture(enginesByFeatureId) {
       end: ChromeUtils.now(),
       resourcesBefore: result?.resourcesBefore,
       resourcesAfter: result?.resourcesAfter,
+      ...details,
     });
   };
 
@@ -258,7 +261,7 @@ function startEngineRunCapture(enginesByFeatureId) {
 
     try {
       const result = await originalRun.call(this, request);
-      recordRun(this, config, start, result);
+      recordRun(this, config, start, result, {});
 
       return result;
     } finally {
@@ -273,15 +276,88 @@ function startEngineRunCapture(enginesByFeatureId) {
     }
 
     const start = ChromeUtils.now();
+    const generator = originalRunWithGenerator.call(this, request);
+    let completed = false;
+    let failed = false;
+    let firstTokenTime = null;
+    let firstChunkTokens = 0;
+    let lastTokenTime = null;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let result;
     activeRuns++;
 
     try {
-      const result = yield* originalRunWithGenerator.call(this, request);
-      recordRun(this, config, start, result);
+      while (true) {
+        const step = await generator.next();
+
+        if (step.done) {
+          result = step.value;
+          completed = true;
+          break;
+        }
+
+        const chunk = step.value;
+        const tokenCount = chunk.tokens?.length ?? 0;
+
+        if (chunk.isPrompt) {
+          inputTokens += tokenCount;
+          yield chunk;
+          continue;
+        }
+
+        if (tokenCount) {
+          const now = ChromeUtils.now();
+
+          if (firstTokenTime === null) {
+            firstTokenTime = now;
+            firstChunkTokens = tokenCount;
+          }
+
+          lastTokenTime = now;
+          outputTokens += tokenCount;
+        }
+
+        yield chunk;
+      }
 
       return result;
+    } catch (error) {
+      failed = true;
+      throw error;
     } finally {
-      activeRuns--;
+      try {
+        if (!completed) {
+          await generator.return(undefined);
+        }
+
+        if (!failed) {
+          /** @type {MLPerfEngineRunDetails} */
+          const details = {};
+          const metrics = result?.metrics;
+
+          details.inputTokens = metrics?.inputTokens ?? inputTokens;
+          details.outputTokens = metrics?.outputTokens ?? outputTokens;
+
+          if (firstTokenTime !== null && lastTokenTime !== null) {
+            details.timeToFirstToken = firstTokenTime - start;
+            details.decodingTime =
+              metrics?.decodingTime ?? lastTokenTime - firstTokenTime;
+
+            const generationTime = lastTokenTime - firstTokenTime;
+            const timedOutputTokens = outputTokens - firstChunkTokens;
+
+            if (generationTime > 0 && timedOutputTokens > 0) {
+              details.tokensPerSecond =
+                timedOutputTokens / (generationTime / 1000);
+            }
+          }
+
+          recordRun(this, config, start, result, details);
+        }
+      } finally {
+        activeRuns--;
+      }
     }
   };
 
@@ -409,9 +485,10 @@ async function measureScenarioInvocation(
  * @param {MLPerfTestHarness} harness - The calling test's harness globals.
  * @param {(message: string) => void} harness.info - The Mochitest info logger.
  * @param {MLPerfAssertions} harness.Assert - The Mochitest assertions.
+ * @param {string} [metricSuffix=""] - Suffix applied to every series name.
  * @returns {MLPerfJournal} The measurement journal.
  */
-function createJournal({ info, Assert }) {
+function createJournal({ info, Assert }, metricSuffix = "") {
   /** @type {Map<string, number[]>} */
   const series = new Map();
 
@@ -424,13 +501,18 @@ function createJournal({ info, Assert }) {
      * @returns {void}
      */
     add(name, value) {
-      Assert.ok(Number.isFinite(value), `${name} is a finite measurement`);
+      const seriesName = metricSuffix ? `${name}-${metricSuffix}` : name;
 
-      if (!series.has(name)) {
-        series.set(name, []);
+      Assert.ok(
+        Number.isFinite(value),
+        `${seriesName} is a finite measurement`
+      );
+
+      if (!series.has(seriesName)) {
+        series.set(seriesName, []);
       }
 
-      series.get(name).push(value);
+      series.get(seriesName).push(value);
     },
 
     /**
@@ -470,6 +552,104 @@ function addMeasurements(journal, metricPrefix, lifecycle, measurements) {
 }
 
 /**
+ * Builds the prefix for one engine's shared measurements.
+ *
+ * @param {string} metricPrefix - The feature's metric prefix.
+ * @param {MLPerfEngineConfig | undefined} engine - The measured engine.
+ * @returns {string} The engine measurement prefix.
+ */
+function engineMetricPrefix(metricPrefix, engine) {
+  if (!engine) {
+    throw new Error("An observed engine has no reporting configuration.");
+  }
+
+  return engine.metricName
+    ? `${metricPrefix}-${engine.metricName}`
+    : metricPrefix;
+}
+
+/**
+ * Adds feature-owned and shared engine measurements for one lifecycle.
+ *
+ * @param {MLPerfJournal} journal - The measurement journal.
+ * @param {string} metricPrefix - The feature's metric prefix.
+ * @param {MLPerfLifecycle} lifecycle - The measured engine lifecycle.
+ * @param {MLPerfScenarioObservation} observation - The measured scenario.
+ * @param {Map<string, MLPerfEngineConfig>} enginesByFeatureId - Engines keyed by feature ID.
+ * @returns {void}
+ */
+function addObservationMeasurements(
+  journal,
+  metricPrefix,
+  lifecycle,
+  observation,
+  enginesByFeatureId
+) {
+  addMeasurements(journal, metricPrefix, lifecycle, observation.measurements);
+
+  for (const creation of observation.engineCreations) {
+    const prefix = engineMetricPrefix(
+      metricPrefix,
+      enginesByFeatureId.get(creation.featureId)
+    );
+
+    journal.add(
+      `${prefix}-engine-creation-time-${lifecycle}`,
+      creation.end - creation.start
+    );
+  }
+
+  for (const run of observation.engineRuns) {
+    const prefix = engineMetricPrefix(
+      metricPrefix,
+      enginesByFeatureId.get(run.featureId)
+    );
+
+    journal.add(`${prefix}-engine-run-time-${lifecycle}`, run.end - run.start);
+
+    if (run.resourcesBefore?.memory != null) {
+      journal.add(
+        `${prefix}-memory-before-run-${lifecycle}`,
+        Math.round(run.resourcesBefore.memory / ONE_MIB)
+      );
+    }
+
+    if (run.resourcesAfter?.memory != null) {
+      journal.add(
+        `${prefix}-memory-after-run-${lifecycle}`,
+        Math.round(run.resourcesAfter.memory / ONE_MIB)
+      );
+    }
+
+    if (run.timeToFirstToken !== undefined) {
+      journal.add(
+        `${prefix}-time-to-first-token-${lifecycle}`,
+        run.timeToFirstToken
+      );
+    }
+
+    if (run.tokensPerSecond !== undefined) {
+      journal.add(
+        `${prefix}-tokens-per-second-${lifecycle}`,
+        run.tokensPerSecond
+      );
+    }
+
+    if (run.decodingTime !== undefined) {
+      journal.add(`${prefix}-decoding-time-${lifecycle}`, run.decodingTime);
+    }
+
+    if (run.inputTokens !== undefined) {
+      journal.add(`${prefix}-input-tokens-${lifecycle}`, run.inputTokens);
+    }
+
+    if (run.outputTokens !== undefined) {
+      journal.add(`${prefix}-output-tokens-${lifecycle}`, run.outputTokens);
+    }
+  }
+}
+
+/**
  * Validates engine configuration and indexes it by feature ID.
  *
  * @param {MLPerfEngineConfig[]} engines - The configured engines.
@@ -477,12 +657,36 @@ function addMeasurements(journal, metricPrefix, lifecycle, measurements) {
  */
 function validateEngineConfigs(engines) {
   const enginesByFeatureId = indexEngines(engines);
+  const metricNames = new Set();
 
   for (const engine of engines) {
     validateIterationCount(
       `${engine.featureId}.expectedRuns`,
       engine.expectedRuns ?? 1
     );
+
+    if (
+      engine.metricName !== undefined &&
+      (typeof engine.metricName !== "string" || !engine.metricName)
+    ) {
+      throw new TypeError("An engine metricName must be a non-empty string.");
+    }
+
+    if (engines.length > 1 && !engine.metricName) {
+      throw new Error(
+        `The engine "${engine.featureId}" needs a metricName in a multi-engine scenario.`
+      );
+    }
+
+    if (engine.metricName) {
+      if (metricNames.has(engine.metricName)) {
+        throw new Error(
+          `The engine metricName "${engine.metricName}" is configured more than once.`
+        );
+      }
+
+      metricNames.add(engine.metricName);
+    }
   }
 
   return enginesByFeatureId;
@@ -550,19 +754,23 @@ function validateIterationCount(name, value) {
 /**
  * Runs and reports a feature scenario across standard ML lifecycles.
  *
- * The first-use sample is intentionally collected once. Subsequent
+ * The first-use scenario is always invoked once and may be reported. Subsequent
  * cold samples recreate the engine process while retaining the profile's
  * downloaded models. Warm samples run after two unreported engine warmups.
- * Memory sampling uses separate cold runs so it cannot perturb reported
- * latency measurements.
+ * Peak-memory sampling uses separate cold and warm runs so it cannot perturb
+ * reported latency measurements.
  *
  * Model-source setup is owned by the MozPerftest environment. This utility does
  * not replace the production Remote Settings or Model Hub configuration.
+ *
+ * Configured engines report creation and run time, before/after inference
+ * process memory, and available generated-token measurements.
  *
  * @param {RunPerfScenarioConfig} config - The scenario configuration.
  * @param {(message: string) => void} config.info - The Mochitest info logger.
  * @param {MLPerfAssertions} config.Assert - The Mochitest assertions.
  * @param {string} config.metricPrefix - Prefix for every reported series.
+ * @param {string} [config.metricSuffix=""] - Suffix for every reported series.
  * @param {RunPerfScenarioConfig["scenario"]} config.scenario - Runs one
  *   production feature interaction.
  * @param {MLPerfEngineConfig[]} [config.engines=[]] - Engines whose production
@@ -572,8 +780,8 @@ function validateIterationCount(name, value) {
  * @param {number} [config.coldIterations=5] - Cold-engine latency samples
  *   after the first use.
  * @param {number} [config.warmIterations=0] - Warm-engine latency samples.
- * @param {number} [config.memoryIterations=3] - Separately sampled cold-engine
- *   peak-memory runs.
+ * @param {number} [config.memoryIterations=3] - Separately sampled peak-memory
+ *   runs for each measured cold and warm lifecycle.
  * @param {number} [config.peakMemorySampleIntervalMs=100] - Delay between memory
  *   samples in milliseconds.
  * @returns {Promise<void>}
@@ -582,6 +790,7 @@ async function runPerfScenario({
   info,
   Assert,
   metricPrefix,
+  metricSuffix = "",
   scenario,
   engines = [],
   measureFirstUse = true,
@@ -594,8 +803,8 @@ async function runPerfScenario({
   validateIterationCount("warmIterations", warmIterations);
   validateIterationCount("memoryIterations", memoryIterations);
 
-  validateEngineConfigs(engines);
-  const journal = createJournal({ info, Assert });
+  const enginesByFeatureId = validateEngineConfigs(engines);
+  const journal = createJournal({ info, Assert }, metricSuffix);
 
   /**
    * Observes and validates one lifecycle invocation.
@@ -615,6 +824,59 @@ async function runPerfScenario({
     return observation;
   };
 
+  /**
+   * Runs the unreported warmups and returns the engines that must be reused.
+   *
+   * @returns {Promise<MLPerfScenarioObservation>} The initial warmup
+   *   observation.
+   */
+  const runWarmups = async () => {
+    await destroyEngines();
+    const initialWarmup = await measure({
+      lifecycle: "warm",
+      sampleKind: "warmup",
+      iteration: 0,
+    });
+
+    for (let iteration = 1; iteration < WARMUP_ITERATIONS; iteration++) {
+      const warmup = await measure(
+        {
+          lifecycle: "warm",
+          sampleKind: "warmup",
+          iteration,
+        },
+        { captureEngineCreation: false }
+      );
+
+      assertWarmEngineReuse(Assert, initialWarmup, warmup, engines);
+    }
+
+    return initialWarmup;
+  };
+
+  /**
+   * Reports one peak inference-process memory observation.
+   *
+   * @param {MLPerfLifecycle} lifecycle - The measured engine lifecycle.
+   * @param {MLPerfScenarioObservation} observation - The sampled scenario.
+   * @returns {void}
+   */
+  const addPeakMemoryMeasurement = (lifecycle, observation) => {
+    if (observation.peakMemory === undefined) {
+      throw new Error("Peak memory sampling did not return a measurement.");
+    }
+
+    Assert.greater(
+      observation.peakMemory,
+      0,
+      "The memory sampler observed the inference process"
+    );
+    journal.add(
+      `${metricPrefix}-peak-memory-${lifecycle}`,
+      observation.peakMemory
+    );
+  };
+
   try {
     await destroyEngines();
     const firstUse = await measure({
@@ -624,11 +886,12 @@ async function runPerfScenario({
     });
 
     if (measureFirstUse) {
-      addMeasurements(
+      addObservationMeasurements(
         journal,
         metricPrefix,
         "first-use",
-        firstUse.measurements
+        firstUse,
+        enginesByFeatureId
       );
     }
 
@@ -640,29 +903,17 @@ async function runPerfScenario({
         iteration,
       });
 
-      addMeasurements(journal, metricPrefix, "cold", observation.measurements);
+      addObservationMeasurements(
+        journal,
+        metricPrefix,
+        "cold",
+        observation,
+        enginesByFeatureId
+      );
     }
 
     if (warmIterations) {
-      await destroyEngines();
-      let initialWarmup;
-
-      for (let iteration = 0; iteration < WARMUP_ITERATIONS; iteration++) {
-        const warmup = await measure(
-          {
-            lifecycle: "warm",
-            sampleKind: "warmup",
-            iteration,
-          },
-          { captureEngineCreation: iteration === 0 }
-        );
-
-        if (initialWarmup) {
-          assertWarmEngineReuse(Assert, initialWarmup, warmup, engines);
-        } else {
-          initialWarmup = warmup;
-        }
-      }
+      const initialWarmup = await runWarmups();
 
       for (let iteration = 0; iteration < warmIterations; iteration++) {
         const observation = await measure(
@@ -675,11 +926,12 @@ async function runPerfScenario({
         );
 
         assertWarmEngineReuse(Assert, initialWarmup, observation, engines);
-        addMeasurements(
+        addObservationMeasurements(
           journal,
           metricPrefix,
           "warm",
-          observation.measurements
+          observation,
+          enginesByFeatureId
         );
       }
     }
@@ -698,19 +950,29 @@ async function runPerfScenario({
         }
       );
 
-      if (observation.peakMemory === undefined) {
-        throw new Error("Peak memory sampling did not return a measurement.");
-      }
+      addPeakMemoryMeasurement("cold", observation);
+    }
 
-      Assert.greater(
-        observation.peakMemory,
-        0,
-        "The memory sampler observed the inference process"
-      );
-      journal.add(
-        `${metricPrefix}-peak-inference-process-memory-cold`,
-        observation.peakMemory
-      );
+    if (warmIterations && memoryIterations) {
+      const initialWarmup = await runWarmups();
+
+      for (let iteration = 0; iteration < memoryIterations; iteration++) {
+        const observation = await measure(
+          {
+            lifecycle: "warm",
+            sampleKind: "memory",
+            iteration,
+          },
+          {
+            captureEngineCreation: false,
+            samplePeakMemory: true,
+            peakMemorySampleIntervalMs,
+          }
+        );
+
+        assertWarmEngineReuse(Assert, initialWarmup, observation, engines);
+        addPeakMemoryMeasurement("warm", observation);
+      }
     }
   } finally {
     await destroyEngines();

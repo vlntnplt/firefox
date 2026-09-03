@@ -31,6 +31,7 @@ add_task(async function test_run_perf_scenario_lifecycles() {
       message = value;
     },
     metricPrefix: "TEST",
+    metricSuffix: "NATIVE",
     async scenario(context) {
       contexts.push(context);
       return { duration: contexts.length };
@@ -56,13 +57,13 @@ add_task(async function test_run_perf_scenario_lifecycles() {
   Assert.deepEqual(
     JSON.parse(message.replace("perfMetrics | ", "")),
     [
-      { name: "TEST-duration-first-use", values: [1], value: 1 },
+      { name: "TEST-duration-first-use-NATIVE", values: [1], value: 1 },
       {
-        name: "TEST-duration-cold",
+        name: "TEST-duration-cold-NATIVE",
         values: [2, 3],
         value: 2.5,
       },
-      { name: "TEST-duration-warm", values: [6, 7], value: 6.5 },
+      { name: "TEST-duration-warm-NATIVE", values: [6, 7], value: 6.5 },
     ],
     "Only measured scenario invocations are reported"
   );
@@ -105,6 +106,141 @@ add_task(async function test_run_perf_scenario_unreported_first_use() {
     [{ name: "TEST-duration-cold", values: [2], value: 2 }],
     "Only the cold invocation is reported"
   );
+});
+
+/**
+ * This test case ensures the runner reports shared and peak memory while
+ * reusing one engine within each warm measurement phase.
+ */
+add_task(async function test_run_perf_scenario_reports_engine_metrics() {
+  const { cleanup, remoteClients } = await setup();
+  const warmEngines = [];
+  let engine;
+  let message;
+
+  try {
+    await MLPerfTestUtils.runPerfScenario({
+      Assert,
+      info(value) {
+        message = value;
+      },
+      metricPrefix: "TEST",
+      metricSuffix: "NATIVE",
+      engines: [
+        {
+          featureId: "formfill-classification",
+          overrides: {
+            numThreads: { expectValue: 2, replaceWith: 1 },
+          },
+        },
+      ],
+      async scenario(context) {
+        if (!engine || ["closed", "error"].includes(engine.engineStatus)) {
+          engine = await createEngine({
+            backend: "onnx",
+            featureId: "formfill-classification",
+            numThreads: 2,
+            taskName: "moz-echo",
+          });
+        }
+
+        const run = engine.run({ data: "Shared metrics" });
+
+        if (
+          context.lifecycle !== "warm" ||
+          (context.sampleKind === "warmup" && context.iteration === 0)
+        ) {
+          await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+        }
+
+        const result = await run;
+
+        if (context.lifecycle === "warm") {
+          warmEngines.push(engine);
+        }
+
+        Assert.equal(
+          result.output.echo,
+          "Shared metrics",
+          "The production engine completes inference"
+        );
+
+        return { duration: 5 };
+      },
+      coldIterations: 0,
+      warmIterations: 1,
+      memoryIterations: 1,
+    });
+
+    const metrics = JSON.parse(message.replace("perfMetrics | ", ""));
+    const metricsByName = new Map(metrics.map(metric => [metric.name, metric]));
+
+    Assert.equal(
+      metrics.length,
+      11,
+      "Only feature-owned and shared engine measurements are reported"
+    );
+    Assert.deepEqual(
+      metricsByName.get("TEST-duration-first-use-NATIVE"),
+      { name: "TEST-duration-first-use-NATIVE", values: [5], value: 5 },
+      "The feature-owned measurement is preserved"
+    );
+    Assert.deepEqual(
+      metricsByName.get("TEST-duration-warm-NATIVE"),
+      { name: "TEST-duration-warm-NATIVE", values: [5], value: 5 },
+      "The warm feature measurement is preserved"
+    );
+    Assert.equal(
+      new Set(warmEngines.slice(0, 3)).size,
+      1,
+      "Warm latency reuses one engine"
+    );
+    Assert.equal(
+      new Set(warmEngines.slice(3)).size,
+      1,
+      "Warm memory reuses one engine"
+    );
+    Assert.notEqual(
+      warmEngines[0],
+      warmEngines[3],
+      "Warm memory uses a separate engine from warm latency"
+    );
+
+    for (const lifecycle of ["cold", "warm"]) {
+      const metric = metricsByName.get(`TEST-peak-memory-${lifecycle}-NATIVE`);
+
+      Assert.equal(metric.values.length, 1, `${lifecycle} has one peak sample`);
+      Assert.greater(metric.value, 0, `${lifecycle} has a positive peak`);
+    }
+
+    for (const name of [
+      "engine-creation-time",
+      "engine-run-time",
+      "memory-before-run",
+      "memory-after-run",
+    ]) {
+      const lifecycles =
+        name === "engine-creation-time" ? ["first-use"] : ["first-use", "warm"];
+
+      for (const lifecycle of lifecycles) {
+        const metric = metricsByName.get(`TEST-${name}-${lifecycle}-NATIVE`);
+
+        Assert.ok(metric, `${name} is reported for ${lifecycle}`);
+        Assert.equal(
+          metric.values.length,
+          1,
+          `${name} has one ${lifecycle} replicate`
+        );
+        Assert.ok(
+          Number.isFinite(metric.value),
+          `${name} has a finite ${lifecycle} median`
+        );
+      }
+    }
+  } finally {
+    await PerfTestEngineProcess.destroyMLEngine();
+    await cleanup();
+  }
 });
 
 /**
@@ -163,12 +299,14 @@ add_task(async function test_run_perf_scenario_observes_real_engines() {
       engines: [
         {
           featureId: "formfill-encoder",
+          metricName: "encoder",
           overrides: {
             numThreads: { expectValue: 2, replaceWith: 1 },
           },
         },
         {
           featureId: "formfill-head",
+          metricName: "head",
           overrides: {
             numThreads: { expectValue: 2, replaceWith: 1 },
           },
@@ -217,11 +355,35 @@ add_task(async function test_run_perf_scenario_observes_real_engines() {
       memoryIterations: 0,
     });
 
+    const metrics = JSON.parse(message.replace("perfMetrics | ", ""));
+    const metricsByName = new Map(metrics.map(metric => [metric.name, metric]));
+
+    Assert.equal(
+      metrics.length,
+      9,
+      "Only the feature and configured engines report measurements"
+    );
     Assert.deepEqual(
-      JSON.parse(message.replace("perfMetrics | ", "")),
-      [{ name: "TEST-duration-first-use", values: [5], value: 5 }],
+      metricsByName.get("TEST-duration-first-use"),
+      { name: "TEST-duration-first-use", values: [5], value: 5 },
       "The feature measurement is reported"
     );
+
+    for (const engineName of ["encoder", "head"]) {
+      for (const metricName of [
+        "engine-creation-time",
+        "engine-run-time",
+        "memory-before-run",
+        "memory-after-run",
+      ]) {
+        const metric = metricsByName.get(
+          `TEST-${engineName}-${metricName}-first-use`
+        );
+
+        Assert.ok(metric, `${engineName} reports ${metricName}`);
+        Assert.equal(metric.values.length, 1, "The metric has one replicate");
+      }
+    }
     Assert.equal(
       PerfTestMLEngineParent.prototype.getEngine,
       originalGetEngine,
@@ -296,18 +458,27 @@ add_task(async function test_run_perf_scenario_rejects_an_active_engine_run() {
 });
 
 /**
- * This test case ensures generator observation forwards chunks and restores
- * the production method after completion.
+ * This test case ensures completed and intentionally abandoned generators
+ * report generation metrics without fabricating final resources.
  */
-add_task(async function test_run_perf_scenario_observes_generator() {
+add_task(async function test_run_perf_scenario_observes_generator_lifecycles() {
   const { cleanup, remoteClients } = await setup();
   const runWithGeneratorStub = perfTestSinon
     .stub(PerfTestMLEngine.prototype, "runWithGenerator")
     .callsFake(async function* () {
+      yield { text: "", tokens: [10, 11], isPrompt: true };
+      await TestUtils.waitForTick();
       yield { text: "A", tokens: [1], isPrompt: false };
+      await TestUtils.waitForTick();
+      yield { text: "B", tokens: [2], isPrompt: false };
       return {
         resourcesBefore: { cpuTime: 1, memory: 2 * 1024 * 1024 },
         resourcesAfter: { cpuTime: 2, memory: 3 * 1024 * 1024 },
+        metrics: {
+          decodingTime: 10,
+          inputTokens: 2,
+          outputTokens: 2,
+        },
       };
     });
   let message;
@@ -319,7 +490,7 @@ add_task(async function test_run_perf_scenario_observes_generator() {
         message = value;
       },
       metricPrefix: "TEST",
-      engines: [{ featureId: "link-preview" }],
+      engines: [{ featureId: "link-preview", expectedRuns: 2 }],
       async scenario() {
         const engine = await createEngine({
           backend: "onnx",
@@ -329,8 +500,24 @@ add_task(async function test_run_perf_scenario_observes_generator() {
 
         await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
 
+        const chunks = [];
+
         for await (const chunk of engine.runWithGenerator({})) {
-          Assert.equal(chunk.text, "A", "The production chunk passes through");
+          if (!chunk.isPrompt) {
+            chunks.push(chunk.text);
+          }
+        }
+
+        Assert.deepEqual(
+          chunks,
+          ["A", "B"],
+          "The production chunks pass through"
+        );
+
+        for await (const chunk of engine.runWithGenerator({})) {
+          if (chunk.text === "B") {
+            break;
+          }
         }
 
         return { duration: 5 };
@@ -340,11 +527,42 @@ add_task(async function test_run_perf_scenario_observes_generator() {
       memoryIterations: 0,
     });
 
-    Assert.deepEqual(
-      JSON.parse(message.replace("perfMetrics | ", "")),
-      [{ name: "TEST-duration-first-use", values: [5], value: 5 }],
-      "The feature measurement is reported"
-    );
+    const metrics = JSON.parse(message.replace("perfMetrics | ", ""));
+    const metricsByName = new Map(metrics.map(metric => [metric.name, metric]));
+
+    for (const name of [
+      "engine-run-time",
+      "time-to-first-token",
+      "tokens-per-second",
+      "decoding-time",
+      "input-tokens",
+      "output-tokens",
+    ]) {
+      Assert.equal(
+        metricsByName.get(`TEST-${name}-first-use`).values.length,
+        2,
+        `${name} includes the completed and abandoned runs`
+      );
+    }
+
+    for (const name of ["input-tokens", "output-tokens"]) {
+      Assert.deepEqual(
+        metricsByName.get(`TEST-${name}-first-use`).values,
+        [2, 2],
+        `${name} counts the completed and abandoned streams`
+      );
+    }
+
+    for (const [name, expectedValue] of [
+      ["memory-before-run", 2],
+      ["memory-after-run", 3],
+    ]) {
+      Assert.deepEqual(
+        metricsByName.get(`TEST-${name}-first-use`).values,
+        [expectedValue],
+        `${name} includes only the completed run`
+      );
+    }
     Assert.equal(
       PerfTestMLEngine.prototype.runWithGenerator,
       runWithGeneratorStub,
