@@ -522,6 +522,25 @@ linkpreview-perf:
             --output $MOZ_FETCHES_DIR/../artifacts
             browser/components/genai/tests/browser/browser_link_preview_perf.js
 
+semantichistory-perf:
+    description: Run the semantic history search end-to-end performance test
+    treeherder:
+        symbol: perftest(semantichistory)
+        tier: 2
+    attributes:
+        batch: false
+        cron: false
+    run-on-projects: [mozilla-central]
+    run:
+        command: >-
+            mkdir -p $MOZ_FETCHES_DIR/../artifacts &&
+            cd $MOZ_FETCHES_DIR &&
+            python3 python/mozperftest/mozperftest/runner.py
+            --mochitest-binary ${MOZ_FETCHES_DIR}/firefox/firefox-bin
+            --flavor mochitest
+            --output $MOZ_FETCHES_DIR/../artifacts
+            browser/components/urlbar/tests/browser/browser_urlbar_semantic_history_perf.js
+
 ml-llama-smollm2-smoke:
     fetches:
         fetch:
