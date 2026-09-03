@@ -183,6 +183,30 @@ perftest_browser_xhtml_dom.js
 **Measures the size of the DOM**
 
 
+## browser/components/genai/tests/browser
+
+Performance tests for GenAI features on Firefox Desktop
+
+browser_link_preview_perf.js
+============================
+
+:owner: GenAI Team
+:name: browser_link_preview_perf.js
+:Default options:
+
+::
+
+ --perfherder
+ --perfherder-metrics name:LINKPREVIEW-first-keypoint-latency,unit:ms,shouldAlert:False, name:LINKPREVIEW-keypoints-complete-latency,unit:ms,shouldAlert:False, name:LINKPREVIEW-peak-memory,unit:MiB,shouldAlert:False, name:LINKPREVIEW-engine-creation-time,unit:ms,shouldAlert:False, name:LINKPREVIEW-engine-run-time,unit:ms,shouldAlert:False, name:LINKPREVIEW-memory-after-run,unit:MiB,shouldAlert:False, name:LINKPREVIEW-time-to-first-token,unit:ms,shouldAlert:False, name:LINKPREVIEW-decoding-time,unit:ms,shouldAlert:False, name:LINKPREVIEW-tokens-per-second,unit:tokens/s,shouldAlert:False, name:LINKPREVIEW-input-tokens,unit:tokens,shouldAlert:False, name:LINKPREVIEW-output-tokens,unit:tokens,shouldAlert:False
+ --verbose
+ --ml-services
+ --manifest perftest.toml
+ --manifest-flavor browser-chrome
+ --try-platform linux, mac, win
+
+**User-perceived latency and inference memory for Link Preview key points, driven through the production UI flow**
+
+
 ## browser/components/translations/tests/browser
 
 Performance tests for Translations models on Firefox Desktop
