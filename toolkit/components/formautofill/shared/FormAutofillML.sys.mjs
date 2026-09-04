@@ -26,7 +26,7 @@ const FormFill_Config = {
   engineId: FEATURES[FORM_AUTOFILL_FEATURE_ID].engineId,
   backend: "best-onnx",
   modelId: "mozilla/tinybert-address-autofill",
-  numThreads: 2,
+  numThreads: 1,
 };
 
 // Copy an engine config with modelRevision pinned to the override from the
@@ -52,7 +52,7 @@ const FormFill_Encoder_Config = {
   featureId: "formfill-encoder",
   engineId: FEATURES["formfill-encoder"].engineId,
   backend: "best-onnx",
-  numThreads: 2,
+  numThreads: 1,
 };
 
 // Head engine: custom `moz-formfill-head` pipeline, scores windowed features.
@@ -61,7 +61,7 @@ const FormFill_Head_Config = {
   featureId: "formfill-head",
   engineId: FEATURES["formfill-head"].engineId,
   backend: "best-onnx",
-  numThreads: 2,
+  numThreads: 1,
 };
 
 /**
@@ -265,7 +265,7 @@ export class FormAutofillML {
     //     encoder turns into a fixed non-zero [CLS][SEP] embedding (NOT a zero
     //     vector), so the difference features become `cur - emptyEmb`.
     const sections = mlFields.map(fd => splitContext(fd.mlData));
-    const uniqueStrings = [...new Set([""].concat(...sections))];
+    const uniqueStrings = [""].concat(...sections);
     let embeddings = await encoderEngine.run({
       args: [uniqueStrings],
       options: { pooling: "mean", normalize: false },
