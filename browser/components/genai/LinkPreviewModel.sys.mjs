@@ -12,7 +12,7 @@ const CHARACTERS_PER_TOKEN = 3.5;
 // times the character count would suffice under normal conditions. To ensure
 // robustness and handle edge cases, we use a more conservative factor of 0.69.
 const CONTEXT_SIZE_MULTIPLIER = 0.69;
-const DEFAULT_INPUT_SENTENCES = 6;
+const DEFAULT_INPUT_SENTENCES = 12;
 const MIN_SENTENCE_LENGTH = 14;
 const MIN_WORD_COUNT = 5;
 const DEFAULT_INPUT_PROMPT =

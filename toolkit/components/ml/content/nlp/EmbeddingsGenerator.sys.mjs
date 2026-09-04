@@ -121,7 +121,7 @@ const ENGINE_OPTIONS = new Map([
       taskName: "feature-extraction",
       featureId: "simple-text-embedder",
       timeoutMS: -1,
-      numThreads: 2,
+      numThreads: 1,
       backend: "best-onnx",
       preferredDimension: 384,
     },

@@ -122,10 +122,8 @@ class _MLSuggest {
 
     let intentRes, nerResult;
     try {
-      [intentRes, nerResult] = await Promise.all([
-        this._findIntent(query),
-        this._findNER(query),
-      ]);
+      intentRes = await this._findIntent(query);
+      nerResult = await this._findNER(query);
     } catch (error) {
       return null;
     }
