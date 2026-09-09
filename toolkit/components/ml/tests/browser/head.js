@@ -82,6 +82,7 @@ async function setup({
       ["browser.ml.checkForMemory", false],
       ["browser.ml.queueWaitTimeout", 2],
       ["javascript.options.wasm_lazy_tiering", true],
+      ...hwInferencePrefs(),
       ...prefs,
     ],
   });
@@ -417,6 +418,7 @@ async function perfSetup({ disabled = false, prefs = [], backend } = {}) {
     ["browser.ml.modelCacheTimeout", 1000],
     ["browser.ml.checkForMemory", false],
     ["javascript.options.wasm_lazy_tiering", true],
+    ...hwInferencePrefs(),
     ...prefs,
   ];
 
@@ -513,11 +515,41 @@ async function perfSetup({ disabled = false, prefs = [], backend } = {}) {
   };
 }
 
+// The CI tasks in taskcluster/kinds/perftest/*.yml (e.g. linux.yml) set
+// MOZ_ML_LLAMA_HWINFERENCE=1 to run the llama.cpp tests in the HWInference
+// process; setup() maps it to the browser.ml.llama.hwInference pref.
+const LLAMA_HW_INFERENCE_ENV = "MOZ_ML_LLAMA_HWINFERENCE";
+const LLAMA_HW_INFERENCE_PREF = "browser.ml.llama.hwInference";
+
+function usesHWInferenceProcess() {
+  return (
+    Services.env.get(LLAMA_HW_INFERENCE_ENV) === "1" ||
+    Services.prefs.getBoolPref(LLAMA_HW_INFERENCE_PREF, false)
+  );
+}
+
+function hwInferencePrefs() {
+  return Services.env.get(LLAMA_HW_INFERENCE_ENV) === "1"
+    ? [[LLAMA_HW_INFERENCE_PREF, true]]
+    : [];
+}
+
+/**
+ * Perfherder name suffix for the HWInference process, kept short because
+ * perfherder caps subtest names at 80 characters. Empty in the inference
+ * content process so its existing series stay continuous.
+ */
+function hwInferenceSuffix() {
+  return usesHWInferenceProcess() ? "_hwinf" : "";
+}
+
 /**
  * Returns the current total physical memory usage in MiB for the inference process
  */
 async function getTotalMemoryUsage() {
-  const procInfo = await getInferenceProcessInfo();
+  const procInfo = await getInferenceProcessInfo(
+    usesHWInferenceProcess() ? "hwInference" : "inference"
+  );
   return Math.round(procInfo.memory / ONE_MIB);
 }
 
@@ -648,7 +680,9 @@ class PeakMemoryTracker {
   }
 
   async collectPeakMemory() {
-    const procInfo = await getInferenceProcessInfo();
+    const procInfo = await getInferenceProcessInfo(
+      usesHWInferenceProcess() ? "hwInference" : "inference"
+    );
     if (procInfo.memory && procInfo.memory > this._memory) {
       this._memory = procInfo.memory;
     }

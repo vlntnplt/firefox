@@ -380,7 +380,7 @@ ml-perf-native:
         env:
             MOZ_ML_BACKENDS: onnx-native
 
-ml-llama-summarizer-perf:
+ml-llama-summarizer-perf: &ml-llama-summarizer-perf
     fetches:
         fetch:
             - smollm2-360-instruct-gguf
@@ -404,6 +404,16 @@ ml-llama-summarizer-perf:
             --hooks toolkit/components/ml/tests/tools/hooks_local_hub.py
             toolkit/components/ml/tests/browser/browser_ml_llama_summarizer_perf.js
 
+
+ml-llama-summarizer-perf-hwinference:
+    <<: *ml-llama-summarizer-perf
+    description: Run ML Summarizer Model Using llama.cpp in the HWInference utility process
+    treeherder:
+        symbol: perftest(ml-llama-sum-perf-hw)
+        tier: 2
+    worker:
+        env:
+            MOZ_ML_LLAMA_HWINFERENCE: "1"
 
 ml-multi-perf-wasm: &ml-multi-perf
     fetches:
