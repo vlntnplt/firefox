@@ -233,6 +233,15 @@ void HWInferenceParent::StartSpeechRecognition(
   });
 }
 
+void HWInferenceParent::StartTextGeneration(
+    Endpoint<PTextGenerationChild>&& aEndpoint,
+    const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
+  SendWhenReady([endpoint = std::move(aEndpoint), model = aModel,
+                 options = aOptions](HWInferenceParent& aSelf) mutable {
+    return aSelf.SendNewTextGeneration(std::move(endpoint), model, options);
+  });
+}
+
 void HWInferenceParent::OnLaunchFailed() {
   LOGD("{}", __func__);
   MOZ_ASSERT(!CanSend());

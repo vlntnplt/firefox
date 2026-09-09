@@ -26,6 +26,10 @@ class HWInferenceChild final : public PHWInferenceChild {
       Endpoint<hwinference::PSpeechRecognitionParent>&& aEndpoint,
       const dom::ContentParentId& aContentId);
 
+  mozilla::ipc::IPCResult RecvNewTextGeneration(
+      Endpoint<hwinference::PTextGenerationChild>&& aEndpoint,
+      const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions);
+
   RefPtr<IsModelAvailablePromise> SendIsModelAvailable(const nsCString& aTask,
                                                        const nsCString& aId);
 

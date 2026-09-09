@@ -4,6 +4,9 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 include protocol PSpeechRecognition;
+include protocol PTextGeneration;
+
+include TextGenerationTypes;
 
 using mozilla::dom::ContentParentId from "mozilla/dom/ipc/IdType.h";
 using mozilla::hwinference::ModelInstallResult from "mozilla/hwinference/HWInferenceTypes.h";
@@ -71,6 +74,12 @@ protocol PHWInference
   child:
     async NewContentSpeechRecognition(Endpoint<PSpeechRecognitionParent> endpoint,
                                       ContentParentId contentId);
+
+    // The model file is resolved and opened by the parent, the utility never
+    // learns its path.
+    async NewTextGeneration(Endpoint<PTextGenerationChild> endpoint,
+                            FileDescriptor model,
+                            TextGenerationOptions options);
 };
 
 } // namespace hwinference

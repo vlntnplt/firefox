@@ -84,7 +84,9 @@ skips the launch. A process that dies, or never comes up, needs nothing from
 the consumer: its keep-alive is a no-op to drop, and the next acquire launches
 a fresh one. Either way, task endpoints are then handed to the process through
 a `Start*` member of that kind's `HWInferenceParent`, which waits for it to be
-bound before sending.
+bound before sending. `TextGenerationParent::Create` does this for a text
+generator: it acquires the process, binds the parent side of a
+`PTextGeneration` and hands the child side over with the model file.
 
 Isolating consumers further — per origin, per feature — is a matter of keying
 `UtilityProcessManager` by more than the `SandboxingKind`, so that a single kind

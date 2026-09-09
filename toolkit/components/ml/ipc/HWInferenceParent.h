@@ -62,6 +62,11 @@ class HWInferenceParent final : public PHWInferenceParent {
   void StartSpeechRecognition(Endpoint<PSpeechRecognitionParent>&& aEndpoint,
                               dom::ContentParentId aChildId);
 
+  // Same for a text generator; aModel is the model file the parent opened.
+  void StartTextGeneration(Endpoint<PTextGenerationChild>&& aEndpoint,
+                           const ipc::FileDescriptor& aModel,
+                           const TextGenerationOptions& aOptions);
+
   // The actor for aKind's process, one per HWInference kind. An instance bound
   // to a process that is no longer aKind's current one is evicted first.
   static RefPtr<HWInferenceParent> GetSingleton(ipc::SandboxingKind aKind);

@@ -6,8 +6,10 @@
 
 Library("mlhwinferencetest")
 
-UNIFIED_SOURCES = [
+# Not unified: the files share helper names in their anonymous namespaces.
+SOURCES += [
     "TestHWInferenceLifecycle.cpp",
+    "TestTextGeneration.cpp",
 ]
 
 include("/ipc/chromium/chromium-config.mozbuild")
