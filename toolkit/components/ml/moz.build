@@ -24,6 +24,7 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] != "android":
     DIRS += [
         "backends/llama",
         "ipc",
+        "textgeneration",
     ]
     if CONFIG["ENABLE_TESTS"]:
         TEST_DIRS += ["tests/gtest"]

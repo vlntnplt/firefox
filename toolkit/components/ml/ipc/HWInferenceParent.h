@@ -55,6 +55,11 @@ class HWInferenceParent final : public PHWInferenceParent {
       Endpoint<PSpeechRecognitionParent>&& aEndpoint,
       dom::ContentParentId aChildId);
 
+  // Same for a text generator; aModel is the model file the parent opened.
+  void StartTextGeneration(Endpoint<PTextGenerationChild>&& aEndpoint,
+                           const ipc::FileDescriptor& aModel,
+                           const TextGenerationOptions& aOptions);
+
  private:
   friend PHWInferenceParent;
   friend class HWInferenceProcess;

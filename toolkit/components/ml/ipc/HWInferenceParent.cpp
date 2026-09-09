@@ -192,6 +192,15 @@ void HWInferenceParent::StartContentSpeechRecognition(
   });
 }
 
+void HWInferenceParent::StartTextGeneration(
+    Endpoint<PTextGenerationChild>&& aEndpoint,
+    const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
+  SendWhenReady([endpoint = std::move(aEndpoint), model = aModel,
+                 options = aOptions](HWInferenceParent& aSelf) mutable {
+    return aSelf.SendNewTextGeneration(std::move(endpoint), model, options);
+  });
+}
+
 void HWInferenceParent::ActorDestroy(ActorDestroyReason aReason) {
   LOGD("{} - reason={}", __func__, static_cast<int>(aReason));
   // A no-op once bound: let go of anyone waiting on an actor that never made it

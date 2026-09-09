@@ -91,6 +91,12 @@ browser consumer calls `HWInferenceProcess::Browser().Acquire()`, sends on
 nothing from the consumer: its keep-alive is a no-op to drop, and the next
 acquire launches a fresh one.
 
+Either way, task endpoints reach the process through a `Start*` member of that
+`HWInferenceProcess`'s actor, which waits for it to be bound before sending.
+`TextGenerationParent::Create` does this for a text generator: it acquires the
+process, binds the parent side of a `PTextGeneration` and hands the child side
+over with the model file.
+
 Isolating consumers further, per origin, per feature, is a matter of giving each
 class its own `HWInferenceProcess`.
 
