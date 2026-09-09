@@ -1,6 +1,8 @@
 /* Any copyright is dedicated to the Public Domain.
    http://creativecommons.org/publicdomain/zero/1.0/ */
 
+/* global TextGenerator */
+
 /// <reference path="../../../../../toolkit/components/translations/tests/browser/shared-head.js" />
 
 // Load the shared-head file first.
@@ -1397,4 +1399,37 @@ async function checkForRemoteType(remoteType) {
     }
   }
   return false;
+}
+
+// top-k only filters; the final dist sampler selects a token.
+const TINYSTORIES_GREEDY_SAMPLERS = [
+  { type: "top-k", topK: 1 },
+  { type: "dist" },
+];
+
+const TINYSTORIES_STORYTELLER_PROMPT = [
+  { role: "system", content: "You are a friendly storyteller." },
+  { role: "user", content: "Once upon a time there was a small mouse who" },
+];
+
+const TINYSTORIES_CONTEXT_SIZE = 512;
+// Chaos mode confines the utility process to CPU 0, where every ggml barrier
+// costs a scheduler slice: 74 ms per token with two threads, 2 s with the
+// default pool. One thread there, the default pool everywhere else.
+const TINYSTORIES_CHAOS_THREADS = parseInt(
+  Services.env.get("MOZ_CHAOSMODE"),
+  16
+)
+  ? { numThreads: 1 }
+  : {};
+
+async function createTinyStoriesGenerator(options = {}) {
+  const modelFile = await File.createFromFileName(
+    getTestFilePath("data/Mozilla/test-llama/main/TinyStories-656K.Q8_0.gguf")
+  );
+  return TextGenerator.create(modelFile, {
+    contextSize: TINYSTORIES_CONTEXT_SIZE,
+    ...TINYSTORIES_CHAOS_THREADS,
+    ...options,
+  });
 }
