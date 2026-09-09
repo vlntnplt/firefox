@@ -83,9 +83,18 @@ row. Their counters are independent; a clean shutdown resets the counter.
 
 Content-driven inference reaches its process through `PContent`, see below. A
 browser consumer calls `HWInferenceProcess::Browser().Acquire()`, sends on
-`Actor()` once its `WhenReady` resolves, and drops its keep-alive when done. A
-dead process's keep-alive is harmless to drop; the next acquire launches a fresh
-process if its restart budget permits.
+`Actor()` once its `WhenReady` resolves, and drops its keep-alive when done.
+`TextGenerationParent::ActorDestroy` delays its release by
+`browser.ml.hwinference.browser_idle_shutdown_grace_ms`, allowing a subsequent
+generator to reuse the process. This grace belongs to text generation, not to
+all users of the process. A dead process's keep-alive is harmless to drop; the
+next acquire launches a fresh process if its restart budget permits.
+
+Either way, task endpoints reach the process through a `Start*` member of that
+`HWInferenceProcess`'s actor, which waits for it to be bound before sending.
+`TextGenerationParent::Create` does this for a text generator: it acquires the
+process, binds the parent side of a `PTextGeneration` and hands the child side
+over with the model file.
 
 Isolating consumers further, per origin, per feature, is a matter of giving each
 class its own `HWInferenceProcess`.
