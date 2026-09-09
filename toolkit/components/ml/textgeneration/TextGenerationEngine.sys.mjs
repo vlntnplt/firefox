@@ -314,6 +314,7 @@ export class TextGenerationEngine {
     this.telemetry = new lazy.MLTelemetry({
       featureId: pipelineOptions.featureId,
       flowId: pipelineOptions.flowId,
+      hostProcess: "hwinference",
     });
   }
 
