@@ -122,6 +122,12 @@ support-files = [
   "ml_telemetry_stub.worker.mjs",
 ]
 
+["browser_ml_textgeneration_concurrency.js"]
+skip-if = [
+  "os == 'android'",
+  "verify",
+]
+
 ["browser_ml_textgeneration_engine.js"]
 
 ["browser_ml_textgeneration_markers.js"]
