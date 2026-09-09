@@ -117,6 +117,8 @@ support-files = [
   "ml_telemetry_stub.worker.mjs",
 ]
 
+["browser_ml_textgeneration_concurrency.js"]
+
 ["browser_ml_textgeneration_engine.js"]
 
 ["browser_ml_textgeneration_markers.js"]
