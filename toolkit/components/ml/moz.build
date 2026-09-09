@@ -46,6 +46,7 @@ XPIDL_SOURCES += [
 
 MOZ_SRC_FILES += [
     "MLModelHubService.sys.mjs",
+    "textgeneration/TextGenerationEngine.sys.mjs",
 ]
 
 UNIFIED_SOURCES += [

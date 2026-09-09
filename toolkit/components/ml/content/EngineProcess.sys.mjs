@@ -11,6 +11,17 @@
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
 
+const lazy = {};
+
+ChromeUtils.defineESModuleGetters(
+  lazy,
+  {
+    TextGenerationEngine:
+      "moz-src:///toolkit/components/ml/textgeneration/TextGenerationEngine.sys.mjs",
+  },
+  { global: "contextual" }
+);
+
 /**
  * @constant
  * @type {string}
@@ -634,14 +645,14 @@ export class PipelineOptions {
    *
    * @type {?number}
    */
-  numBatch = 1024;
+  numBatch = 2048;
 
   /**
    * Token batch size
    *
    * @type {?number}
    */
-  numUbatch = 1024;
+  numUbatch = 512;
 
   /**
    * Whether to use flash attention
@@ -1469,6 +1480,13 @@ export async function createEngine(
 ) {
   try {
     const pipelineOptions = new PipelineOptions(options);
+    if (lazy.TextGenerationEngine.shouldRoute(pipelineOptions)) {
+      return lazy.TextGenerationEngine.create(
+        pipelineOptions,
+        notificationsCallback,
+        abortSignal
+      );
+    }
     const engineParent = await EngineProcess.getMLEngineParent();
     return engineParent.getEngine({
       pipelineOptions,

@@ -36,21 +36,25 @@ add_task(async function test_smollm2_real_chat_generation() {
   const request = { prompt, nPredict: 24 };
 
   let text = "";
-  let generatedTokens = 0;
+  let metrics;
 
   try {
-    for await (const chunk of engine.runWithGenerator(request)) {
-      if (chunk.isPrompt) {
-        continue;
+    const generator = engine.runWithGenerator(request);
+    let result;
+    do {
+      result = await generator.next();
+      if (result.done) {
+        metrics = result.value?.metrics;
+      } else if (!result.value.isPrompt) {
+        text += result.value.text ?? "";
       }
-      text += chunk.text ?? "";
-      generatedTokens += chunk.tokens?.flat()?.length || 0;
-    }
+    } while (!result.done);
 
     info(`SmolLM2 chat output: ${text.trim()}`);
 
     Assert.greater(text.trim().length, 0, "Model produced non-empty output.");
-    Assert.greater(generatedTokens, 0, "Real tokens were decoded.");
+    Assert.ok(metrics, "The run returned metrics.");
+    Assert.greater(metrics.outputTokens, 0, "Real tokens were decoded.");
     const promptText = prompt.map(m => m.content).join(" ");
     Assert.notEqual(
       text.trim(),

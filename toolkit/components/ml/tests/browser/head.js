@@ -597,6 +597,15 @@ async function runInference({
     const res = await run();
     runEndTime = performance.now();
     const decodingTime = runEndTime - startTime;
+    if (!numGeneratedTokens && res.metrics?.outputTokens) {
+      numGeneratedTokens = res.metrics.outputTokens;
+    }
+    if (!numPromptTokens && res.metrics?.inputTokens) {
+      numPromptTokens = res.metrics.inputTokens;
+    }
+    if (!numPromptCharacters && res.metrics?.inputCharacters) {
+      numPromptCharacters = res.metrics.inputCharacters;
+    }
     metrics = fetchMetrics(res.metrics?.runTimestamps || [], isFirstRun);
     metrics[`${isFirstRun ? COLD_START_PREFIX : ""}${TOTAL_MEMORY_USAGE}`] =
       await getTotalMemoryUsage();
@@ -1375,6 +1384,14 @@ function generateFloat16Numpy(vocabSize, dimensions) {
   encoding.set(new Uint8Array(numbers.buffer), offset);
 
   return { numbers, encoding };
+}
+
+// Marks a utility process crash as expected for the debug leak checker,
+// which otherwise fails on the dead process's incomplete bloat log.
+function noteIntentionalUtilityCrash(pid) {
+  Cc["@mozilla.org/utility-process-test;1"]
+    .createInstance(Ci.nsIUtilityProcessTest)
+    .noteIntentionalCrash(pid);
 }
 
 /**

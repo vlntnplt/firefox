@@ -52,7 +52,7 @@ const RS_RUNTIME_COLLECTION = "ml-onnx-runtime";
 // Vendored llama.cpp revision, mirrored from third_party/llama.cpp/moz.yaml.
 // Update alongside a vendor bump so engine_run telemetry reflects the
 // running library. See the matching comment in that moz.yaml.
-const LLAMA_CPP_VERSION = "74ade52741203e5c8f81eaf06a96cb1cfe15f2a3";
+export const LLAMA_CPP_VERSION = "74ade52741203e5c8f81eaf06a96cb1cfe15f2a3";
 const RS_INFERENCE_OPTIONS_COLLECTION = "ml-inference-options";
 const RS_ALLOW_DENY_COLLECTION = "ml-model-allow-deny-list";
 const TERMINATE_TIMEOUT = 5000;
@@ -512,10 +512,9 @@ export class MLEngineParent extends JSProcessActorParent {
     // Create the model hub instance if needed
     if (this.modelHub === null) {
       lazy.console.debug("Creating model hub instance");
-      this.modelHub = new lazy.ModelHub({
+      this.modelHub = await MLEngineParent.createModelHub({
         rootUrl,
         urlTemplate,
-        allowDenyList: await MLEngineParent.getAllowDenyList(),
       });
     }
 
@@ -662,6 +661,28 @@ export class MLEngineParent extends JSProcessActorParent {
     return /** @type {Promise<RecordsML["ml-model-allow-deny-list"][]>} */ (
       MLEngineParent.#getRemoteClient(RS_ALLOW_DENY_COLLECTION).get()
     );
+  }
+
+  /**
+   * Creates a ModelHub instance configured with the shared allow/deny list.
+   *
+   * @param {object} [config]
+   * @param {string} [config.rootUrl] - Root URL used to download models.
+   * @param {string} [config.urlTemplate] - URL template for model files.
+   * @returns {Promise<ModelHub>}
+   */
+  static async createModelHub({ rootUrl, urlTemplate } = {}) {
+    const config = {
+      allowDenyList: await MLEngineParent.getAllowDenyList(),
+    };
+    // Unset hub fields arrive as null; let the ModelHub defaults apply.
+    if (rootUrl != null) {
+      config.rootUrl = rootUrl;
+    }
+    if (urlTemplate != null) {
+      config.urlTemplate = urlTemplate;
+    }
+    return new lazy.ModelHub(config);
   }
 
   /**

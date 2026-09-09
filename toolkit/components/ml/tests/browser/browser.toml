@@ -3,6 +3,8 @@ prefs = [
   "browser.ml.modelHubRootUrl='chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data'",
   # Retire the serving process with its last generator, without an idle wait.
   "browser.ml.hwinference.browser_idle_shutdown_grace_ms=0",
+  # Nightly defaults the pref on; tests opt into the HWInference path.
+  "browser.ml.llama.hwInference=false",
 ]
 support-files = [
   "head.js",
@@ -48,6 +50,12 @@ support-files = ["ml_engine_e2e_cancel_stub.worker.mjs"]
 ["browser_ml_engine_process.js"]
 
 ["browser_ml_engine_rs_hub.js"]
+
+["browser_ml_hwinference_process.js"]
+skip-if = [
+  "os == 'android'",
+  "verify",
+]
 
 ["browser_ml_inference_session_error.js"]
 skip-if = [
@@ -113,6 +121,8 @@ skip-if = [
 support-files = [
   "ml_telemetry_stub.worker.mjs",
 ]
+
+["browser_ml_textgeneration_engine.js"]
 
 ["browser_ml_textgenerator.js"]
 skip-if = [
