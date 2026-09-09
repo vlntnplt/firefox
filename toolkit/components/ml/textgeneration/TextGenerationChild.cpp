@@ -21,6 +21,7 @@
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtrExtensions.h"
 #include "mozilla/dom/BindingUtils.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 #include "nsThreadUtils.h"
 
 #ifdef XP_WIN
@@ -264,6 +265,18 @@ class TextGenerationChild::Generation {
     const double prefillMs = (prefillEnd - mGenerateStart).ToMilliseconds();
     const double decodeMs = (end - prefillEnd).ToMilliseconds();
 
+    PROFILER_MARKER(ML_TEXT_GENERATION_TRACK, ML_INFERENCE,
+                    MarkerTiming::Interval(mGenerateStart, prefillEnd),
+                    MLModelPrefillMarker, mPromptTokens,
+                    ml::TokensPerSecond(mPromptTokens, prefillMs));
+    if (mPrefillEnd.isSome()) {
+      PROFILER_MARKER(ML_TEXT_GENERATION_TRACK, ML_INFERENCE,
+                      MarkerTiming::Interval(prefillEnd, end),
+                      MLModelDecodeMarker, mGeneratedTokens,
+                      ml::TokensPerSecond(mGeneratedTokens, decodeMs),
+                      dom::GetEnumString(reason));
+    }
+
     Timings timings(prefillMs, decodeMs);
     Reply(GenerateResponse(GenerateResult(
         mContent, reason,
@@ -301,6 +314,7 @@ class TextGenerationChild::Generation {
   }
 
   void Flush() {
+    const uint32_t tokens = mPendingTokens;
     mPendingTokens = 0;
     if (mPendingDelta.IsEmpty()) {
       return;
@@ -308,6 +322,8 @@ class TextGenerationChild::Generation {
     nsCString delta = std::move(mPendingDelta);
     mPendingDelta.Truncate();
     mContent.Append(delta);
+    PROFILER_MARKER(ML_TEXT_GENERATION_TRACK, ML_INFERENCE, {},
+                    MLChunkSendMarker, tokens, uint32_t(delta.Length()));
     mChild->RunOnActorThread("TextGenerationChild::Delta",
                              [child = mChild, delta = std::move(delta)] {
                                (void)child->SendDelta(delta);
@@ -384,7 +400,21 @@ void TextGenerationChild::Initialize() {
   RefPtr<TextGenerationChild> self = this;
   MOZ_ALWAYS_SUCCEEDS(mThread->Dispatch(
       NS_NewRunnableFunction("TextGenerationChild::Load", [self] {
+        TimeStamp loadStart = TimeStamp::Now();
         LoadResult result = self->LoadOnThread();
+        if (result.type() == LoadResult::TLoadSuccess) {
+          PROFILER_MARKER(ML_TEXT_GENERATION_TRACK, ML_SETUP,
+                          MarkerTiming::IntervalUntilNowFrom(loadStart),
+                          MLBackendInitMarker, self->mOptions.contextSize(),
+                          self->mOptions.numThreads(),
+                          self->mOptions.numThreadsDecoding(),
+                          dom::GetEnumString(self->mOptions.kvCacheDtype()),
+                          self->mOptions.flashAttn());
+        } else {
+          PROFILER_MARKER(ML_TEXT_GENERATION_TRACK, ML_SETUP,
+                          MarkerTiming::IntervalUntilNowFrom(loadStart),
+                          MLFailedMarker, "backend init"_ns, self->mLoadError);
+        }
         self->RunOnActorThread("TextGenerationChild::Ready",
                                [self, result = std::move(result)] {
                                  (void)self->SendReady(result);
@@ -483,6 +513,8 @@ ipc::IPCResult TextGenerationChild::RecvClear() {
 
 ipc::IPCResult TextGenerationChild::RecvCancel() {
   LOGD("[{} - {}]", fmt::ptr(this), __func__);
+  PROFILER_MARKER(ML_TEXT_GENERATION_TRACK, ML_INFERENCE, {}, MLCancelMarker,
+                  "observed"_ns);
   if (mCurrentGeneration) {
     mCurrentGeneration->RequestCancel();
   }

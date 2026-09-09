@@ -54,6 +54,7 @@ UNIFIED_SOURCES += [
 ]
 
 EXPORTS.mozilla.ml += [
+    "MLProfilerMarkers.h",
     "MLUtils.h",
 ]
 

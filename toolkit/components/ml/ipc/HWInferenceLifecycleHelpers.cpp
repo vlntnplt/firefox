@@ -8,6 +8,7 @@
 #include "HWInferenceLog.h"
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/ipc/UtilityProcessManager.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla::hwinference {
@@ -22,27 +23,36 @@ bool IsBrowserProcessUp() {
   return upm && upm->GetProcessParent(kBrowserProcessKind);
 }
 
+static void DropKeepAlive(RefPtr<ipc::UtilityProcessKeepAlive>&& aKeepAlive,
+                          TimeStamp aReleased, uint32_t aGraceMs) {
+  aKeepAlive = nullptr;
+  const bool retired = !IsBrowserProcessUp();
+  LOGD("ReleaseBrowserProcessAfterGrace - keep-alive dropped, process {}",
+       retired ? "retired" : "still in use");
+  PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                  MarkerTiming::IntervalUntilNowFrom(aReleased),
+                  MLProcessReleaseMarker, aGraceMs, retired);
+}
+
 void ReleaseBrowserProcessAfterGrace(
     RefPtr<ipc::UtilityProcessKeepAlive>&& aKeepAlive) {
   AssertIsOnMainThread();
+  const TimeStamp released = TimeStamp::Now();
   const uint32_t graceMs =
       StaticPrefs::browser_ml_hwinference_browser_idle_shutdown_grace_ms();
   if (!graceMs) {
-    LOGD("{} - dropping the keep-alive at once", __func__);
-    aKeepAlive = nullptr;
+    DropKeepAlive(std::move(aKeepAlive), released, graceMs);
     return;
   }
   LOGD("{} - dropping the keep-alive in {}ms", __func__, graceMs);
   // A DelayedRunnable rather than a bare timer: nothing else keeps the timer
   // alive, and the main thread drops the runnable at shutdown.
   NS_DelayedDispatchToCurrentThread(
-      NS_NewRunnableFunction("hwinference::ReleaseBrowserProcessAfterGrace",
-                             [keepAlive = std::move(aKeepAlive)]() mutable {
-                               LOGD(
-                                   "ReleaseBrowserProcessAfterGrace - grace "
-                                   "expired, dropping the keep-alive");
-                               keepAlive = nullptr;
-                             }),
+      NS_NewRunnableFunction(
+          "hwinference::ReleaseBrowserProcessAfterGrace",
+          [keepAlive = std::move(aKeepAlive), released, graceMs]() mutable {
+            DropKeepAlive(std::move(keepAlive), released, graceMs);
+          }),
       graceMs);
 }
 

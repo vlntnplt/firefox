@@ -124,6 +124,12 @@ support-files = [
 
 ["browser_ml_textgeneration_engine.js"]
 
+["browser_ml_textgeneration_markers.js"]
+skip-if = [
+  "os == 'android'",
+  "verify",
+]
+
 ["browser_ml_textgenerator.js"]
 skip-if = [
   "os == 'android'",
