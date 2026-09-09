@@ -50,7 +50,8 @@ class TextGenerator final : public nsISupports, public nsWrapperCache {
 
  private:
   TextGenerator(nsIGlobalObject* aGlobal,
-                RefPtr<hwinference::TextGenerationParent> aActor);
+                RefPtr<hwinference::TextGenerationParent> aActor,
+                const nsACString& aFeatureId);
   ~TextGenerator();
 
   void OnGenerateSettled();
@@ -59,6 +60,8 @@ class TextGenerator final : public nsISupports, public nsWrapperCache {
 
   nsCOMPtr<nsIGlobalObject> mGlobal;
   RefPtr<hwinference::TextGenerationParent> mActor;
+  // Names the feature in profiler markers.
+  const nsCString mFeatureId;
   bool mGenerateInFlight = false;
   bool mTerminated = false;
 };

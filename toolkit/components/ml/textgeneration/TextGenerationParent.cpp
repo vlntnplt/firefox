@@ -13,6 +13,7 @@
 #include "mozilla/hwinference/HWInferenceParent.h"
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/UtilityProcessManager.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 
 namespace mozilla::hwinference {
 
@@ -30,13 +31,33 @@ already_AddRefed<TextGenerationParent> TextGenerationParent::Create(
     const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
   AssertIsOnMainThread();
   const bool processReused = HWInferenceProcess::Browser().IsUp();
+  const TimeStamp spawnStart = TimeStamp::Now();
   RefPtr<ipc::UtilityProcessKeepAlive> keepAlive =
       HWInferenceProcess::Browser().Acquire();
   if (!keepAlive) {
     LOGD("{} - the browser HWInference process failed to launch", __func__);
+    PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                    MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                    MLFailedMarker, "process spawn"_ns, "launch refused"_ns);
     return nullptr;
   }
   RefPtr<HWInferenceParent> process = HWInferenceProcess::Browser().Actor();
+  if (!processReused) {
+    process->WhenReady()->Then(
+        GetMainThreadSerialEventTarget(), __func__,
+        [spawnStart]() {
+          PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                          MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                          MLProcessSpawnMarker,
+                          (TimeStamp::Now() - spawnStart).ToMilliseconds());
+        },
+        [spawnStart]() {
+          PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                          MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                          MLFailedMarker, "process spawn"_ns,
+                          "process never came up"_ns);
+        });
+  }
 
   ipc::Endpoint<PTextGenerationParent> parentEnd;
   ipc::Endpoint<PTextGenerationChild> childEnd;
@@ -79,14 +100,27 @@ ipc::IPCResult TextGenerationParent::RecvDelta(const nsCString& aText) {
   return IPC_OK();
 }
 
+static void DropKeepAlive(RefPtr<ipc::UtilityProcessKeepAlive>&& aKeepAlive,
+                          TimeStamp aReleased, uint32_t aGraceMs) {
+  WeakPtr<ipc::UtilityProcessKeepAlive> weak = aKeepAlive.get();
+  aKeepAlive = nullptr;
+  const bool retired = !weak.get();
+  LOGD("DropKeepAlive - keep-alive dropped, process {}",
+       retired ? "retired" : "still in use");
+  PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                  MarkerTiming::IntervalUntilNowFrom(aReleased),
+                  MLProcessReleaseMarker, aGraceMs, retired);
+}
+
 static void ReleaseAfterIdleGrace(
     RefPtr<ipc::UtilityProcessKeepAlive>&& aKeepAlive) {
   AssertIsOnMainThread();
 
+  const TimeStamp released = TimeStamp::Now();
   const uint32_t graceMs =
       StaticPrefs::browser_ml_hwinference_browser_idle_shutdown_grace_ms();
   if (!graceMs) {
-    aKeepAlive = nullptr;
+    DropKeepAlive(std::move(aKeepAlive), released, graceMs);
     return;
   }
 
@@ -96,8 +130,8 @@ static void ReleaseAfterIdleGrace(
   NS_DelayedDispatchToCurrentThread(
       NS_NewRunnableFunction(
           "hwinference::TextGenerationParent::ReleaseAfterIdleGrace",
-          [keepAlive = std::move(aKeepAlive)]() mutable {
-            keepAlive = nullptr;
+          [keepAlive = std::move(aKeepAlive), released, graceMs]() mutable {
+            DropKeepAlive(std::move(keepAlive), released, graceMs);
           }),
       graceMs);
 }

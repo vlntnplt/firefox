@@ -49,6 +49,8 @@ dictionary TextGeneratorCreateOptions {
   /** Quantized values require flashAttn; create() rejects otherwise. */
   TextGenerationKVCacheDtype kvCacheDtype = "f16";
   boolean flashAttn = false;
+  /** Names the feature asking, in profiler markers only. */
+  UTF8String featureId = "";
 };
 
 dictionary TextGenerationMessage {
