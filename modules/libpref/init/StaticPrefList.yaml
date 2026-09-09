@@ -1847,6 +1847,14 @@
   value: 3
   mirror: always
 
+# How long the browser-driven HWInference process outlives its last consumer,
+# in milliseconds, so the next one skips the launch. Zero shuts it down at
+# once.
+- name: browser.ml.hwinference.browser_idle_shutdown_grace_ms
+  type: uint32_t
+  value: 120000
+  mirror: always
+
 - name: browser.navigation.requireUserInteraction
   type: bool
   value: true

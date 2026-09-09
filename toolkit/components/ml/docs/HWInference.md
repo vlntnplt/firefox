@@ -73,11 +73,18 @@ the browser features touch. The two also have independent lifetimes and crash
 budgets.
 
 Content-driven inference reaches `HW_INFERENCE` through `PContent`, see below.
-A parent-process consumer acquires `HW_INFERENCE_BROWSER` through
-`UtilityProcessManager::AcquireBrowserHWInferenceProcess`, which hands back the
-keep-alive and binds that kind's `HWInferenceParent`. Either way, task
-endpoints are then handed to the process through a `Start*` member of that
-actor, which waits for it to be bound before sending.
+A parent-process consumer holds `HW_INFERENCE_BROWSER` through the
+`UtilityProcessKeepAlive` that
+`UtilityProcessManager::AcquireBrowserHWInferenceProcess` hands it: the first
+acquire launches the process, later ones share the keep-alive. A task actor
+keeps its keep-alive until its `ActorDestroy`, where it hands it to
+`ReleaseBrowserProcessAfterGrace`, which drops it after
+`browser.ml.hwinference.browser_idle_shutdown_grace_ms`, so the next consumer
+skips the launch. A process that dies, or never comes up, needs nothing from
+the consumer: its keep-alive is a no-op to drop, and the next acquire launches
+a fresh one. Either way, task endpoints are then handed to the process through
+a `Start*` member of that kind's `HWInferenceParent`, which waits for it to be
+bound before sending.
 
 Isolating consumers further — per origin, per feature — is a matter of keying
 `UtilityProcessManager` by more than the `SandboxingKind`, so that a single kind
