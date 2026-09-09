@@ -606,6 +606,15 @@ async function runInference({
     const res = await run();
     runEndTime = performance.now();
     const decodingTime = runEndTime - startTime;
+    if (!numGeneratedTokens && res.metrics?.outputTokens) {
+      numGeneratedTokens = res.metrics.outputTokens;
+    }
+    if (!numPromptTokens && res.metrics?.inputTokens) {
+      numPromptTokens = res.metrics.inputTokens;
+    }
+    if (!numPromptCharacters && res.metrics?.inputCharacters) {
+      numPromptCharacters = res.metrics.inputCharacters;
+    }
     metrics = fetchMetrics(res.metrics?.runTimestamps || [], isFirstRun);
     metrics[`${isFirstRun ? COLD_START_PREFIX : ""}${TOTAL_MEMORY_USAGE}`] =
       await getTotalMemoryUsage();
@@ -1386,6 +1395,14 @@ function generateFloat16Numpy(vocabSize, dimensions) {
   return { numbers, encoding };
 }
 
+// Marks a utility process crash as expected for the debug leak checker,
+// which otherwise fails on the dead process's incomplete bloat log.
+function noteIntentionalUtilityCrash(pid) {
+  Cc["@mozilla.org/utility-process-test;1"]
+    .createInstance(Ci.nsIUtilityProcessTest)
+    .noteIntentionalCrash(pid);
+}
+
 /**
  * Checks that a process exists.
  *
@@ -1422,6 +1439,15 @@ const TINYSTORIES_CHAOS_THREADS = parseInt(
 )
   ? { numThreads: 1 }
   : {};
+const TINYSTORIES_ENGINE_OPTIONS = {
+  backend: "llama.cpp",
+  taskName: "text-generation",
+  modelId: "Mozilla/test-llama",
+  modelFile: "TinyStories-656K.Q8_0.gguf",
+  modelRevision: "main",
+  numContext: 256,
+  ...TINYSTORIES_CHAOS_THREADS,
+};
 
 async function createTinyStoriesGenerator(options = {}) {
   const modelFile = await File.createFromFileName(
@@ -1432,4 +1458,65 @@ async function createTinyStoriesGenerator(options = {}) {
     ...TINYSTORIES_CHAOS_THREADS,
     ...options,
   });
+}
+
+async function collectGeneratedText(generator) {
+  let text = "";
+  for await (const chunk of generator) {
+    text += chunk.text;
+  }
+  return text;
+}
+
+function mockModelHubModel(
+  sandbox,
+  { id, model, filePath, headers = {}, error }
+) {
+  const { Progress } = ChromeUtils.importESModule(
+    "chrome://global/content/ml/Utils.sys.mjs"
+  );
+  return sandbox
+    .stub(ModelHub.prototype, "getModelDataAsFile")
+    .callsFake(async function ({ progressCallback }) {
+      const statusInfo = {
+        metadata: { model },
+        ok: true,
+        id,
+      };
+      progressCallback(
+        new Progress.ProgressAndStatusCallbackParams({
+          ...statusInfo,
+          type: Progress.ProgressType.DOWNLOAD,
+          statusText: Progress.ProgressStatusText.INITIATE,
+        })
+      );
+      progressCallback(
+        new Progress.ProgressAndStatusCallbackParams({
+          ...statusInfo,
+          type: Progress.ProgressType.DOWNLOAD,
+          statusText: Progress.ProgressStatusText.IN_PROGRESS,
+          progress: 25,
+          totalLoaded: 256,
+          currentLoaded: 256,
+          total: 1024,
+          units: "bytes",
+        })
+      );
+      progressCallback(
+        new Progress.ProgressAndStatusCallbackParams({
+          ...statusInfo,
+          type: Progress.ProgressType.DOWNLOAD,
+          statusText: Progress.ProgressStatusText.DONE,
+          progress: 100,
+          totalLoaded: 1024,
+          currentLoaded: 768,
+          total: 1024,
+          units: "bytes",
+        })
+      );
+      if (error) {
+        throw error;
+      }
+      return [filePath, headers];
+    });
 }
