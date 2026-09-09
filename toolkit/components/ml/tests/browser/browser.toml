@@ -121,6 +121,8 @@ support-files = [
 
 ["browser_ml_textgeneration_markers.js"]
 
+["browser_ml_textgeneration_telemetry.js"]
+
 ["browser_ml_textgenerator.js"]
 
 ["browser_ml_thompson_sample.js"]

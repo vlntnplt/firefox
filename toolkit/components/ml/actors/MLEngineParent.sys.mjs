@@ -359,7 +359,11 @@ export class MLEngineParent extends JSProcessActorParent {
       // Abort any pending operations as the engine creating failed
       abortController?.abort();
       const { modelId, taskName, flowId } = pipelineOptions;
-      const telemetry = new MLTelemetry({ featureId, flowId });
+      const telemetry = new MLTelemetry({
+        featureId,
+        flowId,
+        hostProcess: "inference",
+      });
       telemetry.recordEngineCreationFailure({
         modelId,
         featureId,
@@ -1154,6 +1158,7 @@ export class MLEngine {
     this.telemetry = new MLTelemetry({
       featureId: pipelineOptions.featureId,
       flowId: pipelineOptions.flowId,
+      hostProcess: "inference",
     });
     this.QueryInterface = ChromeUtils.generateQI([
       "nsIObserver",
