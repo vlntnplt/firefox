@@ -1,5 +1,9 @@
 [DEFAULT]
-prefs = ["browser.ml.modelHubRootUrl='chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data'"]
+prefs = [
+  "browser.ml.modelHubRootUrl='chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data'",
+  # Retire the serving process with its last generator, without an idle wait.
+  "browser.ml.hwinference.browser_idle_shutdown_grace_ms=0",
+]
 support-files = [
   "head.js",
   "shared-head.js",
@@ -8,6 +12,7 @@ support-files = [
 
 # Asserts best-onnx resolves to onnx-native; gated to platforms that bundle
 # the native onnxruntime (matches browser_ml_native.js skip-if).
+
 ["browser_ml_best_onnx.js"]
 skip-if = [
   "asan",
@@ -107,6 +112,12 @@ skip-if = [
 ]
 support-files = [
   "ml_telemetry_stub.worker.mjs",
+]
+
+["browser_ml_textgenerator.js"]
+skip-if = [
+  "os == 'android'",
+  "verify",
 ]
 
 ["browser_ml_thompson_sample.js"]

@@ -7,6 +7,10 @@
 with Files("**"):
     BUG_COMPONENT = ("Core", "Machine Learning: On Device")
 
+EXPORTS.mozilla.dom += [
+    "TextGenerator.h",
+]
+
 EXPORTS.mozilla.hwinference += [
     "TextGenerationChild.h",
     "TextGenerationEnums.h",
@@ -16,6 +20,7 @@ EXPORTS.mozilla.hwinference += [
 UNIFIED_SOURCES += [
     "TextGenerationChild.cpp",
     "TextGenerationParent.cpp",
+    "TextGenerator.cpp",
 ]
 
 IPDL_SOURCES = [

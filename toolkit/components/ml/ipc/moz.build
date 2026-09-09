@@ -13,12 +13,14 @@ EXPORTS.mozilla.hwinference += [
     "HWInferenceLog.h",
     "HWInferenceParent.h",
     "HWInferenceTypes.h",
+    "ModelFileUtils.h",
 ]
 
 UNIFIED_SOURCES += [
     "HWInferenceChild.cpp",
     "HWInferenceLifecycleHelpers.cpp",
     "HWInferenceParent.cpp",
+    "ModelFileUtils.cpp",
 ]
 
 IPDL_SOURCES = [
