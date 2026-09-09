@@ -838,6 +838,7 @@ void SetUtilitySandbox(int aBroker, ipc::SandboxingKind aKind) {
     case ipc::SandboxingKind::GENERIC_UTILITY:
 #ifndef ANDROID
     case ipc::SandboxingKind::HW_INFERENCE:
+    case ipc::SandboxingKind::HW_INFERENCE_BROWSER:
 #endif  // !ANDROID
       policy = GetUtilitySandboxPolicy(sBroker);
       break;

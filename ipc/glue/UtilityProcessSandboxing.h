@@ -35,6 +35,7 @@ enum SandboxingKind : uint64_t {
 
 #ifndef ANDROID
   HW_INFERENCE,
+  HW_INFERENCE_BROWSER,
 #endif  // !ANDROID
 
   // Add new kinds directly above this one: the gtests, and the
@@ -42,6 +43,13 @@ enum SandboxingKind : uint64_t {
   // ones by index.
   COUNT,
 };
+
+#ifndef ANDROID
+inline bool IsHWInferenceKind(SandboxingKind aKind) {
+  return aKind == SandboxingKind::HW_INFERENCE ||
+         aKind == SandboxingKind::HW_INFERENCE_BROWSER;
+}
+#endif  // !ANDROID
 
 bool IsUtilitySandboxEnabled(const char* envVar, SandboxingKind aKind);
 bool IsUtilitySandboxEnabled(SandboxingKind aKind);

@@ -11,6 +11,7 @@
 #include "mozilla/StaticPtr.h"
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/UtilityProcessParent.h"
+#include "mozilla/ipc/UtilityProcessSandboxing.h"
 #include "mozilla/hwinference/PHWInferenceParent.h"
 #include "mozilla/ipc/UtilityMediaService.h"
 
@@ -21,7 +22,9 @@ class HWInferenceParent final : public PHWInferenceParent {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(HWInferenceParent, override);
 
-  HWInferenceParent() = default;
+  explicit HWInferenceParent(ipc::SandboxingKind aKind) : mKind(aKind) {}
+
+  ipc::SandboxingKind Kind() const { return mKind; }
 
   void ActorDestroy(ActorDestroyReason aReason) override;
 
@@ -46,22 +49,37 @@ class HWInferenceParent final : public PHWInferenceParent {
       const RefPtr<ipc::UtilityProcessParent>& aUtilityParent);
 
   // Resolved once this actor is bound to its utility process, rejected if that
-  // process goes away before it can be.
+  // process never comes up or goes away before it can be.
   RefPtr<GenericNonExclusivePromise> WhenReady() { return mReadyPromise; }
 
-  // Forwards aEndpoint to the HWInference process once its actor is ready. The
-  // caller must hold a keep-alive, see
-  // UtilityProcessManager::AcquireContentHWInferenceProcess().
-  static void StartContentSpeechRecognition(
-      Endpoint<PSpeechRecognitionParent>&& aEndpoint,
-      dom::ContentParentId aChildId);
+  // The launch this actor was waiting on failed: rejects WhenReady() and
+  // retires this instance, so the next acquire binds a fresh one.
+  void OnLaunchFailed();
 
-  static RefPtr<HWInferenceParent> GetSingleton();
+  // Forwards aEndpoint to the HWInference process once this actor is ready.
+  // The caller must hold a keep-alive on the process, see
+  // UtilityProcessManager::AcquireContentHWInferenceProcess().
+  void StartSpeechRecognition(Endpoint<PSpeechRecognitionParent>&& aEndpoint,
+                              dom::ContentParentId aChildId);
+
+  // The actor for aKind's process, one per HWInference kind. An instance bound
+  // to a process that is no longer aKind's current one is evicted first.
+  static RefPtr<HWInferenceParent> GetSingleton(ipc::SandboxingKind aKind);
 
  private:
   friend PHWInferenceParent;
-  static StaticRefPtr<HWInferenceParent> sInstance;
+  static StaticRefPtr<HWInferenceParent>& InstanceFor(
+      ipc::SandboxingKind aKind);
+  static StaticRefPtr<HWInferenceParent> sContentInstance;
+  static StaticRefPtr<HWInferenceParent> sBrowserInstance;
   ~HWInferenceParent() = default;
+
+  // Runs aSend(*this) once this actor is bound to its process. The endpoint
+  // aSend carries closes itself if the process never comes up.
+  template <typename Send>
+  void SendWhenReady(Send&& aSend);
+
+  const ipc::SandboxingKind mKind;
 
   // The utility process this actor is bound to, null until BindToUtilityProcess
   // and once destroyed. An instance is only ever bound to one process.

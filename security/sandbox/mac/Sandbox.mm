@@ -306,7 +306,7 @@ bool StartMacSandbox(MacSandboxInfo const& aInfo, std::string& aErrorMessage) {
   std::string bundleIDCacheDir;
 
   if (aInfo.type == MacSandboxType_Utility &&
-      aInfo.utilityKind != ipc::SandboxingKind::HW_INFERENCE) {
+      !ipc::IsHWInferenceKind(aInfo.utilityKind)) {
     profile = const_cast<char*>(SandboxPolicyUtility);
 
     switch (aInfo.utilityKind) {
@@ -499,7 +499,7 @@ bool StartMacSandbox(MacSandboxInfo const& aInfo, std::string& aErrorMessage) {
     params.push_back(getenv("MOZ_BLOCK_REMOTE_APPLE_IMAGEIO") ? "FALSE"
                                                               : "TRUE");
   } else if (aInfo.type == MacSandboxType_Utility &&
-             aInfo.utilityKind == ipc::SandboxingKind::HW_INFERENCE) {
+             ipc::IsHWInferenceKind(aInfo.utilityKind)) {
     profile = const_cast<char*>(SandboxPolicyHWInference);
     params.push_back("SHOULD_LOG");
     params.push_back(aInfo.shouldLog ? "TRUE" : "FALSE");

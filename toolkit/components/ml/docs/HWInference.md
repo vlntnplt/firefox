@@ -55,27 +55,31 @@ the capability to mark pages as executable for JITing code.
 inference on text) are eventually expected to also run inside `HWInference`, to
 be able to use hardware acceleration for tasks unrelated to speech recognition.
 
-## One process, many users
+## Two processes, two kinds of users
 
-There is a single `HWInference` process, keyed like every other utility process
-by its `SandboxingKind` alone (see `GetProcess`/`LaunchProcess` in
-{searchfox}`ipc/glue/UtilityProcessManager.cpp`), with one
-`HWInferenceParent` on the main-process side,
-`HWInferenceParent::GetSingleton()`.
+`HWInference` processes are keyed like every other utility process by their
+`SandboxingKind` alone (see `GetProcess`/`LaunchProcess` in
+{searchfox}`ipc/glue/UtilityProcessManager.cpp`), and there are two kinds
+sharing one sandbox policy: `HW_INFERENCE` for content-driven inference, and
+`HW_INFERENCE_BROWSER` for inference the browser itself asks for. Each has its
+own `HWInferenceParent` on the main-process side,
+`HWInferenceParent::GetSingleton(kind)`.
 
-Content-driven inference reaches it through
-`UtilityProcessManager::StartContentHWInferenceManager`. A privileged,
-parent-process-triggered consumer — future "browser AI" features — launches the
-same process, with `UtilityProcessManager::LaunchProcessWithKeepAlive`.
+They are separate processes so that a consumer a content process can reach
+never shares an address space with browser data. The content process is the
+riskier IPC peer, and the `HW_INFERENCE` process parses what it sends; the
+`HW_INFERENCE_BROWSER` process holds page text and prompts from every origin
+the browser features touch. The two also have independent lifetimes and crash
+budgets.
 
-What such a consumer does need is a manager protocol of its own alongside
-{searchfox}`PHWInferenceManager
-<toolkit/components/ml/ipc/PHWInferenceManager.ipdl>`, which is
-content-specific: today the only way into the process from outside it is the
-content path described below.
+Content-driven inference reaches `HW_INFERENCE` through `PContent`, see below.
+A parent-process consumer acquires `HW_INFERENCE_BROWSER` through
+`UtilityProcessManager::AcquireBrowserHWInferenceProcess`, which hands back the
+keep-alive and binds that kind's `HWInferenceParent`. Either way, task
+endpoints are then handed to the process through a `Start*` member of that
+actor, which waits for it to be bound before sending.
 
-Isolating consumers from each other in separate processes — chrome-driven from
-content-driven, per origin, per feature — is a matter of keying
+Isolating consumers further — per origin, per feature — is a matter of keying
 `UtilityProcessManager` by more than the `SandboxingKind`, so that a single kind
 can have several live processes.
 

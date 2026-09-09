@@ -729,7 +729,8 @@ UtilityProcessManager::StartHWInference() {
   RefPtr<UtilityProcessManager> self = this;
   using RetPromise = HWInferencePromise;
   RefPtr<hwinference::HWInferenceParent> hwip =
-      hwinference::HWInferenceParent::GetSingleton();
+      hwinference::HWInferenceParent::GetSingleton(
+          SandboxingKind::HW_INFERENCE);
   MOZ_ASSERT(hwip, "Unable to get a singleton for HWInference");
   LOGD("[%p] Starting HWInference utility process with HW_INFERENCE sandboxing",
        this);
@@ -953,12 +954,27 @@ UtilityProcessManager::AcquireContentHWInferenceProcess() {
     return nullptr;
   }
 
-  RefPtr<UtilityProcessKeepAlive> keepAlive =
-      LaunchProcessWithKeepAlive(SandboxingKind::HW_INFERENCE);
+  return AcquireHWInferenceProcess(SandboxingKind::HW_INFERENCE);
+}
+
+already_AddRefed<UtilityProcessKeepAlive>
+UtilityProcessManager::AcquireBrowserHWInferenceProcess() {
+  MOZ_ASSERT(NS_IsMainThread());
+  return AcquireHWInferenceProcess(SandboxingKind::HW_INFERENCE_BROWSER);
+}
+
+already_AddRefed<UtilityProcessKeepAlive>
+UtilityProcessManager::AcquireHWInferenceProcess(SandboxingKind aKind) {
+  MOZ_ASSERT(IsHWInferenceKind(aKind));
+  RefPtr<UtilityProcessKeepAlive> keepAlive = LaunchProcessWithKeepAlive(aKind);
   if (keepAlive) {
     // A no-op once bound, and what re-binds if the PHWInference channel went
     // away without the process going with it.
-    keepAlive->StartUtility(hwinference::HWInferenceParent::GetSingleton());
+    RefPtr<hwinference::HWInferenceParent> actor =
+        hwinference::HWInferenceParent::GetSingleton(aKind);
+    keepAlive->StartUtility(actor)->Then(
+        GetMainThreadSerialEventTarget(), __func__, [](Ok) {},
+        [actor](const LaunchError&) { actor->OnLaunchFailed(); });
   }
   return keepAlive.forget();
 }

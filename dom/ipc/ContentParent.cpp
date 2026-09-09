@@ -5202,8 +5202,8 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateSpeechRecognition(
     return IPC_OK();
   }
 
-  hwinference::HWInferenceParent::StartContentSpeechRecognition(
-      std::move(aEndpoint), mChildID);
+  hwinference::HWInferenceParent::GetSingleton(SandboxingKind::HW_INFERENCE)
+      ->StartSpeechRecognition(std::move(aEndpoint), mChildID);
   return IPC_OK();
 }
 

@@ -49,7 +49,8 @@ extern LazyLogModule gHWInferenceLog;
 #define LOGD(...) MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Debug, __VA_ARGS__)
 #define LOGV(...) MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Verbose, __VA_ARGS__)
 
-StaticRefPtr<HWInferenceParent> HWInferenceParent::sInstance;
+StaticRefPtr<HWInferenceParent> HWInferenceParent::sContentInstance;
+StaticRefPtr<HWInferenceParent> HWInferenceParent::sBrowserInstance;
 
 static StaticAutoPtr<nsTHashSet<nsCString>> sMockInstalledModels;
 
@@ -173,8 +174,18 @@ NS_IMPL_ISUPPORTS(ModelDownloadCallbacks, nsIMLModelDownloadProgressCallback,
                   nsIMLModelDownloadCompletionCallback)
 
 /* static */
-RefPtr<HWInferenceParent> HWInferenceParent::GetSingleton() {
+StaticRefPtr<HWInferenceParent>& HWInferenceParent::InstanceFor(
+    ipc::SandboxingKind aKind) {
+  MOZ_RELEASE_ASSERT(ipc::IsHWInferenceKind(aKind));
+  return aKind == ipc::SandboxingKind::HW_INFERENCE ? sContentInstance
+                                                    : sBrowserInstance;
+}
+
+/* static */
+RefPtr<HWInferenceParent> HWInferenceParent::GetSingleton(
+    ipc::SandboxingKind aKind) {
   AssertIsOnMainThread();
+  StaticRefPtr<HWInferenceParent>& instance = InstanceFor(aKind);
 
   // Evict an instance bound to a process that is no longer the current one.
   // PHWInference is separate from PUtilityProcess, so it keeps reporting
@@ -182,42 +193,54 @@ RefPtr<HWInferenceParent> HWInferenceParent::GetSingleton() {
   // out in that window would have StartUtility resolve on a doomed actor.
   // Comparing the bound process also covers process death, not just
   // CleanShutdown.
-  if (sInstance && sInstance->mUtilityParent) {
+  if (instance && instance->mUtilityParent) {
     RefPtr<ipc::UtilityProcessManager> upm =
         ipc::UtilityProcessManager::GetIfExists();
-    if (!upm || upm->GetProcessParent(ipc::SandboxingKind::HW_INFERENCE) !=
-                    sInstance->mUtilityParent) {
+    if (!upm || upm->GetProcessParent(aKind) != instance->mUtilityParent) {
       LOGD("{} - evicting instance bound to a gone process", __func__);
-      RefPtr<HWInferenceParent> stale = sInstance;
-      sInstance = nullptr;
+      RefPtr<HWInferenceParent> stale = instance;
+      instance = nullptr;
       // Synchronously runs ActorDestroy, so CanSend() is false on return.
       stale->Close();
     }
   }
 
-  if (!sInstance) {
-    sInstance = new HWInferenceParent();
-    ClearOnShutdown(&sInstance);
+  if (!instance) {
+    instance = new HWInferenceParent(aKind);
+    ClearOnShutdown(&instance);
   }
-  return sInstance;
+  return instance;
 }
 
-/* static */
-void HWInferenceParent::StartContentSpeechRecognition(
-    Endpoint<PSpeechRecognitionParent>&& aEndpoint,
-    dom::ContentParentId aChildId) {
-  RefPtr<HWInferenceParent> self = GetSingleton();
-  self->WhenReady()->Then(
+template <typename Send>
+void HWInferenceParent::SendWhenReady(Send&& aSend) {
+  WhenReady()->Then(
       GetMainThreadSerialEventTarget(), __func__,
-      [self, endpoint = std::move(aEndpoint), aChildId]() mutable {
-        if (!self->SendNewContentSpeechRecognition(std::move(endpoint),
-                                                   aChildId)) {
-          LOGD("Failed to send endpoint to utility process");
+      [self = RefPtr{this}, send = std::forward<Send>(aSend)]() mutable {
+        if (!send(*self)) {
+          LOGD("Failed to send the endpoint to HWInference");
         }
       },
-      []() {
-        LOGD("HWInference never came up: dropping the speech endpoint");
-      });
+      []() { LOGD("HWInference never came up: dropping the endpoint"); });
+}
+
+void HWInferenceParent::StartSpeechRecognition(
+    Endpoint<PSpeechRecognitionParent>&& aEndpoint,
+    dom::ContentParentId aChildId) {
+  SendWhenReady([endpoint = std::move(aEndpoint),
+                 aChildId](HWInferenceParent& aSelf) mutable {
+    return aSelf.SendNewContentSpeechRecognition(std::move(endpoint), aChildId);
+  });
+}
+
+void HWInferenceParent::OnLaunchFailed() {
+  LOGD("{}", __func__);
+  MOZ_ASSERT(!CanSend());
+  mReadyPromise->Reject(NS_ERROR_NOT_AVAILABLE, __func__);
+  StaticRefPtr<HWInferenceParent>& instance = InstanceFor(mKind);
+  if (instance == this) {
+    instance = nullptr;
+  }
 }
 
 void HWInferenceParent::ActorDestroy(ActorDestroyReason aReason) {
@@ -228,8 +251,9 @@ void HWInferenceParent::ActorDestroy(ActorDestroyReason aReason) {
   mUtilityParent = nullptr;
   // Only clear ourselves: a late ActorDestroy from a superseded instance must
   // not evict the replacement created after it.
-  if (sInstance == this) {
-    sInstance = nullptr;
+  StaticRefPtr<HWInferenceParent>& instance = InstanceFor(mKind);
+  if (instance == this) {
+    instance = nullptr;
   }
 }
 

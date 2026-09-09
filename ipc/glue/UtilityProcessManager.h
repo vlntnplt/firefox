@@ -122,6 +122,10 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
   // for as long as the returned keep-alive. Returns nullptr past
   // browser.ml.hwinference.max_restarts crashes, rather than looping.
   already_AddRefed<UtilityProcessKeepAlive> AcquireContentHWInferenceProcess();
+
+  // Same for the parent-driven HW_INFERENCE_BROWSER process, which has no
+  // restart budget.
+  already_AddRefed<UtilityProcessKeepAlive> AcquireBrowserHWInferenceProcess();
 #endif  // !ANDROID
 
   void OnProcessUnexpectedShutdown(UtilityProcessHost* aHost);
@@ -326,6 +330,10 @@ class UtilityProcessManager final : public UtilityProcessHost::Listener {
 #endif  // XP_WIN
 
 #ifndef ANDROID
+  // Launches aKind (or reuses it) and binds its HWInferenceParent to it.
+  already_AddRefed<UtilityProcessKeepAlive> AcquireHWInferenceProcess(
+      SandboxingKind aKind);
+
   // Unexpected HWInference shutdowns since the last clean one. ProcessFields is
   // dropped on each teardown, so its own crash counter cannot see a loop.
   uint32_t mHWInferenceRestarts = 0;

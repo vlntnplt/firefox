@@ -106,7 +106,7 @@ bool UtilityProcessImpl::Init(int aArgc, char* aArgv[]) {
     UtilityMediaServiceParent::WMFPreloadForSandbox();
   }
 
-  if (*sandboxingKind == SandboxingKind::HW_INFERENCE) {
+  if (IsHWInferenceKind(static_cast<SandboxingKind>(*sandboxingKind))) {
     mozilla::llama::LlamaRuntimeLinker::Init();
   }
 

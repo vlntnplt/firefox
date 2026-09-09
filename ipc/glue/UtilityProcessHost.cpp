@@ -203,6 +203,7 @@ void UtilityProcessHost::InitAfterConnect(bool aSucceeded) {
 
 #  ifndef ANDROID
       case SandboxingKind::HW_INFERENCE:
+      case SandboxingKind::HW_INFERENCE_BROWSER:
         policy = SandboxBrokerPolicyFactory::GetHWInferencePolicy(
             GetActor()->OtherPid());
         break;
