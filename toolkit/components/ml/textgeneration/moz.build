@@ -25,6 +25,9 @@ IPDL_SOURCES = [
 
 LOCAL_INCLUDES += [
     "/ipc/glue",
+    "/third_party/llama.cpp/ggml/include",
+    "/third_party/llama.cpp/include",
+    "/toolkit/components/ml/backends/llama",
 ]
 
 include("/ipc/chromium/chromium-config.mozbuild")

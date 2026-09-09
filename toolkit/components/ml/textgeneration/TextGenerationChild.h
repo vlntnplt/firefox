@@ -6,14 +6,21 @@
 #ifndef mozilla_hwinference_TextGenerationChild_h
 #define mozilla_hwinference_TextGenerationChild_h
 
+#include <functional>
+
+#include "mozilla/Atomics.h"
+#include "nsIThread.h"
 #include "mozilla/hwinference/PTextGenerationChild.h"
 #include "mozilla/ipc/FileDescriptor.h"
 
+namespace mozilla::llama {
+class LlamaBackend;
+}
+
 namespace mozilla::hwinference {
 
-// Utility-process side of one generator. Echo stub: it resolves Generate with
-// the concatenated message contents and emits one matching Delta, exercising
-// the whole message surface with no inference behind it.
+// Utility-process side of one text generator, driving a LlamaBackend on a
+// thread of its own: generators share nothing, and run in parallel.
 class TextGenerationChild final : public PTextGenerationChild {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TextGenerationChild, override);
@@ -21,8 +28,7 @@ class TextGenerationChild final : public PTextGenerationChild {
   TextGenerationChild(const ipc::FileDescriptor& aModel,
                       const TextGenerationOptions& aOptions);
 
-  // Call once the actor is bound; reports the load outcome with Ready. The
-  // echo stub loads nothing and reports success at once.
+  // Call once the actor is bound; reports the load outcome with Ready.
   void Initialize();
 
   mozilla::ipc::IPCResult RecvGenerate(const GenerateRequest& aRequest,
@@ -34,10 +40,31 @@ class TextGenerationChild final : public PTextGenerationChild {
 
  private:
   friend PTextGenerationChild;
-  ~TextGenerationChild() = default;
+  class Generation;
+
+  ~TextGenerationChild();
+
+  // Runs on mThread.
+  LoadResult LoadOnThread();
+
+  // Skipped if the actor can no longer send.
+  void RunOnActorThread(const char* aName, std::function<void()>&& aFn);
 
   ipc::FileDescriptor mModel;
-  TextGenerationOptions mOptions;
+  const TextGenerationOptions mOptions;
+
+  const nsCOMPtr<nsIThread> mThread;
+  const nsCOMPtr<nsISerialEventTarget> mActorThread;
+
+  // mThread only.
+  RefPtr<llama::LlamaBackend> mBackend;
+  nsCString mLoadError;
+
+  // Actor thread only.
+  CopyableTArray<ChatMessage> mHistory;
+  RefPtr<Generation> mCurrentGeneration;
+
+  Atomic<bool> mShutdown{false};
 };
 
 }  // namespace mozilla::hwinference
