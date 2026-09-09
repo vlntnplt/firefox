@@ -6,14 +6,21 @@
 #ifndef mozilla_hwinference_TextGenerationChild_h
 #define mozilla_hwinference_TextGenerationChild_h
 
+#include <functional>
+
+#include "mozilla/Atomics.h"
+#include "nsIThread.h"
 #include "mozilla/hwinference/PTextGenerationChild.h"
 #include "mozilla/ipc/FileDescriptor.h"
 
+namespace mozilla::llama {
+class LlamaBackend;
+}
+
 namespace mozilla::hwinference {
 
-// Utility-process side of one generator. Echo stub: it resolves Generate with
-// the concatenated message contents and emits one matching Delta, exercising
-// the whole message surface with no inference behind it.
+// Utility-process side of one text generator, driving a LlamaBackend on a
+// thread of its own: generators share nothing, and run in parallel.
 class TextGenerationChild final : public PTextGenerationChild {
  public:
   NS_INLINE_DECL_THREADSAFE_REFCOUNTING(TextGenerationChild, override);
@@ -21,11 +28,10 @@ class TextGenerationChild final : public PTextGenerationChild {
   TextGenerationChild(const ipc::FileDescriptor& aModel,
                       const TextGenerationOptions& aOptions);
 
-  // Call once the actor is bound; reports the load outcome with Ready. The
-  // echo stub loads nothing and reports success at once.
+  // Call once the actor is bound; reports the load outcome with Ready.
   void Initialize();
 
-  mozilla::ipc::IPCResult RecvGenerate(const GenerateRequest& aRequest,
+  mozilla::ipc::IPCResult RecvGenerate(GenerateRequest&& aRequest,
                                        GenerateResolver&& aResolve);
   mozilla::ipc::IPCResult RecvClear();
   mozilla::ipc::IPCResult RecvCancel();
@@ -34,10 +40,33 @@ class TextGenerationChild final : public PTextGenerationChild {
 
  private:
   friend PTextGenerationChild;
-  ~TextGenerationChild() = default;
+  class Generation;
+
+  ~TextGenerationChild();
+
+  // Runs on mGenerationThread.
+  LoadResult LoadOnThread();
+
+  // Always dispatches to the utility main thread; skipped after actor teardown.
+  void DispatchToActorThread(const char* aName, std::function<void()>&& aFn);
 
   ipc::FileDescriptor mModel;
-  TextGenerationOptions mOptions;
+  const TextGenerationOptions mOptions;
+
+  // Model work and conversation history are confined to this thread.
+  const nsCOMPtr<nsIThread> mGenerationThread;
+  // The utility main thread owns IPC; it never runs the backend.
+  const nsCOMPtr<nsISerialEventTarget> mActorThread;
+
+  // mGenerationThread only.
+  RefPtr<llama::LlamaBackend> mBackend;
+  nsCString mLoadError;
+  nsTArray<ChatMessage> mHistory;
+
+  // Actor thread only.
+  RefPtr<Generation> mCurrentGeneration;
+
+  Atomic<bool> mShutdown{false};
 };
 
 }  // namespace mozilla::hwinference

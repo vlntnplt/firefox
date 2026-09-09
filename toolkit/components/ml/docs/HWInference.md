@@ -3,7 +3,7 @@
 # HWInference: the on-device hardware-accelerated inference process
 
 `HWInference` is a utility process that runs native, hardware-accelerated
-inference libraries (currently `parakeet.cpp`, backed by `libggml`) outside of
+inference libraries (`parakeet.cpp` and `llama.cpp`, backed by `libggml`) outside of
 any content process, and outside the main process. Unlike the [Firefox AI
 Runtime](inference-architecture) inference process, it does not run
 JavaScript: its job is purely computational, receiving some input, running it
@@ -18,8 +18,8 @@ The plumbing lives in {searchfox}`toolkit/components/ml/ipc`, and the process
 itself is managed by {searchfox}`UtilityProcessManager
 <ipc/glue/UtilityProcessManager.cpp>`.
 [`SpeechRecognition`](/media/SpeechRecognition), which implements the
-on-device recognition side of the Web Speech API, is the only consumer today,
-and is used as the worked example throughout.
+on-device recognition side of the Web Speech API, and browser text generation are its current consumers. Speech recognition
+is used as the worked example for content-process connections.
 
 ## The `HWInference` process
 
@@ -51,9 +51,8 @@ Since it doesn't run JavaScript, it will eventually be possible to tighten the
 sandbox further on macOS by making it a different executable, relinquishing
 the capability to mark pages as executable for JITing code.
 
-`ONNX Runtime` (for non-LLM type inference) and `llama.cpp` (for LLM-type
-inference on text) are eventually expected to also run inside `HWInference`, to
-be able to use hardware acceleration for tasks unrelated to speech recognition.
+`llama.cpp` runs text generation here when `browser.ml.llama.hwInference` is
+enabled. `ONNX Runtime` (for non-LLM inference) is expected to follow.
 
 ## Two processes, two kinds of users
 
@@ -108,13 +107,35 @@ flowchart LR
     SR
   end
   subgraph Main[Main process]
+    API[TextGenerator] --> TP[TextGenerationParent]
     CHP[Content HWInferenceParent]
     BHP[Browser HWInferenceParent]
   end
-  BrowserHW[Browser HWInference]
+  subgraph BrowserHW[Browser HWInference]
+    TC[TextGenerationChild] --> LB[LlamaBackend]
+  end
+  TP --> TC
   SR -. Model requests .-> CHP
-  BHP --> BrowserHW
+  BHP -. Creates generator .-> TC
 ```
+
+### Text generation threads
+
+`TextGenerationChild` binds on the utility main thread. IPC handlers move each
+request to the generation thread, which owns the conversation history. Formatting
+reads the committed history and the incoming messages; successful results move
+the incoming messages into history before replying. Errors leave history unchanged.
+Cancelled and zero-token results retain their input messages, as other successful
+results do. `Clear` and history destruction run on the same worker queue.
+There is no per-generation history snapshot. Backend input conversion and prompt
+formatting still traverse the conversation on the worker.
+
+Each generator owns a `TextGenerator` thread for model loading, prompt formatting,
+prefill, decoding, and backend destruction. llama.cpp's internal thread pools
+are driven from that thread. Replies and output deltas dispatch back to the
+actor's event target. Cancellation and shutdown cross the boundary through
+atomic flags. Future engines sharing this process must likewise keep engine
+compute and blocking model operations off the utility main thread.
 
 ## Process lifetime
 
@@ -195,7 +216,7 @@ the endpoint, allowing the content-side actor to report failure.
 Each task protocol is a separate top-level connection, so its two sides choose
 their event targets independently. Speech recognition uses `SpeechIPC` in
 content; the utility side receives on the main thread and dispatches inference
-to its `Parakeet` thread.
+to its `Parakeet` thread. Text generation uses the thread split described above.
 
 ## Model provisioning: task resolvers and `ModelHub`
 
@@ -342,6 +363,10 @@ actor lifetime, in every process involved. `ModelHub:4` can also be useful.
 The process lifetime and restart policy are covered by `HWInferenceProcessTest`
 and `BrowserHWInferenceProcessTest` in
 {searchfox}`toolkit/components/ml/tests/gtest/TestHWInferenceProcess.cpp`.
+`TextGenerationTest` covers model loading, generation, cancellation, failure,
+and the idle grace with the utility sandbox enabled. Browser tests in
+{searchfox}`toolkit/components/ml/tests/browser` cover the WebIDL and MLEngine
+surfaces, concurrent generators, profiler markers, and telemetry.
 
 The content path, model provisioning and consent are exercised end to end by
 the speech recognition tests, see [its documentation](/media/SpeechRecognition).
