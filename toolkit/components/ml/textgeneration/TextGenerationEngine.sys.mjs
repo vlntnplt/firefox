@@ -93,6 +93,7 @@ function toCreateOptions(options) {
     batchSize: options.numBatch ?? undefined,
     ubatchSize: options.numUbatch ?? undefined,
     flashAttn: options.flashAttn ?? undefined,
+    featureId: options.featureId ?? "",
   };
   if (options.kvCacheDtype) {
     createOptions.kvCacheDtype = toKVCacheDtype(options.kvCacheDtype);
@@ -198,17 +199,16 @@ class ChunkQueue {
   }
 }
 
-/** Per-run counters for the engine-run telemetry record. */
-class RunTracker {
-  settled = false;
+/** What recordEngineRun reports about a streamed run. */
+class StreamStats {
   firstChunkAt = 0;
   lastChunkAt = 0;
   chunkCount = 0;
   characterCount = 0;
+  streaming = false;
 
-  constructor(streaming) {
+  constructor() {
     this.beforeRun = ChromeUtils.now();
-    this.streaming = streaming;
   }
 
   /** @param {string} text */
@@ -222,7 +222,7 @@ class RunTracker {
   }
 
   /** @param {EngineRunResult} result */
-  streamingMetrics(result) {
+  metrics(result) {
     return {
       tokenCount: result.metrics.outputTokens,
       characterCount: this.characterCount,
@@ -409,47 +409,47 @@ export class TextGenerationEngine {
   }
 
   /**
-   * @param {RunTracker} tracker
+   * @param {StreamStats} stats
    * @param {EngineRunResult} result
    */
-  #recordRun(tracker, result) {
+  #recordRun(stats, result) {
     this.telemetry.recordRunInferenceSuccessFlow(this.engineId, result.metrics);
     this.telemetry.recordEngineRun({
-      beforeRun: tracker.beforeRun,
+      beforeRun: stats.beforeRun,
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
       engineId: this.engineId,
       modelId: this.pipelineOptions.modelId,
       backend: this.pipelineOptions.backend,
       backendSourceRevision: lazy.LLAMA_CPP_VERSION,
-      ...(tracker.streaming ? tracker.streamingMetrics(result) : {}),
+      ...(stats.streaming ? stats.metrics(result) : {}),
     });
-    tracker.settled = true;
   }
 
   /** @param {LlamaRunRequest} request */
   async run(request) {
-    const tracker = new RunTracker(false);
+    const stats = new StreamStats();
     try {
       const result = await this.#execute(request);
-      this.#recordRun(tracker, result);
+      this.#recordRun(stats, result);
       return result;
     } catch (error) {
       this.telemetry.recordRunInferenceFailure(error);
-      tracker.settled = true;
       throw error;
     }
   }
 
   /** @param {LlamaRunRequest} request */
   async *runWithGenerator(request) {
-    const tracker = new RunTracker(true);
+    const stats = new StreamStats();
+    stats.streaming = true;
     const queue = new ChunkQueue();
     /** @type {Promise<EngineRunResult> | null} */
     let completion = null;
+    let settled = false;
     try {
       completion = this.#execute(request, text => {
-        tracker.onChunk(text);
+        stats.onChunk(text);
         queue.push(text);
       });
       // Keeps the rejection handled; the await below rethrows it.
@@ -465,21 +465,18 @@ export class TextGenerationEngine {
       // Link Preview keys its final flush on an empty terminal chunk.
       yield { text: "", tokens: [], isPrompt: false };
 
-      this.#recordRun(tracker, result);
+      this.#recordRun(stats, result);
+      settled = true;
       return result;
     } catch (error) {
+      settled = true;
       this.telemetry.recordRunInferenceFailure(error);
-      tracker.settled = true;
       throw error;
     } finally {
       // Breaking out of a `for await` loop returns this generator mid-decode.
-      if (!tracker.settled) {
+      if (!settled) {
         this.cancel();
-        try {
-          await completion;
-        } catch (error) {
-          // Ignored: the consumer already walked away.
-        }
+        await completion?.catch(() => {});
       }
     }
   }

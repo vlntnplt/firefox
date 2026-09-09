@@ -10,6 +10,7 @@
 #include "mozilla/hwinference/HWInferenceParent.h"
 #include "mozilla/ipc/Endpoint.h"
 #include "mozilla/ipc/UtilityProcessManager.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 
 namespace mozilla::hwinference {
 
@@ -27,13 +28,33 @@ already_AddRefed<TextGenerationParent> TextGenerationParent::Create(
     const ipc::FileDescriptor& aModel, const TextGenerationOptions& aOptions) {
   AssertIsOnMainThread();
   const bool processReused = HWInferenceProcess::Browser().IsUp();
+  const TimeStamp spawnStart = TimeStamp::Now();
   RefPtr<ipc::UtilityProcessKeepAlive> keepAlive =
       HWInferenceProcess::Browser().Acquire();
   if (!keepAlive) {
     LOGD("{} - the browser HWInference process failed to launch", __func__);
+    PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                    MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                    MLFailedMarker, "process spawn"_ns, "launch refused"_ns);
     return nullptr;
   }
   RefPtr<HWInferenceParent> process = HWInferenceProcess::Browser().Actor();
+  if (!processReused) {
+    process->WhenReady()->Then(
+        GetMainThreadSerialEventTarget(), __func__,
+        [spawnStart]() {
+          PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                          MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                          MLProcessSpawnMarker,
+                          (TimeStamp::Now() - spawnStart).ToMilliseconds());
+        },
+        [spawnStart]() {
+          PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                          MarkerTiming::IntervalUntilNowFrom(spawnStart),
+                          MLFailedMarker, "process spawn"_ns,
+                          "process never came up"_ns);
+        });
+  }
 
   ipc::Endpoint<PTextGenerationParent> parentEnd;
   ipc::Endpoint<PTextGenerationChild> childEnd;

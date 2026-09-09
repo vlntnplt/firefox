@@ -11,6 +11,7 @@
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPtr.h"
 #include "mozilla/ipc/UtilityProcessManager.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla::hwinference {
@@ -128,13 +129,27 @@ already_AddRefed<ipc::UtilityProcessKeepAlive> HWInferenceProcess::Acquire() {
   return keepAlive.forget();
 }
 
+// Retired: this was the last keep-alive.
+static void DropKeepAlive(RefPtr<ipc::UtilityProcessKeepAlive>&& aKeepAlive,
+                          TimeStamp aReleased, uint32_t aGraceMs) {
+  WeakPtr<ipc::UtilityProcessKeepAlive> weak = aKeepAlive.get();
+  aKeepAlive = nullptr;
+  const bool retired = !weak.get();
+  LOGD("DropKeepAlive - keep-alive dropped, process {}",
+       retired ? "retired" : "still in use");
+  PROFILER_MARKER(ML_HWINFERENCE_PROCESS_TRACK, ML_SETUP,
+                  MarkerTiming::IntervalUntilNowFrom(aReleased),
+                  MLProcessReleaseMarker, aGraceMs, retired);
+}
+
 void HWInferenceProcess::Release(
     RefPtr<ipc::UtilityProcessKeepAlive>&& aKeepAlive) {
   AssertIsOnMainThread();
 
+  const TimeStamp released = TimeStamp::Now();
   const uint32_t graceMs = GraceMs();
   if (!graceMs) {
-    aKeepAlive = nullptr;
+    DropKeepAlive(std::move(aKeepAlive), released, graceMs);
     return;
   }
 
@@ -142,10 +157,11 @@ void HWInferenceProcess::Release(
   // Not a timer: nothing would hold it, and the main thread drops the runnable
   // at shutdown.
   NS_DelayedDispatchToCurrentThread(
-      NS_NewRunnableFunction("hwinference::HWInferenceProcess::Release",
-                             [keepAlive = std::move(aKeepAlive)]() mutable {
-                               keepAlive = nullptr;
-                             }),
+      NS_NewRunnableFunction(
+          "hwinference::HWInferenceProcess::Release",
+          [keepAlive = std::move(aKeepAlive), released, graceMs]() mutable {
+            DropKeepAlive(std::move(keepAlive), released, graceMs);
+          }),
       graceMs);
 }
 
