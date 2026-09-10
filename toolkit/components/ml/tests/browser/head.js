@@ -1452,6 +1452,12 @@ async function checkForRemoteType(remoteType) {
   return false;
 }
 
+// Bound off the namespace rather than destructuring MLTestUtils, which some
+// tests in this directory declare themselves.
+const { runOnBothInferenceProcesses } = ChromeUtils.importESModule(
+  "resource://testing-common/MLTestUtils.sys.mjs"
+).MLTestUtils;
+
 // top-k only filters; the final dist sampler selects a token.
 const TINYSTORIES_GREEDY_SAMPLERS = [
   { type: "top-k", topK: 1 },
