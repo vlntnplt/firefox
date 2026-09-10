@@ -1442,3 +1442,9 @@ async function checkForRemoteType(remoteType) {
   }
   return false;
 }
+
+// Bound off the namespace rather than destructuring MLTestUtils, which some
+// tests in this directory declare themselves.
+const { runOnBothInferenceProcesses } = ChromeUtils.importESModule(
+  "resource://testing-common/MLTestUtils.sys.mjs"
+).MLTestUtils;
