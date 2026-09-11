@@ -226,6 +226,7 @@ nsresult LlamaGenerateTask::Run() {
   // Notify completion (nullopt signals end of stream)
   LOGV_RUNNER("{}: Indicating completed status", __PRETTY_FUNCTION__);
 
+  mState = TaskState::CompletedSuccess;
   if (MOZ_UNLIKELY(!PushMessage(mozilla::Nothing()))) {
     auto msg = nsFmtCString(
         "{}: Fatal error: Unable to indicate "
@@ -237,7 +238,6 @@ nsresult LlamaGenerateTask::Run() {
   }
 
   LOGV_RUNNER("{} LlamaGenerateTask Completed.", __PRETTY_FUNCTION__);
-  mState = TaskState::CompletedSuccess;
   return NS_OK;
 }
 
