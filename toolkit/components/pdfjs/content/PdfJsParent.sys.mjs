@@ -119,6 +119,14 @@ export function filterCertsForView(data) {
 }
 
 export class PdfJsParent extends JSWindowActorParent {
+  /**
+   * When true, the alt text engine is neither downloaded nor run and guesses
+   * return a fixed string. Defaults to true under automation; a test that
+   * needs the real engine clears it.
+   *
+   * @type {boolean}
+   */
+  static stubAIEngine = Cu.isInAutomation;
   #signatureStorageChangedObserver = null;
 
   #mutablePreferences = new Set([
@@ -520,7 +528,7 @@ export class PdfJsParent extends JSWindowActorParent {
       const now = ChromeUtils.now();
 
       let response;
-      if (Cu.isInAutomation) {
+      if (PdfJsParent.stubAIEngine) {
         response = { output: "In Automation" };
       } else {
         const engine = await this.#createAIEngine(service, null);
@@ -549,7 +557,7 @@ export class PdfJsParent extends JSWindowActorParent {
       throw new Error("Invalid service");
     }
 
-    if (Cu.isInAutomation) {
+    if (PdfJsParent.stubAIEngine) {
       PdfJsTelemetry.report({
         type: "editing",
         data: {
@@ -670,7 +678,7 @@ export class PdfJsParent extends JSWindowActorParent {
         action: "pdfjs.image.alt_text.model_deleted",
       },
     });
-    if (Cu.isInAutomation) {
+    if (PdfJsParent.stubAIEngine) {
       return null;
     }
     try {
