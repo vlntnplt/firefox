@@ -118,13 +118,8 @@ TEST_F(TestUtilityProcess, LaunchAllKinds) {
 // do: it declares a single `utility` service.
 #ifndef ANDROID
 
-// Checks that a request arriving in the window right after teardown launches
-// a fresh process. HWInferenceParent is bound to PHWInference, a separate
-// toplevel from PUtilityProcess, so once DestroyProcess has removed the
-// UtilityProcessManager entry the cached actor still reports CanSend() until
-// the peer dies and the channel errors, a main-thread dispatch later.
-// GetSingleton evicts it in that window so StartUtility relaunches instead of
-// taking its CanSend() fast path.
+// A request right after CleanShutdown gets a fresh process and a fresh actor,
+// although the old actor can still send.
 TEST_F(TestUtilityProcess, HWInferenceRelaunchesAfterShutdown) {
   auto manager = UtilityProcessManager::GetSingleton();
   ASSERT_TRUE(manager);
@@ -146,8 +141,7 @@ TEST_F(TestUtilityProcess, HWInferenceRelaunchesAfterShutdown) {
   auto firstPid = manager->ProcessPid(SandboxingKind::HW_INFERENCE);
   ASSERT_TRUE(firstPid.isSome());
 
-  // Nothing spins the event loop between these two, so the actor's
-  // ActorDestroy cannot have run yet: this is exactly the stale window.
+  // Same turn: the old actor has not seen ActorDestroy yet.
   manager->CleanShutdown(SandboxingKind::HW_INFERENCE);
   auto relaunch = WaitFor(manager->StartHWInference());
   ASSERT_TRUE(relaunch.isOk())

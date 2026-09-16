@@ -20,8 +20,6 @@ class HWInferenceChild final : public PHWInferenceChild {
 
   HWInferenceChild() = default;
 
-  void Shutdown();
-
   mozilla::ipc::IPCResult RecvNewContentSpeechRecognition(
       Endpoint<hwinference::PSpeechRecognitionParent>&& aEndpoint,
       const dom::ContentParentId& aContentId);
