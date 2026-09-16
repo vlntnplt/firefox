@@ -7,7 +7,9 @@
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPtr.h"
 #include "nsTHashSet.h"
+#include "HWInferenceLog.h"
 #include "HWInferenceParent.h"
+#include "HWInferenceProcess.h"
 #include "mozilla/dom/Blob.h"
 #include "mozilla/dom/BlobBinding.h"
 #include "mozilla/ipc/FileDescriptor.h"
@@ -44,12 +46,9 @@
 
 namespace mozilla::hwinference {
 
-extern LazyLogModule gHWInferenceLog;
 #define LOGE(...) MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Error, __VA_ARGS__)
 #define LOGD(...) MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Debug, __VA_ARGS__)
 #define LOGV(...) MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Verbose, __VA_ARGS__)
-
-StaticRefPtr<HWInferenceParent> HWInferenceParent::sInstance;
 
 static StaticAutoPtr<nsTHashSet<nsCString>> sMockInstalledModels;
 
@@ -172,56 +171,34 @@ class ModelDownloadCallbacks final
 NS_IMPL_ISUPPORTS(ModelDownloadCallbacks, nsIMLModelDownloadProgressCallback,
                   nsIMLModelDownloadCompletionCallback)
 
-/* static */
-RefPtr<HWInferenceParent> HWInferenceParent::GetSingleton() {
-  AssertIsOnMainThread();
-
-  // After CleanShutdown the actor can still send until the handshake
-  // completes, and StartUtility would take it for bound.
-  if (sInstance && sInstance->CanSend()) {
-    RefPtr<ipc::UtilityProcessManager> upm =
-        ipc::UtilityProcessManager::GetIfExists();
-    if (!upm || upm->GetProcessParent(ipc::SandboxingKind::HW_INFERENCE) !=
-                    sInstance->Manager()) {
-      LOGD("{} - evicting instance bound to a gone process", __func__);
-      sInstance = nullptr;
-    }
-  }
-
-  if (!sInstance) {
-    sInstance = new HWInferenceParent();
-    ClearOnShutdown(&sInstance);
-  }
-  return sInstance;
+template <typename Send>
+void HWInferenceParent::SendWhenReady(Send&& aSend) {
+  WhenReady()->Then(
+      GetMainThreadSerialEventTarget(), __func__,
+      [self = RefPtr{this}, send = std::forward<Send>(aSend)]() mutable {
+        if (!send(*self)) {
+          LOGD("Failed to send the endpoint to HWInference");
+        }
+      },
+      []() { LOGD("HWInference never came up: dropping the endpoint"); });
 }
 
-/* static */
 void HWInferenceParent::StartContentSpeechRecognition(
     Endpoint<PSpeechRecognitionParent>&& aEndpoint,
     dom::ContentParentId aChildId) {
-  RefPtr<HWInferenceParent> self = GetSingleton();
-  self->WhenReady()->Then(
-      GetMainThreadSerialEventTarget(), __func__,
-      [self, endpoint = std::move(aEndpoint), aChildId]() mutable {
-        if (!self->SendNewContentSpeechRecognition(std::move(endpoint),
-                                                   aChildId)) {
-          LOGD("Failed to send endpoint to utility process");
-        }
-      },
-      []() {
-        LOGD("HWInference never came up: dropping the speech endpoint");
-      });
+  SendWhenReady([endpoint = std::move(aEndpoint),
+                 aChildId](HWInferenceParent& aSelf) mutable {
+    return aSelf.SendNewContentSpeechRecognition(std::move(endpoint), aChildId);
+  });
 }
 
 void HWInferenceParent::ActorDestroy(ActorDestroyReason aReason) {
-  LOGD("{}", __func__);
+  LOGD("{} - reason={}", __func__, static_cast<int>(aReason));
   // A no-op once bound: let go of anyone waiting on an actor that never made it
   // to its process.
   mReadyPromise->Reject(NS_ERROR_NOT_AVAILABLE, __func__);
-  // Only clear ourselves: a late ActorDestroy from a superseded instance must
-  // not evict the replacement created after it.
-  if (sInstance == this) {
-    sInstance = nullptr;
+  if (mOwner) {
+    mOwner->OnActorDestroyed(this, aReason);
   }
 }
 
