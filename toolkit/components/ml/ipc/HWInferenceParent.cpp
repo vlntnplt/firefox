@@ -176,22 +176,15 @@ NS_IMPL_ISUPPORTS(ModelDownloadCallbacks, nsIMLModelDownloadProgressCallback,
 RefPtr<HWInferenceParent> HWInferenceParent::GetSingleton() {
   AssertIsOnMainThread();
 
-  // Evict an instance bound to a process that is no longer the current one.
-  // PHWInference is separate from PUtilityProcess, so it keeps reporting
-  // CanSend() for a main-thread dispatch after the peer died, and handing it
-  // out in that window would have StartUtility resolve on a doomed actor.
-  // Comparing the bound process also covers process death, not just
-  // CleanShutdown.
-  if (sInstance && sInstance->mUtilityParent) {
+  // After CleanShutdown the actor can still send until the handshake
+  // completes, and StartUtility would take it for bound.
+  if (sInstance && sInstance->CanSend()) {
     RefPtr<ipc::UtilityProcessManager> upm =
         ipc::UtilityProcessManager::GetIfExists();
     if (!upm || upm->GetProcessParent(ipc::SandboxingKind::HW_INFERENCE) !=
-                    sInstance->mUtilityParent) {
+                    sInstance->Manager()) {
       LOGD("{} - evicting instance bound to a gone process", __func__);
-      RefPtr<HWInferenceParent> stale = sInstance;
       sInstance = nullptr;
-      // Synchronously runs ActorDestroy, so CanSend() is false on return.
-      stale->Close();
     }
   }
 
@@ -225,7 +218,6 @@ void HWInferenceParent::ActorDestroy(ActorDestroyReason aReason) {
   // A no-op once bound: let go of anyone waiting on an actor that never made it
   // to its process.
   mReadyPromise->Reject(NS_ERROR_NOT_AVAILABLE, __func__);
-  mUtilityParent = nullptr;
   // Only clear ourselves: a late ActorDestroy from a superseded instance must
   // not evict the replacement created after it.
   if (sInstance == this) {
@@ -236,22 +228,12 @@ void HWInferenceParent::ActorDestroy(ActorDestroyReason aReason) {
 nsresult HWInferenceParent::BindToUtilityProcess(
     const RefPtr<ipc::UtilityProcessParent>& aUtilityParent) {
   LOGD("{}", __func__);
-  Endpoint<hwinference::PHWInferenceParent> parentEnd;
-  Endpoint<hwinference::PHWInferenceChild> childEnd;
-  MOZ_ALWAYS_SUCCEEDS(PHWInference::CreateEndpoints(
-      ipc::EndpointProcInfo::Current(), aUtilityParent->OtherEndpointProcInfo(),
-      &parentEnd, &childEnd));
-
-  LOGD("Sending StartHWInferenceService to utility process");
-  if (!aUtilityParent->SendStartHWInferenceService(std::move(childEnd))) {
-    LOGE("Failed to send StartHWInferenceService");
-    MOZ_ASSERT(false, "StartHWInference service failure");
+  if (!aUtilityParent->SendPHWInferenceConstructor(this)) {
+    LOGE("Failed to construct the HWInference actor");
+    MOZ_ASSERT(false, "HWInference actor construction failure");
     return NS_ERROR_FAILURE;
   }
 
-  LOGD("StartHWInferenceService sent successfully, binding parent endpoint");
-  MOZ_ALWAYS_TRUE(parentEnd.Bind(this));
-  mUtilityParent = aUtilityParent;
   mReadyPromise->Resolve(true, __func__);
   return NS_OK;
 }

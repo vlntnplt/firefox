@@ -63,10 +63,6 @@ class HWInferenceParent final : public PHWInferenceParent {
   static StaticRefPtr<HWInferenceParent> sInstance;
   ~HWInferenceParent() = default;
 
-  // The utility process this actor is bound to, null until BindToUtilityProcess
-  // and once destroyed. An instance is only ever bound to one process.
-  RefPtr<ipc::UtilityProcessParent> mUtilityParent;
-
   const RefPtr<GenericNonExclusivePromise::Private> mReadyPromise =
       new GenericNonExclusivePromise::Private(
           "HWInferenceParent::mReadyPromise");

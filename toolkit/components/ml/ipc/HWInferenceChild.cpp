@@ -15,8 +15,6 @@ LazyLogModule gHWInferenceLog("HWInference");
 #define LOGE(fmt, ...) \
   MOZ_LOG_FMT(gHWInferenceLog, LogLevel::Error, fmt, ##__VA_ARGS__)
 
-void HWInferenceChild::Shutdown() { PHWInferenceChild::Close(); }
-
 ipc::IPCResult HWInferenceChild::RecvNewContentSpeechRecognition(
     Endpoint<hwinference::PSpeechRecognitionParent>&& aEndpoint,
     const dom::ContentParentId& aContentId) {
