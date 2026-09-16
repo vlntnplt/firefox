@@ -55,29 +55,44 @@ the capability to mark pages as executable for JITing code.
 inference on text) are eventually expected to also run inside `HWInference`, to
 be able to use hardware acceleration for tasks unrelated to speech recognition.
 
-## One process, many users
+## Two processes, two kinds of users
 
-There is a single `HWInference` process, keyed like every other utility process
-by its `SandboxingKind` alone (see `GetProcess`/`LaunchProcess` in
-{searchfox}`ipc/glue/UtilityProcessManager.cpp`), with one
-`HWInferenceParent` on the main-process side,
-`HWInferenceParent::GetSingleton()`.
+A `SandboxingKind` does not imply a single process. `mProcesses` in
+{searchfox}`ipc/glue/UtilityProcessManager.cpp` is a flat list: `LaunchProcess`
+still hands out the kind's shared process, which lives until `CleanShutdown`,
+and `LaunchIndependentProcess` spawns one whose lifetime is exactly that of the
+`UtilityProcessKeepAlive` it hands back. `HW_INFERENCE` has two live processes
+of the second sort, one per class of consumer, each with its own
+`HWInferenceParent` on the main-process side and both under the same sandbox
+policy.
 
-Content-driven inference reaches it through
-`UtilityProcessManager::StartContentHWInferenceManager`. A privileged,
-parent-process-triggered consumer — future "browser AI" features — launches the
-same process, with `UtilityProcessManager::LaunchProcessWithKeepAlive`.
+They are separate so that a process a content process can reach never shares an
+address space with browser data. Content is the riskier IPC peer, and the
+process serving it parses what it sends; the browser's process holds page text
+and prompts from every origin its features touch. The two also have independent
+lifetimes and restart budgets.
 
-What such a consumer does need is a manager protocol of its own alongside
-{searchfox}`PHWInferenceManager
-<toolkit/components/ml/ipc/PHWInferenceManager.ipdl>`, which is
-content-specific: today the only way into the process from outside it is the
-content path described below.
+{searchfox}`HWInferenceProcess <toolkit/components/ml/ipc/HWInferenceProcess.h>`
+is what shares one of them between the consumers of one class: it launches the
+process on the first `Acquire`, hands every consumer the same keep-alive, and
+tracks that keep-alive weakly, so the consumers alone decide how long the process
+lives. It also owns the `HWInferenceParent` bound to that process.
+`HWInferenceProcess::Content` stops relaunching past
+`browser.ml.hwinference.max_restarts` deaths in a row that nobody asked for.
+`HWInferenceProcess::Browser` has no budget, as nothing a web page sends reaches
+it, and its `Release` holds the keep-alive for
+`browser.ml.hwinference.browser_idle_shutdown_grace_ms`, so that a consumer
+arriving inside that window reuses both the process and its bound actor.
 
-Isolating consumers from each other in separate processes — chrome-driven from
-content-driven, per origin, per feature — is a matter of keying
-`UtilityProcessManager` by more than the `SandboxingKind`, so that a single kind
-can have several live processes.
+Content-driven inference reaches its process through `PContent`, see below. A
+browser consumer calls `HWInferenceProcess::Browser().Acquire()`, sends on
+`Actor()` once its `WhenReady` resolves, and hands the keep-alive back to
+`Release` in its `ActorDestroy`. A process that dies, or never comes up, needs
+nothing from the consumer: its keep-alive is a no-op to drop, and the next
+acquire launches a fresh one.
+
+Isolating consumers further, per origin, per feature, is a matter of giving each
+class its own `HWInferenceProcess`.
 
 The topology this produces: **every** content process shares the one
 `HWInference` process, getting its own `HWInferenceManagerParent`
@@ -112,36 +127,36 @@ flowchart LR
 
 ## Process lifetime
 
-Users of the `HWInference` process decide how long it lives.
+Users of an `HWInference` process decide how long it lives.
 
-`UtilityProcessManager::LaunchProcessWithKeepAlive` hands out a
-`UtilityProcessKeepAlive` on the process (main thread only), a single one shared
-by every caller; when the last reference to it goes away the process is shut down
-with `CleanShutdown`, rather than lingering until browser shutdown like other
-Utility processes.
+`HWInferenceProcess::Acquire` hands out the `UtilityProcessKeepAlive` of the
+running or launching process (main thread only), the same one to every caller;
+when the last reference to it goes away the process is shut down, rather than
+lingering until browser shutdown like other Utility processes.
 
 - **Content-process consumers** go through {searchfox}`PContent
-  <dom/ipc/PContent.ipdl>`: `RequestHWInferenceConnection` acquires a keep-alive
-  for the requesting content process -- whether or not the process then starts
-  -- and `ReleaseHWInferenceConnection` drops it. `HWInferenceManagerChild`
-  sends exactly one release per request, from `ActorDestroy`. `ContentParent`
-  holds a single keep-alive for as long as its content process has a connection
-  outstanding, and drops it in its own `ActorDestroy`, so a crashed content
-  process cannot pin the utility process forever.
-- **Parent-process consumers** call `LaunchProcessWithKeepAlive` directly, with
-  no IPC involved, and bind their actor to the process it hands back with
-  `UtilityProcessKeepAlive::StartUtility`.
+  <dom/ipc/PContent.ipdl>`: `AcquireHWInferenceProcess` acquires the content
+  process' keep-alive -- whether or not the process then starts -- and
+  `ReleaseHWInferenceConnection` drops it. `ContentParent` holds a single
+  keep-alive for as long as its content process has a connection outstanding,
+  and drops it in its own `ActorDestroy`, so a crashed content process cannot
+  pin the utility process forever.
+- **Parent-process consumers** call `Acquire` directly, with no IPC involved,
+  send on `HWInferenceProcess::Actor` once its `WhenReady` resolves, and hand
+  the keep-alive back to `Release`.
 
 A keep-alive holds the process it was acquired on rather than its
 `SandboxingKind`, so one that outlives that process — it crashed, or the browser
-is shutting down — cannot shut down the process that replaced it.
+is shutting down — cannot shut down the process that replaced it. A process that
+dies, or never comes up, needs nothing from its consumers: the next `Acquire`
+launches a fresh one, with a fresh actor, and whoever waited on the old actor's
+`WhenReady` is told.
 
 `UtilityProcessManager` has no policy of its own: it shuts the process down the
-moment the last keep-alive on it goes away. Other policies can be implemented,
-they belong in the user of the process. An example is `SpeechRecognition`: the
-Web API has numerous async static methods, and it would be wasteful to shutdown
-the process every time one of those static methods finish, when another one is
-about to be called.
+moment the last keep-alive on it goes away. Other policies belong in the user of
+the process. An example is `SpeechRecognition`: the Web API has numerous async
+static methods, and it would be wasteful to shutdown the process every time one
+of those static methods finish, when another one is about to be called.
 
 ## Connecting from a content process
 
@@ -204,7 +219,7 @@ sequenceDiagram
   SRB->>CC: SendRequestHWInferenceConnection(parentEp)
   CC->>CP: PContent::RequestHWInferenceConnection(parentEp)
   CP->>UPM: StartContentHWInferenceManager(parentEp, contentId)
-  Note over UPM: LaunchProcessWithKeepAlive(HW_INFERENCE), then<br/>keepAlive->StartUtility(HWInferenceParent):<br/>launches the process if not already running
+  Note over UPM: HWInferenceProcess::Content().Acquire():<br/>launches the process if not already running
   Note over CP: ++mHWInferenceConnections<br/>keeps the UtilityProcessKeepAlive it got back
   UPM->>HWP: SendNewContentHWInferenceManager(parentEp, contentId)
   HWP->>HWC: PHWInference::NewContentHWInferenceManager(parentEp, contentId)

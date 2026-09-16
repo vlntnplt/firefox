@@ -9,13 +9,16 @@ with Files("**"):
 
 EXPORTS.mozilla.hwinference += [
     "HWInferenceChild.h",
+    "HWInferenceLog.h",
     "HWInferenceParent.h",
+    "HWInferenceProcess.h",
     "HWInferenceTypes.h",
 ]
 
 UNIFIED_SOURCES += [
     "HWInferenceChild.cpp",
     "HWInferenceParent.cpp",
+    "HWInferenceProcess.cpp",
 ]
 
 IPDL_SOURCES = [
