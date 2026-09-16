@@ -679,7 +679,8 @@ void TestTriggerMetrics(uint32_t aProcessType,
     } break;
     case nsIXULRuntime::PROCESS_TYPE_UTILITY:
       (void)ipc::UtilityProcessManager::GetSingleton()
-          ->GetProcessParent(ipc::SandboxingKind::GENERIC_UTILITY)
+          ->GetSharedKeepAlive(ipc::SandboxingKind::GENERIC_UTILITY)
+          ->GetProcessParent()
           ->SendTestTriggerMetrics()
           ->Then(
               GetCurrentSerialEventTarget(), __func__,
