@@ -33,7 +33,7 @@ import {
   CountVectorizer,
   cosSim,
 } from "chrome://global/content/ml/NLPUtils.sys.mjs";
-import { EmbeddingsGenerator } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
+import { embeddingsGeneratorFactory } from "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs";
 import { SmartTabGroupingManager } from "moz-src:///browser/components/tabbrowser/SmartTabGrouping.sys.mjs";
 
 const lazy = {};
@@ -100,13 +100,17 @@ function isAllowedURL(url) {
 let _embeddingsGenerator = null;
 function getEmbeddingsGenerator() {
   if (!_embeddingsGenerator) {
-    _embeddingsGenerator = EmbeddingsGenerator.forGeneral();
+    _embeddingsGenerator = embeddingsGeneratorFactory.forGeneral({
+      featureId: "sw-tool-open-tabs",
+    });
   }
   return _embeddingsGenerator;
 }
 
 async function embedTexts(texts) {
-  const result = await getEmbeddingsGenerator().embedMany(texts);
+  const result = await getEmbeddingsGenerator().embedMany(texts, {
+    activity: "rank-tabs",
+  });
   return result.output || result;
 }
 

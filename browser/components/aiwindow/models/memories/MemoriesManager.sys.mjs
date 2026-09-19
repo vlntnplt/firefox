@@ -41,8 +41,6 @@ import {
   MAX_SESSIONS_FIRST_RUN,
   MAX_SESSIONS_DELTA_RUN,
   MEMORY_TYPE_PROFILE_FACT,
-  DEFAULT_RELEVANT_MEMORIES_TOP_K,
-  DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD,
 } from "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs";
 import {
   getFormattedMemoryAttributeList,
@@ -765,22 +763,11 @@ export class MemoriesManager {
    * Public API wrapper around MemoryStore.getRelevantMemories
    *
    * @param {string} message                  User message to find relevant memories for
-   * @param {number} topK                     Number of top relevant memories to return
-   *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_TOP_K})
-   * @param {number} similarityThreshold      Minimum similarity score (0-1) to include
-   *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD})
+   * @param {object} [options]                See MemoryStore.getRelevantMemories
    * @returns {Promise<Array<object>>}        List of relevant memories sorted by similarity
    */
-  static async getRelevantMemories(
-    message,
-    topK = DEFAULT_RELEVANT_MEMORIES_TOP_K,
-    similarityThreshold = DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD
-  ) {
-    return await MemoryStore.getRelevantMemories(
-      message,
-      topK,
-      similarityThreshold
-    );
+  static async getRelevantMemories(message, options = {}) {
+    return await MemoryStore.getRelevantMemories(message, options);
   }
 
   /**

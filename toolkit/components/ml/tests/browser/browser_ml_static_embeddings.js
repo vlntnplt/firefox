@@ -67,7 +67,8 @@ add_task(async function test_static_embeddings() {
   /** @type {MLEngineClass} */
   const engine = await createEngine(
     new PipelineOptions({
-      featureId: "simple-text-embedder",
+      featureId: "semantic-history",
+      config: "simple-text-embedder",
       engineId: "test-static-embeddings",
 
       modelId: "mozilla/static-embeddings",
@@ -81,13 +82,16 @@ add_task(async function test_static_embeddings() {
   );
 
   const inputText = "The quick brown fox jumped over the lazy fox";
-  const { output, metrics } = await engine.run({
-    args: [inputText],
-    options: {
-      pooling: "mean",
-      normalize: true,
+  const { output, metrics } = await engine.run(
+    {
+      args: [inputText],
+      options: {
+        pooling: "mean",
+        normalize: true,
+      },
     },
-  });
+    { activity: "index-history" }
+  );
 
   is(output.length, 1, "One embedding was returned");
   const [embedding] = output;
@@ -141,13 +145,16 @@ add_task(async function test_static_embeddings() {
   // emoji (encoded as a surrogate pair) contributes 2 to inputChars.
   const emojiText = "😄";
   Assert.equal(emojiText.length, 2, "The emoji should be 2 UTF-16 code units");
-  const { metrics: emojiMetrics } = await engine.run({
-    args: [emojiText],
-    options: {
-      pooling: "mean",
-      normalize: true,
+  const { metrics: emojiMetrics } = await engine.run(
+    {
+      args: [emojiText],
+      options: {
+        pooling: "mean",
+        normalize: true,
+      },
     },
-  });
+    { activity: "index-history" }
+  );
   Assert.equal(
     emojiMetrics.inputChars,
     emojiText.length,

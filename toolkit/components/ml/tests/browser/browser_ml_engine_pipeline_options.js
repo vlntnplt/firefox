@@ -88,7 +88,10 @@ add_task(async function test_ml_engine_pick_feature_id() {
   Assert.equal(await checkForRemoteType("inference"), true);
 
   info("Run the inference");
-  const inferencePromise = engineInstance.run({ data: "This gets echoed." });
+  const inferencePromise = engineInstance.run(
+    { data: "This gets echoed." },
+    { activity: "describe-image" }
+  );
 
   info("Wait for the pending downloads.");
   await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
@@ -470,7 +473,10 @@ add_task(async function test_ml_engine_two_tasknames_in_rs() {
   Assert.equal(await checkForRemoteType("inference"), true);
 
   info("Run the inference");
-  const inferencePromise = engineInstance.run({ data: "This gets echoed." });
+  const inferencePromise = engineInstance.run(
+    { data: "This gets echoed." },
+    { activity: "describe-image" }
+  );
 
   info("Wait for the pending downloads.");
   await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);

@@ -7,25 +7,44 @@ const { MLTestUtils } = ChromeUtils.importESModule(
   "resource://testing-common/MLTestUtils.sys.mjs"
 );
 
+const FORM_AUTOFILL_CONFIGS = new Set([
+  "formfill-classification",
+  "formfill-encoder",
+  "formfill-head",
+]);
+
 /**
  * Creates options for a model-free echo engine.
  *
- * @param {string} featureId - The feature requesting the engine.
+ * @param {string} config - The config the engine resolves; the form autofill
+ *   ones belong to the form-autofill feature and name their engine.
  * @param {string} [backend="onnx"] - The requested inference backend.
  * @param {number} [numThreads=2] - The requested number of inference threads.
- * @returns {{
- *   featureId: string,
- *   taskName: string,
- *   backend: string,
- *   numThreads: number,
- * }} The engine options.
+ * @returns {object} The engine options.
  */
-function createOptions(featureId, backend = "onnx", numThreads = 2) {
-  return {
-    featureId,
+function createOptions(config, backend = "onnx", numThreads = 2) {
+  const options = {
+    featureId: config,
     taskName: "moz-echo",
     backend,
     numThreads,
+  };
+  if (FORM_AUTOFILL_CONFIGS.has(config)) {
+    options.featureId = "form-autofill";
+    options.config = config;
+    options.engineId = `${config}-engine`;
+  }
+  return options;
+}
+
+/**
+ * @param {MLEngine<any>} engine
+ * @returns {{ activity: string | null }} Run options naming the activity the
+ *   engine's feature requires.
+ */
+function runOptionsFor(engine) {
+  return {
+    activity: engine.featureId === "form-autofill" ? "classify-field" : null,
   };
 }
 
@@ -39,7 +58,7 @@ function createOptions(featureId, backend = "onnx", numThreads = 2) {
 async function runEchoEngines(engines, remoteClients) {
   const messages = engines.map((_, index) => `Engine ${index}`);
   const runs = engines.map((engine, index) =>
-    engine.run({ data: messages[index] })
+    engine.run({ data: messages[index] }, runOptionsFor(engine))
   );
 
   await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(
@@ -238,7 +257,10 @@ add_task(async function test_interceptor_overrides_wasm_with_native() {
     );
 
     const engine = await createEngine(createOptions("formfill-head"));
-    const result = await engine.run({ data: "This gets echoed." });
+    const result = await engine.run(
+      { data: "This gets echoed." },
+      { activity: "score-field" }
+    );
 
     Assert.equal(
       (await engineCreation).engine,

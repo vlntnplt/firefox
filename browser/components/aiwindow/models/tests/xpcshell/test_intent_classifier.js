@@ -143,16 +143,16 @@ add_task(async function test_getPromptIntent_selects_model_by_region() {
       {
         region: "US",
         modelId: DEFAULT_INTENT_MODEL,
-        featureId: "smart-intent",
+        config: "smart-intent",
       },
       {
         region: "FR",
         modelId: INTENT_MODEL_ENGLISH_FRENCH,
-        featureId: "smart-intent-en-fr",
+        config: "smart-intent-en-fr",
       },
     ];
 
-    for (const { region, modelId, featureId } of cases) {
+    for (const { region, modelId, config } of cases) {
       Region._setHomeRegion(region, false);
       createEngineStub.resetHistory();
 
@@ -170,10 +170,11 @@ add_task(async function test_getPromptIntent_selects_model_by_region() {
         `Region ${region} should use model ${modelId}`
       );
       Assert.equal(
-        opts.featureId,
-        featureId,
-        `Region ${region} should use feature ${featureId}`
+        opts.config,
+        config,
+        `Region ${region} should use config ${config}`
       );
+      Assert.equal(opts.featureId, "sw-smartbar", "The feature is sw-smartbar");
       Assert.equal(
         opts.backend,
         "best-onnx",

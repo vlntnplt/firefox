@@ -1260,6 +1260,7 @@ async function runBenchmark() {
       }
 
       workload.pipelineOptions.engineId = "about-inference-benchmark";
+      workload.pipelineOptions.featureId = "about-inference";
       const bench = { name: workload.name, backend: currentBackend, runs: [] };
       let engine = null;
       let engineParent = null;

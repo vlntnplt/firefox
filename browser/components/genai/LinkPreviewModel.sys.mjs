@@ -114,11 +114,14 @@ export async function runSmokeTest({ engine, buildID }) {
   }
   try {
     let text = "";
-    for await (const chunk of engine.runWithGenerator({
-      prompt: SMOKE_PROMPT,
-      samplers: SMOKE_SAMPLERS,
-      nPredict: SMOKE_N_PREDICT,
-    })) {
+    for await (const chunk of engine.runWithGenerator(
+      {
+        prompt: SMOKE_PROMPT,
+        samplers: SMOKE_SAMPLERS,
+        nPredict: SMOKE_N_PREDICT,
+      },
+      { activity: "extract-key-points" }
+    )) {
       text += chunk.text || "";
     }
     const outputHash = await sha256Hex(text);
@@ -239,7 +242,7 @@ export const LinkPreviewModel = {
   },
 
   get engineId() {
-    return lazy.FEATURES[this.id].engineId;
+    return lazy.FEATURES[this.id].engineIds[0];
   },
 
   /**
@@ -543,19 +546,23 @@ export const LinkPreviewModel = {
       const postProcessor = await SentencePostProcessor.initialize();
       const blockedTokens = this.getBlockTokenList();
       let abandonedGeneration = false;
-      for await (const val of engine.runWithGenerator({
-        nPredict,
-        stopTokens: lazy.stopTokens,
-        logit_bias_toks: blockedTokens,
-        logit_bias_vals: Array(blockedTokens.length).fill(-Infinity),
-        prompt: [
-          { role: "system", content: systemPrompt },
-          {
-            role: "user",
-            content: lazy.preUserPrompt + processedInput + lazy.postUserPrompt,
-          },
-        ],
-      })) {
+      for await (const val of engine.runWithGenerator(
+        {
+          nPredict,
+          stopTokens: lazy.stopTokens,
+          logit_bias_toks: blockedTokens,
+          logit_bias_vals: Array(blockedTokens.length).fill(-Infinity),
+          prompt: [
+            { role: "system", content: systemPrompt },
+            {
+              role: "user",
+              content:
+                lazy.preUserPrompt + processedInput + lazy.postUserPrompt,
+            },
+          ],
+        },
+        { activity: "extract-key-points" }
+      )) {
         const { sentence, abort } = postProcessor.put(val.text);
         if (sentence) {
           onText?.(sentence);

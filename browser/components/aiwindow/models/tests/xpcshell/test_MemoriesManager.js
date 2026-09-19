@@ -116,10 +116,14 @@ async function addMemories() {
  * Helper function to return relevant memories with fake semantic embeddings
  *
  * @param {string} message
- * @param {int} topK
- * @param {float} threshold
+ * @param {object} [options]
+ * @param {number} [options.topK]
+ * @param {number} [options.similarityThreshold]
  */
-async function getFakeRelevantMemories(message, topK, threshold) {
+async function getFakeRelevantMemories(
+  message,
+  { topK, similarityThreshold } = {}
+) {
   // Mock the private embeddings generator in MemoriesManager
   // We'll create a fake generator that returns predictable embeddings
   const fakeGenerator = {
@@ -179,7 +183,7 @@ async function getFakeRelevantMemories(message, topK, threshold) {
   }));
 
   return similarities
-    .filter(m => m.similarity >= (threshold ?? 0.3))
+    .filter(m => m.similarity >= (similarityThreshold ?? 0.3))
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK ?? 5);
 }

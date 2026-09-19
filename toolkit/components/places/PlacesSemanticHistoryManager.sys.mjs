@@ -225,7 +225,9 @@ class PlacesSemanticHistoryManager {
       return;
     }
 
-    this.embedder = lazy.embeddingsGeneratorFactory.forPlaces();
+    this.embedder = lazy.embeddingsGeneratorFactory.forPlaces({
+      featureId: "semantic-history",
+    });
     this.semanticDB = new lazy.PlacesSemanticHistoryDatabase({
       embeddingSize: this.embedder.embeddingSize,
       fileName: "places_semantic.sqlite",
@@ -854,7 +856,8 @@ class PlacesSemanticHistoryManager {
       // you prepare an array of requests.
       try {
         batchTensors = await this.embedder.embedMany(
-          rowsToAdd.map(r => r.content)
+          rowsToAdd.map(r => r.content),
+          { activity: "index-history" }
         );
         batchTensors = this.#convertTensor(batchTensors, rowsToAdd.length);
       } catch (ex) {
@@ -983,6 +986,9 @@ class PlacesSemanticHistoryManager {
    * This runs the engine's inference pipeline on the provided request and
    * checks if changes to the rank warrant triggering an update.
    *
+   * Queries for the address bar: the embedding run is attributed to
+   * `urlbar-places`.
+   *
    * @param {object} queryContext
    *   The request to run through the engine.
    * @param {string} queryContext.searchString
@@ -997,7 +1003,10 @@ class PlacesSemanticHistoryManager {
 
     let tensor;
     try {
-      tensor = await this.embedder.embed(queryContext.searchString);
+      tensor = await this.embedder.embed(queryContext.searchString, {
+        featureId: "urlbar-places",
+        activity: "query-history",
+      });
       tensor = this.#convertTensor(tensor, 1);
     } catch (ex) {
       lazy.logger.error(`Error processing tensor: ${ex}`);

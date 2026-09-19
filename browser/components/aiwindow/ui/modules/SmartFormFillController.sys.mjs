@@ -566,8 +566,10 @@ export class SmartFormFillController {
       ),
     ].join("\n");
 
-    const relevantMemories =
-      await lazy.MemoriesManager.getRelevantMemories(contextMessage);
+    const relevantMemories = await lazy.MemoriesManager.getRelevantMemories(
+      contextMessage,
+      { featureId: "sw-form-autofill" }
+    );
 
     return relevantMemories.map(relevant_memory => {
       const { id, memory_summary, similarity } = relevant_memory;

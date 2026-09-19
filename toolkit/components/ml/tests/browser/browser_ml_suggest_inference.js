@@ -60,7 +60,8 @@ requestLongerTimeout(10);
 
 const CUSTOM_INTENT_OPTIONS = {
   taskName: "text-classification",
-  featureId: "suggest-intent-classification",
+  featureId: "urlbar-suggest",
+  config: "suggest-intent-classification",
   engineId: "ml-suggest-intent",
   modelId: "Mozilla/mobilebert-uncased-finetuned-LoRA-intent-classifier",
   modelHubUrlTemplate: "{model}/{revision}",
@@ -72,7 +73,8 @@ const CUSTOM_INTENT_OPTIONS = {
 
 const CUSTOM_NER_OPTIONS = {
   taskName: "token-classification",
-  featureId: "suggest-NER",
+  featureId: "urlbar-suggest",
+  config: "suggest-NER",
   engineId: "ml-suggest-ner",
   modelId: "Mozilla/distilbert-uncased-NER-LoRA",
   modelHubUrlTemplate: "{model}/{revision}",

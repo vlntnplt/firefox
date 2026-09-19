@@ -2,10 +2,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import {
-  createEngine,
-  FEATURES,
-} from "chrome://global/content/ml/EngineProcess.sys.mjs";
+import { createEngine } from "chrome://global/content/ml/EngineProcess.sys.mjs";
 
 import { FormAutofill } from "resource://autofill/FormAutofill.sys.mjs";
 import { FormAutofillUtils } from "resource://gre/modules/shared/FormAutofillUtils.sys.mjs";
@@ -17,13 +14,14 @@ import { MLEngineParent } from "moz-src:///toolkit/components/ml/actors/MLEngine
 
 // Default classifier: a single `text-classification` model that maps a field's
 // context string straight to a field type.
-const FORM_AUTOFILL_FEATURE_ID = "formfill-classification";
+const FORM_AUTOFILL_FEATURE_ID = "form-autofill";
 const ML_TASKNAME = "text-classification";
 
 const FormFill_Config = {
   taskName: ML_TASKNAME,
   featureId: FORM_AUTOFILL_FEATURE_ID,
-  engineId: FEATURES[FORM_AUTOFILL_FEATURE_ID].engineId,
+  config: "formfill-classification",
+  engineId: "formfill-classification-engine",
   backend: "best-onnx",
   modelId: "mozilla/tinybert-address-autofill",
   numThreads: 2,
@@ -49,8 +47,9 @@ const EMBEDDING_DIM = 384;
 // Encoder engine: stock feature-extraction, one pooled vector per field.
 const FormFill_Encoder_Config = {
   taskName: "feature-extraction",
-  featureId: "formfill-encoder",
-  engineId: FEATURES["formfill-encoder"].engineId,
+  featureId: FORM_AUTOFILL_FEATURE_ID,
+  config: "formfill-encoder",
+  engineId: "formfill-encoder-engine",
   backend: "best-onnx",
   numThreads: 2,
 };
@@ -58,8 +57,9 @@ const FormFill_Encoder_Config = {
 // Head engine: custom `moz-formfill-head` pipeline, scores windowed features.
 const FormFill_Head_Config = {
   taskName: "moz-formfill-head",
-  featureId: "formfill-head",
-  engineId: FEATURES["formfill-head"].engineId,
+  featureId: FORM_AUTOFILL_FEATURE_ID,
+  config: "formfill-head",
+  engineId: "formfill-head-engine",
   backend: "best-onnx",
   numThreads: 2,
 };
@@ -147,7 +147,7 @@ export class FormAutofillML {
    */
   #publishVersion(configs) {
     FormAutofillML.#modelVersion = configs
-      .map(config => this.#revisions.get(config.featureId) ?? "")
+      .map(config => this.#revisions.get(config.config) ?? "")
       .join("/");
   }
 
@@ -171,7 +171,7 @@ export class FormAutofillML {
    *   `configs`, or null when inference should be skipped this time.
    */
   async #ensureEngines(configs) {
-    const cached = configs.map(config => this.#engines.get(config.featureId));
+    const cached = configs.map(config => this.#engines.get(config.config));
     if (
       cached.every(
         engine => engine && !["closed", "error"].includes(engine.engineStatus)
@@ -183,7 +183,7 @@ export class FormAutofillML {
 
     const remember = engines =>
       configs.forEach((config, i) =>
-        this.#engines.set(config.featureId, engines[i])
+        this.#engines.set(config.config, engines[i])
       );
 
     try {
@@ -216,20 +216,17 @@ export class FormAutofillML {
 
     const details = await Promise.all(
       configs.map(config =>
-        MLEngineParent.getInferenceOptions(config.featureId, config.taskName)
+        MLEngineParent.getInferenceOptions(config.config, config.taskName)
       )
     );
     // Models are versioned independently, so telemetry reports every revision.
     // A single-model classifier therefore reports just its own revision.
     configs.forEach((config, i) =>
-      this.#revisions.set(
-        config.featureId,
-        override || details[i].modelRevision
-      )
+      this.#revisions.set(config.config, override || details[i].modelRevision)
     );
     this.#publishVersion(configs);
 
-    return configs.map(config => this.#engines.get(config.featureId));
+    return configs.map(config => this.#engines.get(config.config));
   }
 
   /**
@@ -277,10 +274,13 @@ export class FormAutofillML {
       return; // No fields to identify.
     }
 
-    const results = await engines[0].run({
-      args: [mlFields.map(fd => fd.mlData)],
-      options: { pooling: "mean", normalize: true },
-    });
+    const results = await engines[0].run(
+      {
+        args: [mlFields.map(fd => fd.mlData)],
+        options: { pooling: "mean", normalize: true },
+      },
+      { activity: "classify-field" }
+    );
 
     this.#applyResults(mlFields, results);
   }
@@ -321,10 +321,13 @@ export class FormAutofillML {
     //     vector), so the difference features become `cur - emptyEmb`.
     const sections = mlFields.map(fd => splitContext(fd.mlData));
     const uniqueStrings = [...new Set([""].concat(...sections))];
-    let embeddings = await encoderEngine.run({
-      args: [uniqueStrings],
-      options: { pooling: "mean", normalize: false },
-    });
+    let embeddings = await encoderEngine.run(
+      {
+        args: [uniqueStrings],
+        options: { pooling: "mean", normalize: false },
+      },
+      { activity: "embed-field" }
+    );
 
     // feature-extraction can triple-nest a singleton batch; un-nest it the same
     // way EmbeddingsGenerator.embedMany does.
@@ -357,7 +360,10 @@ export class FormAutofillML {
     // functions return `{ output, metrics }`, so the per-field results (shaped
     // like the text-classification output: `{ label, score }`) live under
     // `.output`.
-    const scores = await headEngine.run({ args: [rows] });
+    const scores = await headEngine.run(
+      { args: [rows] },
+      { activity: "score-field" }
+    );
 
     this.#applyResults(mlFields, scores?.output ?? scores);
   }

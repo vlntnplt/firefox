@@ -319,6 +319,7 @@ add_task(async function test_ml_engine_reuse_metadata_differs() {
     flowId: "flow-1",
     timeoutMS: 1000,
   });
+  const sharedEngine = MLEngine.getInstance("echo-metadata");
   const inferencePromise = engineInstance.run({ data: "This gets echoed." });
   await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
   Assert.equal(
@@ -335,9 +336,14 @@ add_task(async function test_ml_engine_reuse_metadata_differs() {
     timeoutMS: 5000,
   });
   is(
-    engineInstance,
-    engineInstance2,
+    MLEngine.getInstance("echo-metadata"),
+    sharedEngine,
     "Engine is reused when only per-request metadata differs."
+  );
+  isnot(
+    engineInstance2.telemetry.flowId,
+    engineInstance.telemetry.flowId,
+    "Each creation gets a view attributed to its own flow."
   );
 
   const inferencePromise2 = engineInstance2.run({ data: "Echoed again." });

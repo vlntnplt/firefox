@@ -174,8 +174,8 @@ add_task(async function test_ml_suggest_perf() {
     metricPrefix: METRIC_PREFIX,
     scenario: searchOnce,
     engines: [
-      { featureId: "suggest-intent-classification", metricName: "intent" },
-      { featureId: "suggest-NER", metricName: "ner" },
+      { config: "suggest-intent-classification", metricName: "intent" },
+      { config: "suggest-NER", metricName: "ner" },
     ],
     coldIterations: 0,
     warmIterations: 5,

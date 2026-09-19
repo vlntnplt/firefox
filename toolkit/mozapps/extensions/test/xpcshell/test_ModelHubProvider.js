@@ -469,7 +469,7 @@ add_task(
         totalSize: 2048,
         lastUsed: new Date("2023-10-01T12:00:00Z"),
         updateDate: 0,
-        engineIds: [FEATURES["speech-recognition"].engineId],
+        engineIds: FEATURES["speech-recognition"].engineIds,
       },
     });
     sandbox.stub(ModelHubProvider.modelHub, "getOwnerIcon").resolves(null);

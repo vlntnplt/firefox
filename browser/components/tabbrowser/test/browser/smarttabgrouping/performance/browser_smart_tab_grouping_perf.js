@@ -441,14 +441,14 @@ add_task(async function test_smart_tab_grouping() {
       // STG requests best-onnx, so the expectValue matches as-is.
       engines: [
         {
-          featureId: "smart-tab-topic",
+          config: "smart-tab-topic",
           metricName: "topic",
           // generateGroupLabels calls topicEngine.run() once
           // (SmartTabGrouping.sys.mjs:1595).
           expectedRuns: 1,
         },
         {
-          featureId: "simple-text-embedder",
+          config: "simple-text-embedder",
           metricName: "embedder",
           // Three runs per invocation, and only two of them are real work:
           //  1. initEmbeddingEngine()'s warm-up embedMany(["test"]), kicked

@@ -678,6 +678,7 @@ export async function applyQualityAndSensitivityFilter(
   conversation.addUserMessage(userPrompt);
   const response = await conversation.run({
     fxAccountToken: await openAIEngine.getFxAccountToken(),
+    activity: "filter-memories",
   });
 
   const parsed = parseAndExtractJSON(response, { kept_memories: [] });
@@ -750,6 +751,7 @@ export async function getMergeMemoryCandidates(conversation, memories) {
   conversation.addUserMessage(userPrompt);
 
   const response = await conversation.run({
+    activity: "merge-memories",
     inferenceParams: {
       response_format: makeJSONSchemaBlob("MemoriesMergeCandidates", {
         type: "array",

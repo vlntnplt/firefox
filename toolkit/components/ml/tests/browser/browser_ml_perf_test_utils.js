@@ -146,7 +146,7 @@ add_task(async function test_run_perf_scenario_reports_engine_metrics() {
       metricSuffix: "NATIVE",
       engines: [
         {
-          featureId: "formfill-classification",
+          config: "formfill-classification",
           overrides: {
             numThreads: { expectValue: 2, replaceWith: 1 },
           },
@@ -158,7 +158,8 @@ add_task(async function test_run_perf_scenario_reports_engine_metrics() {
         if (!engine || ["closed", "error"].includes(engine.engineStatus)) {
           engine = await createEngine({
             backend: "onnx",
-            featureId: "formfill-classification",
+            featureId: "form-autofill",
+            config: "formfill-classification",
             numThreads: 2,
             taskName: "moz-echo",
             timeoutMS: -1,
@@ -166,7 +167,10 @@ add_task(async function test_run_perf_scenario_reports_engine_metrics() {
           created = true;
         }
 
-        const run = engine.run({ data: "Shared metrics" });
+        const run = engine.run(
+          { data: "Shared metrics" },
+          { activity: "classify-field" }
+        );
 
         if (created) {
           await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
@@ -317,14 +321,14 @@ add_task(async function test_run_perf_scenario_observes_real_engines() {
       metricPrefix: "TEST",
       engines: [
         {
-          featureId: "formfill-encoder",
+          config: "formfill-encoder",
           metricName: "encoder",
           overrides: {
             numThreads: { expectValue: 2, replaceWith: 1 },
           },
         },
         {
-          featureId: "formfill-head",
+          config: "formfill-head",
           metricName: "head",
           overrides: {
             numThreads: { expectValue: 2, replaceWith: 1 },
@@ -332,23 +336,36 @@ add_task(async function test_run_perf_scenario_observes_real_engines() {
         },
       ],
       async scenario() {
-        const featureIds = [
-          "formfill-encoder",
-          "formfill-head",
-          "about-inference",
+        const engineOptions = [
+          {
+            featureId: "form-autofill",
+            config: "formfill-encoder",
+            engineId: "formfill-encoder-engine",
+            activity: "embed-field",
+          },
+          {
+            featureId: "form-autofill",
+            config: "formfill-head",
+            engineId: "formfill-head-engine",
+            activity: "score-field",
+          },
+          { featureId: "about-inference", activity: null },
         ];
         const engines = await Promise.all(
-          featureIds.map(featureId =>
+          engineOptions.map(({ activity: _activity, ...options }) =>
             createEngine({
               backend: "onnx",
-              featureId,
+              ...options,
               numThreads: 2,
               taskName: "moz-echo",
             })
           )
         );
         const runs = engines.map((engine, index) =>
-          engine.run({ data: `Engine ${index}` })
+          engine.run(
+            { data: `Engine ${index}` },
+            { activity: engineOptions[index].activity }
+          )
         );
 
         await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(
@@ -445,16 +462,17 @@ add_task(async function test_run_perf_scenario_rejects_an_active_engine_run() {
     await Assert.rejects(
       MLPerfTestUtils.runPerfScenario({
         metricPrefix: "TEST",
-        engines: [{ featureId: "formfill-classification" }],
+        engines: [{ config: "formfill-classification" }],
         async scenario() {
           const engine = await createEngine({
             backend: "onnx",
-            featureId: "formfill-classification",
+            featureId: "form-autofill",
+            config: "formfill-classification",
             taskName: "moz-echo",
           });
 
           await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
-          runPromise = engine.run({});
+          runPromise = engine.run({}, { activity: "classify-field" });
 
           return { duration: 1 };
         },
@@ -527,8 +545,9 @@ add_task(async function test_run_perf_scenario_observes_generator_lifecycles() {
         await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
 
         const chunks = [];
+        const runOptions = { activity: "extract-key-points" };
 
-        for await (const chunk of engine.runWithGenerator({})) {
+        for await (const chunk of engine.runWithGenerator({}, runOptions)) {
           if (!chunk.isPrompt) {
             chunks.push(chunk.text);
           }
@@ -540,7 +559,7 @@ add_task(async function test_run_perf_scenario_observes_generator_lifecycles() {
           "The production chunks pass through"
         );
 
-        for await (const chunk of engine.runWithGenerator({})) {
+        for await (const chunk of engine.runWithGenerator({}, runOptions)) {
           if (chunk.text === "B") {
             break;
           }

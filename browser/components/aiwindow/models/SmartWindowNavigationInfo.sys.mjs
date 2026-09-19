@@ -69,18 +69,22 @@ class NavigationInfoImpl {
     }
 
     if (!this.#embeddingsGenerator) {
-      this.#embeddingsGenerator = lazy.embeddingsGeneratorFactory.forGeneral();
+      this.#embeddingsGenerator = lazy.embeddingsGeneratorFactory.forGeneral({
+        featureId: "sw-tool-navigation",
+      });
     }
 
     if (!this.#navEmbeddings) {
       const result = await this.#embeddingsGenerator.embedMany(
-        this.#navEntries.map(e => e.embeddingText)
+        this.#navEntries.map(e => e.embeddingText),
+        { activity: "index-settings" }
       );
       this.#navEmbeddings = result.output ?? result;
     }
 
     const queryResult = await this.#embeddingsGenerator.embed(
-      query.toLowerCase()
+      query.toLowerCase(),
+      { activity: "query-settings" }
     );
     let queryEmbedding = queryResult.output ?? queryResult;
     if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {

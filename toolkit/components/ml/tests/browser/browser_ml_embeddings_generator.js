@@ -96,7 +96,9 @@ async function setup() {
 }
 
 add_task(async function test_EmbeddingsGenerator_for_minimum_physical_memory() {
-  let embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  let embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   Assert.ok(
     embeddingsGenerator.isEnoughPhysicalMemoryAvailable(),
     "Physical Memory size < 7GiB."
@@ -104,7 +106,9 @@ add_task(async function test_EmbeddingsGenerator_for_minimum_physical_memory() {
 });
 
 add_task(async function test_EmbeddingsGenerator_for_minimum_cpu_cores() {
-  let embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  let embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   Assert.ok(
     embeddingsGenerator.isEnoughCpuCoresAvailable(),
     "Number CPU cores < 2."
@@ -135,7 +139,9 @@ add_task(async function test_embedMany_valid_inputs() {
   await SpecialPowers.pushPrefEnv({
     set: [["places.semanticHistory.embeddingType", "static"]],
   });
-  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forPlaces();
+  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forPlaces({
+    featureId: "semantic-history",
+  });
   sinon.stub(embeddingsGenerator, "createEngineIfNotPresent").callsFake(() => {
     return new MockMLEngineForEmbedMany(true);
   });
@@ -155,7 +161,9 @@ add_task(async function test_embedMany_valid_inputs() {
 });
 
 add_task(async function test_embedMany_empty_array_input() {
-  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   sinon.stub(embeddingsGenerator, "createEngineIfNotPresent").callsFake(() => {
     return new MockMLEngineForEmbedMany();
   });
@@ -177,7 +185,9 @@ add_task(async function test_embedMany_empty_array_input() {
 });
 
 add_task(async function test_embedMany_invalid_input_null() {
-  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   sinon.stub(embeddingsGenerator, "createEngineIfNotPresent").callsFake(() => {
     return new MockMLEngineForEmbedMany();
   });
@@ -196,7 +206,9 @@ add_task(async function test_embedMany_invalid_input_null() {
 });
 
 add_task(async function test_embedMany_invalid_input_nonstring() {
-  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   sinon.stub(embeddingsGenerator, "createEngineIfNotPresent").callsFake(() => {
     return new MockMLEngineForEmbedMany();
   });
@@ -258,7 +270,9 @@ add_task(async function test_ensureEngine_replaces_a_dead_engine() {
 });
 
 add_task(async function test_embed_valid_input() {
-  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   sinon.stub(embeddingsGenerator, "createEngineIfNotPresent").callsFake(() => {
     return new MockMLEngineForEmbed();
   });
@@ -273,7 +287,9 @@ add_task(async function test_embed_valid_input() {
 });
 
 add_task(async function test_embed_invalid_input_empty_string() {
-  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   sinon.stub(embeddingsGenerator, "createEngineIfNotPresent").callsFake(() => {
     return new MockMLEngineForEmbed();
   });
@@ -319,7 +335,9 @@ add_task(async function test_forPlaces_prefDrivesContextual() {
     set: [["places.semanticHistory.embeddingType", "contextual"]],
   });
   try {
-    const contextual = new EmbeddingsGeneratorFactory().forPlaces();
+    const contextual = new EmbeddingsGeneratorFactory().forPlaces({
+      featureId: "semantic-history",
+    });
     if (IS_MAC_OR_WINDOWS) {
       Assert.equal(
         contextual.options.backend,
@@ -344,7 +362,9 @@ add_task(async function test_forPlaces_prefDrivesContextual() {
 });
 
 add_task(async function test_forGeneral_returnsContextualEmbeddings() {
-  const eg = new EmbeddingsGeneratorFactory().forGeneral();
+  const eg = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
   Assert.equal(
     eg.options.backend,
     "best-onnx",
@@ -363,7 +383,9 @@ add_task(async function test_forPlaces_explicitStaticPref() {
       set: [["places.semanticHistory.embeddingType", "static"]],
     });
     try {
-      const eg = new EmbeddingsGeneratorFactory().forPlaces();
+      const eg = new EmbeddingsGeneratorFactory().forPlaces({
+        featureId: "semantic-history",
+      });
       Assert.equal(
         eg.options.backend,
         "static-embeddings",
@@ -397,7 +419,9 @@ add_task(async function test_forPlaces_regionDefaults() {
   try {
     for (const { region, contextual, desc } of cases) {
       await withHomeRegion(region, () => {
-        const eg = new EmbeddingsGeneratorFactory().forPlaces();
+        const eg = new EmbeddingsGeneratorFactory().forPlaces({
+          featureId: "semantic-history",
+        });
         const expected =
           contextual && IS_MAC_OR_WINDOWS ? "best-onnx" : "static-embeddings";
         Assert.equal(
@@ -445,7 +469,9 @@ add_task(async function test_forPlaces_multilingualRegionsPref() {
           const expected =
             contextual && IS_MAC_OR_WINDOWS ? "best-onnx" : "static-embeddings";
           Assert.equal(
-            new EmbeddingsGeneratorFactory().forPlaces().options.backend,
+            new EmbeddingsGeneratorFactory().forPlaces({
+              featureId: "semantic-history",
+            }).options.backend,
             expected,
             `Region "${region}" + locale "${locale}" (${desc}) resolves to ${expected}`
           );
@@ -520,7 +546,9 @@ add_task(async function test_forPlaces_multilingualRegionsPrefOverrides() {
           const expected =
             contextual && IS_MAC_OR_WINDOWS ? "best-onnx" : "static-embeddings";
           Assert.equal(
-            new EmbeddingsGeneratorFactory().forPlaces().options.backend,
+            new EmbeddingsGeneratorFactory().forPlaces({
+              featureId: "semantic-history",
+            }).options.backend,
             expected,
             `Pref "${setPref}" with region "${region}" + locale "${locale}" (${desc}) resolves to ${expected}`
           );
@@ -566,7 +594,7 @@ add_task(async function test_factory_freezesRegionOnFirstUse() {
 
     await withHomeRegion("FR", () => {
       Assert.equal(
-        factory.forPlaces().options.backend,
+        factory.forPlaces({ featureId: "semantic-history" }).options.backend,
         expected,
         "First use captures the FR region"
       );
@@ -574,7 +602,7 @@ add_task(async function test_factory_freezesRegionOnFirstUse() {
 
     await withHomeRegion("US", () => {
       Assert.equal(
-        factory.forPlaces().options.backend,
+        factory.forPlaces({ featureId: "semantic-history" }).options.backend,
         expected,
         "A later region change does not alter the embedding family"
       );
@@ -596,7 +624,7 @@ add_task(async function test_factory_freezesNullRegion() {
 
     await withHomeRegion(null, () => {
       Assert.equal(
-        factory.forPlaces().options.backend,
+        factory.forPlaces({ featureId: "semantic-history" }).options.backend,
         "static-embeddings",
         "An unresolved region falls back to static"
       );
@@ -604,7 +632,7 @@ add_task(async function test_factory_freezesNullRegion() {
 
     await withHomeRegion("FR", () => {
       Assert.equal(
-        factory.forPlaces().options.backend,
+        factory.forPlaces({ featureId: "semantic-history" }).options.backend,
         "static-embeddings",
         "Resolving to FR later does not switch the family mid-session"
       );
@@ -623,14 +651,18 @@ add_task(async function test_forPlaces_invalidPrefFallsBackToRegion() {
   try {
     await withHomeRegion("US", () => {
       Assert.equal(
-        new EmbeddingsGeneratorFactory().forPlaces().options.backend,
+        new EmbeddingsGeneratorFactory().forPlaces({
+          featureId: "semantic-history",
+        }).options.backend,
         "static-embeddings",
         "An unrecognized pref value falls back to the region default"
       );
     });
     await withHomeRegion("FR", () => {
       Assert.equal(
-        new EmbeddingsGeneratorFactory().forPlaces().options.backend,
+        new EmbeddingsGeneratorFactory().forPlaces({
+          featureId: "semantic-history",
+        }).options.backend,
         IS_MAC_OR_WINDOWS ? "best-onnx" : "static-embeddings",
         "An unrecognized pref value falls back to the region default in FR"
       );
@@ -707,7 +739,9 @@ add_task(async function test_contextual_hasNoManualFallbackEngine() {
   // best-onnx resolves native -> wasm inside MLEngineChild, so the generator
   // must not carry (or act on) its own fallback engine config.
   for (const eg of [
-    new EmbeddingsGeneratorFactory().forGeneral(),
+    new EmbeddingsGeneratorFactory().forGeneral({
+      featureId: "about-inference",
+    }),
     EmbeddingsGenerator.forTest({ type: EMBEDDING_TYPE.CONTEXTUAL }),
   ]) {
     Assert.equal(
@@ -720,7 +754,9 @@ add_task(async function test_contextual_hasNoManualFallbackEngine() {
 
 add_task(
   async function test_ensureEngine_all_concurrent_callers_reject_on_failure() {
-    const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+    const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+      featureId: "about-inference",
+    });
 
     sinon
       .stub(embeddingsGenerator, "createEngineIfNotPresent")
@@ -751,7 +787,9 @@ add_task(
 );
 
 add_task(async function test_ensureEngine_allows_retry_after_failure() {
-  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+  const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+    featureId: "about-inference",
+  });
 
   let callCount = 0;
   sinon

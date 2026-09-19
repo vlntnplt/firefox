@@ -26,7 +26,7 @@ export class SpeechRecognitionFeature extends AIFeature {
    *   under.
    */
   static get engineId() {
-    return FEATURES[this.id].engineId;
+    return FEATURES[this.id].engineIds[0];
   }
 
   /**

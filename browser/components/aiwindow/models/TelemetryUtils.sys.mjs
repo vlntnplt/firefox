@@ -127,7 +127,9 @@ export class TelemetryPromptEngine {
       apiKey: "",
       backend: "openai",
       baseURL: lazy.openAIEngine.endpoint,
-      featureId: "llm-telemetry",
+      featureId: "sw-chat",
+      config: "llm-telemetry",
+      engineId: "llm-telemetry-engine",
       flowId: null,
       modelId: promptRecord.model ?? null,
       modelRevision: "main",
@@ -181,10 +183,13 @@ export class TelemetryPromptEngine {
       fields: JSON.stringify(Object.keys(this.#promptRecord.output_schema)),
     });
 
-    const result = await this.#engineInstance.run({
-      fxAccountToken,
-      args: [{ role: "system", content: prompt }],
-    });
+    const result = await this.#engineInstance.run(
+      {
+        fxAccountToken,
+        args: [{ role: "system", content: prompt }],
+      },
+      { activity: "grade-conversation" }
+    );
 
     lazy.console.debug("Returning: ", result);
     return this.verifyResult(result);

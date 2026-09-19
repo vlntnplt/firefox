@@ -350,7 +350,9 @@ export class MockMemoriesRetrieval {
    * Install the mock.
    */
   constructor() {
-    const embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
+    const embeddingsGenerator = embeddingsGeneratorFactory.forGeneral({
+      featureId: "sw-memories",
+    });
     this.#embeddingSize = embeddingsGenerator.embeddingSize;
     embeddingsGenerator.setEngine({
       run: async request => {

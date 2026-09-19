@@ -192,7 +192,9 @@ export async function constructRelevantMemoriesContextMessage(
   model
 ) {
   const relevantMemories = (
-    await lazy.MemoriesManager.getRelevantMemories(message)
+    await lazy.MemoriesManager.getRelevantMemories(message, {
+      featureId: "sw-chat",
+    })
   ).map(memory => ({
     id: memory.id,
     memory_summary: memory.memory_summary,

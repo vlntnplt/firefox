@@ -553,7 +553,7 @@ export class PdfJsParent extends JSWindowActorParent {
         response = { output: "In Automation" };
       } else {
         const engine = await this.#createAIEngine(service, null);
-        response = await engine.run(request);
+        response = await engine.run(request, { activity: "describe-image" });
       }
 
       const time = ChromeUtils.now() - now;

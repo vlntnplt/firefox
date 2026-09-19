@@ -61,7 +61,7 @@ Options passed to the `createEngine` function are verified and converted into a 
 Below are the options available:
 
 - **taskName**: The name of the task the pipeline is configured for.
-- **featureId**: The identifier for the browser feature using the pipeline.
+- **featureId**: The browser feature using the pipeline, one of the `FEATURES` keys.
 - **config**: The name of the model configuration to resolve from Remote Settings. Defaults to `featureId`.
 - **engineId**: The identifier for the engine to be used by the pipeline.
 - **timeoutMS**: The maximum amount of time in milliseconds the worker will run (-1 to never expire).
@@ -97,11 +97,19 @@ To learn about the different inference tasks, refer to this Hugging Face
 documentation: [Tasks](https://huggingface.co/tasks)
 
 **featureId** identifies the browser feature using the pipeline, for telemetry and for
-looking up its engine id in `FEATURES`.
+looking up its default engine id in `FEATURES`. `FEATURES` lists, for each feature, the
+engines it runs and the closed set of activities its runs may name.
 
 **config** selects the record holding the pipeline options in Remote Settings -- {ref}`See the ml-inference-options collection <inference-remote-settings>`.
 It defaults to `featureId`, so a feature with its own record needs no explicit config, and
 several features can share one record by naming it.
+
+`createEngine` returns a view of the engine for its caller: `run` and `runWithGenerator`
+attribute their telemetry to that caller's `featureId` and `flowId`, so two features sharing
+an engine stay distinguishable. Both take a second argument `{ activity }` naming what the
+feature runs the engine for (for example `index-history` and `query-history` on the shared
+embedder), one of the feature's activities in `FEATURES`; it is recorded on `engine_run`
+and a run naming an unknown activity is rejected.
 
 **engineId** is used to manage the lifecycle of the engine. When not provided, it defaults to
 `default-engine`. Everytime a new engine is created using `createEngine`, the API will ensure that

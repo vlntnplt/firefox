@@ -45,7 +45,9 @@ class _MLSuggest {
 
   INTENT_OPTIONS = {
     taskName: /** @type {const} */ ("text-classification"),
-    featureId: /** @type {const} */ ("suggest-intent-classification"),
+    featureId: "urlbar-suggest",
+    config: /** @type {const} */ ("suggest-intent-classification"),
+    engineId: "ml-suggest-intent",
     timeoutMS: -1,
     numThreads: 2,
     backend: "best-onnx",
@@ -53,7 +55,9 @@ class _MLSuggest {
 
   NER_OPTIONS = {
     taskName: /** @type {const} */ ("token-classification"),
-    featureId: /** @type {const} */ ("suggest-NER"),
+    featureId: "urlbar-suggest",
+    config: /** @type {const} */ ("suggest-NER"),
+    engineId: "ml-suggest-ner",
     timeoutMS: -1,
     numThreads: 2,
     backend: "best-onnx",
@@ -215,7 +219,7 @@ class _MLSuggest {
    */
   async _findIntent(query, options = {}) {
     const engineIntentClassifier =
-      this.#modelEngines[this.INTENT_OPTIONS.featureId];
+      this.#modelEngines[this.INTENT_OPTIONS.config];
     if (!engineIntentClassifier) {
       return null;
     }
@@ -223,14 +227,14 @@ class _MLSuggest {
     /** @type {Awaited<ReturnType<typeof engineIntentClassifier["run"]>>} */
     let res;
     try {
-      res = await engineIntentClassifier.run({
-        args: [query],
-        options,
-      });
+      res = await engineIntentClassifier.run(
+        { args: [query], options },
+        { activity: "classify-intent" }
+      );
     } catch (error) {
       // The engine could have timed out or crashed, so drop it from the cache
       // and recreate it for the next query.
-      delete this.#modelEngines[this.INTENT_OPTIONS.featureId];
+      delete this.#modelEngines[this.INTENT_OPTIONS.config];
       this.#initializeModelEngine(this.INTENT_OPTIONS);
       return null;
     }
@@ -247,13 +251,16 @@ class _MLSuggest {
    *   The options for the engine pipeline
    */
   async _findNER(query, options = {}) {
-    const engineNER = this.#modelEngines[this.NER_OPTIONS.featureId];
+    const engineNER = this.#modelEngines[this.NER_OPTIONS.config];
     try {
-      return await engineNER?.run({ args: [query], options });
+      return await engineNER?.run(
+        { args: [query], options },
+        { activity: "extract-entities" }
+      );
     } catch (error) {
       // The engine could have timed out or crashed, so drop it from the cache
       // and recreate it for the next query.
-      delete this.#modelEngines[this.NER_OPTIONS.featureId];
+      delete this.#modelEngines[this.NER_OPTIONS.config];
       this.#initializeModelEngine(this.NER_OPTIONS);
       return null;
     }

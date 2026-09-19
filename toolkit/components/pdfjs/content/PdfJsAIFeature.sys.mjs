@@ -29,7 +29,7 @@ export class PdfJsGuessAltTextFeature extends AIFeature {
    * @returns {string}
    */
   static get engineId() {
-    return FEATURES[this.id].engineId;
+    return FEATURES[this.id].engineIds[0];
   }
 
   /**

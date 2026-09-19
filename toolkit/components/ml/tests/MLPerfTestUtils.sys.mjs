@@ -305,17 +305,17 @@ function startEngineRunCapture(enginesByKey) {
   const configForEngine = engine =>
     enginesByKey.get(engineKey(engine.pipelineOptions)) ?? null;
 
-  MLEngine.prototype.run = async function (request) {
+  MLEngine.prototype.run = async function (request, ...rest) {
     const config = configForEngine(this);
     if (!config) {
-      return originalRun.call(this, request);
+      return originalRun.call(this, request, ...rest);
     }
 
     const start = ChromeUtils.now();
     activeRuns++;
 
     try {
-      const result = await originalRun.call(this, request);
+      const result = await originalRun.call(this, request, ...rest);
       recordRun(this, config, start, result, {});
 
       return result;
@@ -324,14 +324,14 @@ function startEngineRunCapture(enginesByKey) {
     }
   };
 
-  MLEngine.prototype.runWithGenerator = async function* (request) {
+  MLEngine.prototype.runWithGenerator = async function* (request, ...rest) {
     const config = configForEngine(this);
     if (!config) {
-      return yield* originalRunWithGenerator.call(this, request);
+      return yield* originalRunWithGenerator.call(this, request, ...rest);
     }
 
     const start = ChromeUtils.now();
-    const generator = originalRunWithGenerator.call(this, request);
+    const generator = originalRunWithGenerator.call(this, request, ...rest);
     let completed = false;
     let failed = false;
     let firstTokenTime = null;

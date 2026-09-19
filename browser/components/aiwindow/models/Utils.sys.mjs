@@ -175,6 +175,80 @@ export const MODEL_FEATURES = Object.freeze({
 /** @typedef {(typeof MODEL_FEATURES)[keyof typeof MODEL_FEATURES]} ModelFeature */
 
 /**
+ * ML telemetry attribution of the model configs that build engines: the
+ * browser feature and the activity its runs carry by default (FEATURES in
+ * toolkit/components/ml/content/EngineProcess.sys.mjs). A run may name
+ * another of the feature's activities.
+ */
+export const ML_ATTRIBUTION = Object.freeze({
+  [MODEL_FEATURES.CHAT]: { featureId: "sw-chat", activity: "answer-turn" },
+  [MODEL_FEATURES.TITLE_GENERATION]: {
+    featureId: "sw-chat",
+    activity: "name-conversation",
+  },
+  [MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_SYSTEM]: {
+    featureId: "sw-chat",
+    activity: "classify-message",
+  },
+  [MODEL_FEATURES.SEARCH_ANSWER_GENERATION]: {
+    featureId: "sw-tool-search-web",
+    activity: "answer-search",
+  },
+  [MODEL_FEATURES.AITAB]: {
+    featureId: "sw-tool-aitab",
+    activity: "generate-page",
+  },
+  [MODEL_FEATURES.CONVERSATION_SUGGESTIONS_SIDEBAR_STARTER]: {
+    featureId: "sw-suggestions",
+    activity: "draft-starters",
+  },
+  [MODEL_FEATURES.CONVERSATION_SUGGESTIONS_FOLLOWUP]: {
+    featureId: "sw-suggestions",
+    activity: "draft-followups",
+  },
+  [MODEL_FEATURES.RESUME_ACTIVITY_CONVERSATION_STARTER]: {
+    featureId: "sw-suggestions",
+    activity: "draft-resume",
+  },
+  [MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM]: {
+    featureId: "sw-memories",
+    activity: "generate-memories",
+  },
+  [MODEL_FEATURES.MEMORIES_QUALITY_AND_SENSITIVITY_FILTER_SYSTEM]: {
+    featureId: "sw-memories",
+    activity: "filter-memories",
+  },
+  [MODEL_FEATURES.MEMORIES_MERGE]: {
+    featureId: "sw-memories",
+    activity: "merge-memories",
+  },
+  [MODEL_FEATURES.TAB_GROUP_NAMING]: {
+    featureId: "sw-auto-tab-grouping",
+    activity: "name-group",
+  },
+  [MODEL_FEATURES.SMART_FORM_FILL]: {
+    featureId: "sw-form-autofill",
+    activity: "fill-form",
+  },
+  [MODEL_FEATURES.AGENT_MONITOR]: {
+    featureId: "sw-monitor",
+    activity: "check-page",
+  },
+});
+
+/**
+ * @param {ModelFeature} feature
+ * @returns {{ featureId: string, activity: string }}
+ */
+export function mlAttributionForModelFeature(feature) {
+  const attribution = ML_ATTRIBUTION[feature];
+  if (!attribution) {
+    throw new Error(`No ML attribution for model feature "${feature}"`);
+  }
+  return attribution;
+}
+
+/**
  * Service types for different AI Window features
  */
 export const SERVICE_TYPES = Object.freeze({

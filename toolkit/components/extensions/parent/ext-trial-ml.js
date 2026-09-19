@@ -105,6 +105,7 @@ class TrialML extends ExtensionAPI {
       throw new ExtensionError("Engine already created");
     }
     options.engineId = this.#pipelineId;
+    options.featureId = "webextension";
     const { extension } = this;
     if (!this.extension || this.extension.hasShutdown) {
       throw new ExtensionError("Extension has already shutdown");

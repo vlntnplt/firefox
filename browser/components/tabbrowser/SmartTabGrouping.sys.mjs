@@ -3,10 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
-import {
-  createEngine,
-  FEATURES,
-} from "chrome://global/content/ml/EngineProcess.sys.mjs";
+import { createEngine } from "chrome://global/content/ml/EngineProcess.sys.mjs";
 import {
   cosSim,
   KeywordExtractor,
@@ -124,7 +121,7 @@ const ML_TASK_FEATURE_EXTRACTION = "feature-extraction";
 const ML_TASK_TEXT2TEXT = "text2text-generation";
 
 const STG_FEATURE_ID = "smart-tab-grouping";
-const STG_TOPIC_FEATURE_ID = "smart-tab-topic";
+const STG_TOPIC_CONFIG = "smart-tab-topic";
 
 const LABEL_REASONS = {
   DEFAULT: "DEFAULT",
@@ -140,8 +137,9 @@ export const SMART_TAB_GROUPING_CONFIG = {
     dtype: "q8",
     timeoutMS: 2 * 60 * 1000, // 2 minutes
     taskName: ML_TASK_TEXT2TEXT,
-    featureId: STG_TOPIC_FEATURE_ID,
-    engineId: FEATURES[STG_TOPIC_FEATURE_ID].engineId,
+    featureId: STG_FEATURE_ID,
+    config: STG_TOPIC_CONFIG,
+    engineId: "smart-tab-topic-engine",
     backend: "best-onnx",
   },
   dataConfig: {
@@ -401,7 +399,7 @@ export class SmartTabGroupingManager extends AIFeature {
   static async deleteSmartTabModels() {
     // The embedding model is shared (forGeneral); only the topic model is
     // STG-owned, so don't uninstall the embedding model here.
-    const engineIds = [FEATURES[STG_TOPIC_FEATURE_ID].engineId];
+    const engineIds = [SMART_TAB_GROUPING_CONFIG.topicGeneration.engineId];
     // Remove all ML Engine files associated with this feature.
     await lazy.MLUninstallService.uninstall({
       engineIds,
@@ -427,7 +425,9 @@ export class SmartTabGroupingManager extends AIFeature {
    */
   getEmbeddingsGenerator() {
     if (!this.embeddingsGenerator) {
-      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
+      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral({
+        featureId: this.config.topicGeneration.featureId,
+      });
     }
     return this.embeddingsGenerator;
   }
@@ -439,7 +439,9 @@ export class SmartTabGroupingManager extends AIFeature {
     try {
       await this.getEmbeddingsGenerator().ensureEngine();
       // warm up the engine
-      await this.getEmbeddingsGenerator().embedMany(["test"]);
+      await this.getEmbeddingsGenerator().embedMany(["test"], {
+        activity: "embed-tabs",
+      });
     } catch (e) {}
   }
 
@@ -1054,13 +1056,13 @@ export class SmartTabGroupingManager extends AIFeature {
    * Get updated config for the ml engine
    *
    * @param {object} initData
-   * @param {string} featureId
+   * @param {string} config - The model config the engine resolves.
    * @return {*}
    */
-  static getUpdatedInitData(initData, featureId) {
+  static getUpdatedInitData(initData, config) {
     // we're setting a specific modelRevision through about:config or Nimbus
     if (
-      featureId === SMART_TAB_GROUPING_CONFIG.topicGeneration.featureId &&
+      config === SMART_TAB_GROUPING_CONFIG.topicGeneration.config &&
       lazy.topicModelRevision !== LATEST_MODEL_REVISION
     ) {
       initData.modelRevision = lazy.topicModelRevision;
@@ -1078,6 +1080,7 @@ export class SmartTabGroupingManager extends AIFeature {
   async _createMLEngine(engineConfig, progressCallback) {
     const {
       featureId,
+      config,
       engineId,
       dtype,
       taskName,
@@ -1088,6 +1091,7 @@ export class SmartTabGroupingManager extends AIFeature {
     } = engineConfig;
     let initData = {
       featureId,
+      config,
       engineId,
       dtype,
       taskName,
@@ -1097,7 +1101,7 @@ export class SmartTabGroupingManager extends AIFeature {
       backend,
     };
 
-    initData = SmartTabGroupingManager.getUpdatedInitData(initData, featureId);
+    initData = SmartTabGroupingManager.getUpdatedInitData(initData, config);
     const engine = await createEngine(initData, progressCallback);
     // For "best-onnx" (and similar) the actual backend is decided in the
     // inference child and reported back via EnginePort:EngineReady, so
@@ -1120,7 +1124,9 @@ export class SmartTabGroupingManager extends AIFeature {
       return [];
     }
     // embedMany mean-pools + normalizes and returns one vector per string.
-    return this.getEmbeddingsGenerator().embedMany(textToEmbedList);
+    return this.getEmbeddingsGenerator().embedMany(textToEmbedList, {
+      activity: "embed-tabs",
+    });
   }
 
   /**
@@ -1593,7 +1599,9 @@ export class SmartTabGroupingManager extends AIFeature {
       args: [requestInfo.inputArgs],
       options: requestInfo.runOptions,
     };
-    const genLabelResults = await this.topicEngine.run(request);
+    const genLabelResults = await this.topicEngine.run(request, {
+      activity: "label-group",
+    });
     genLabelResults.forEach((genResult, genResultIndex) => {
       groupingResult.clusterRepresentations[
         genResultIndex
@@ -1688,14 +1696,14 @@ export class SmartTabGroupingManager extends AIFeature {
   async getEngineConfigs() {
     if (!this.topicEngineConfig) {
       this.topicEngineConfig = await lazy.MLEngineParent.getInferenceOptions(
-        this.config.topicGeneration.featureId,
+        this.config.topicGeneration.config,
         this.config.topicGeneration.taskName
       );
     }
     if (!this.embeddingEngineConfig) {
-      const { featureId, taskName } = this.getEmbeddingsGenerator().options;
+      const { config, taskName } = this.getEmbeddingsGenerator().options;
       this.embeddingEngineConfig =
-        await lazy.MLEngineParent.getInferenceOptions(featureId, taskName);
+        await lazy.MLEngineParent.getInferenceOptions(config, taskName);
     }
     return {
       [ML_TASK_TEXT2TEXT]: this.topicEngineConfig,

@@ -31,9 +31,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
  * method, allowing flexible tracking across different parts of the system.
  *
  * @example
- * new MLTelemetry({ featureId: "ml-suggest-intent" }).sessionStart({ interaction: "button_click" });
+ * new MLTelemetry({ featureId: "urlbar-suggest" }).sessionStart({ interaction: "button_click" });
  * @example
- * new MLTelemetry({ featureId: "ml-suggest-intent", flowId: "1234-5678" }).sessionStart({ interaction: "keyboard_shortcut"});
+ * new MLTelemetry({ featureId: "urlbar-suggest", flowId: "1234-5678" }).sessionStart({ interaction: "keyboard_shortcut"});
  */
 export class MLTelemetry {
   static #systemMemoryMB = Math.round(
@@ -84,17 +84,20 @@ export class MLTelemetry {
   }
 
   /**
-   * Returns the label used in telemetry for a given engine ID.
-   * Converts addon engine IDs to "webextension" label.
+   * Returns the label used by the labeled timing distributions: the feature
+   * id, "webextension" for add-on engines, "default-engine" when the caller
+   * gave no feature id.
    *
-   * @param {string} engineId - The engine ID to convert.
-   * @returns {string} The Glean label for the engine.
+   * @param {object} ids
+   * @param {string | null} [ids.engineId]
+   * @param {string | null} [ids.featureId]
+   * @returns {string}
    */
-  static getGleanLabel(engineId) {
-    if (lazy.isAddonEngineId(engineId)) {
+  static getGleanLabel({ engineId, featureId }) {
+    if (engineId && lazy.isAddonEngineId(engineId)) {
       return "webextension";
     }
-    return engineId;
+    return featureId || "default-engine";
   }
 
   /**
@@ -182,7 +185,10 @@ export class MLTelemetry {
   recordEngineCreationSuccessFlow({ flowId, engineId, duration }) {
     const currentFlowId = flowId || this.#flowId;
     const actualEngineId = engineId;
-    const actualLabel = MLTelemetry.getGleanLabel(engineId);
+    const actualLabel = MLTelemetry.getGleanLabel({
+      engineId,
+      featureId: this.#featureId,
+    });
 
     Glean.firefoxAiRuntime.engineCreationSuccessFlow.record({
       flow_id: currentFlowId,
@@ -267,7 +273,9 @@ export class MLTelemetry {
     try {
       const currentFlowId = this.#flowId;
       const EngineId = engineId || undefined;
-      const Label = engineId ? MLTelemetry.getGleanLabel(engineId) : "no-label";
+      const Label = engineId
+        ? MLTelemetry.getGleanLabel({ engineId, featureId: this.#featureId })
+        : "no-label";
 
       // Handle legacy preprocessingTime field
       const tokenizingTime =
@@ -339,12 +347,14 @@ export class MLTelemetry {
    * @param {unknown} options.error - The error class/message or object.
    * @param {string | null} [options.engineId]
    * @param {string | null} [options.modelId]
+   * @param {string | null} [options.activity]
    * @param {string} [options.flow_id=this.flowId]
    */
   recordRunInferenceFailure({
     error,
     engineId = null,
     modelId = null,
+    activity = null,
     flow_id = this.flowId,
   }) {
     // Ensure error is always a string
@@ -355,6 +365,7 @@ export class MLTelemetry {
       featureId: this.#featureId,
       engineId,
       modelId,
+      activity,
       error: errorString,
     };
     Glean.firefoxAiRuntime.runInferenceFailure.record(payload);
@@ -380,6 +391,7 @@ export class MLTelemetry {
    * @param {number | null} [options.timeToFirstChunk]
    * @param {number | null} [options.averageChunkTime]
    * @param {string | null} [options.backendSourceRevision]
+   * @param {string | null} [options.activity]
    * @param {string} [options.flow_id]
    * @param {string} [options.feature_id]
    */
@@ -395,6 +407,7 @@ export class MLTelemetry {
     timeToFirstChunk = null,
     averageChunkTime = null,
     backendSourceRevision = null,
+    activity = null,
     flow_id = this.#flowId,
     feature_id = this.#featureId,
   }) {
@@ -430,6 +443,7 @@ export class MLTelemetry {
       feature_id,
       engine_id: engineId,
       model_id: modelId,
+      activity,
       backend,
       backend_source_revision: backendSourceRevision,
       // Specifically use the "||" operator since Glean expects "null" rather than

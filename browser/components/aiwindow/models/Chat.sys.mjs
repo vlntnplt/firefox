@@ -343,6 +343,7 @@ Object.assign(Chat, {
     // itself in a loop; the model stays free to answer or call another tool.
     const searchExecuted = conversation._searchExecutedTurn === currentTurn;
 
+    let completions = 0;
     const streamModelResponse = () => {
       const snapshot = conversation.compactChatCompletions();
 
@@ -362,6 +363,7 @@ Object.assign(Chat, {
         args: snapshot,
         inferenceParams: { tool_choice: "auto" },
         signal,
+        activity: completions++ ? "answer-with-tool-result" : "answer-turn",
       });
     };
 

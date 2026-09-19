@@ -96,7 +96,7 @@ add_task(async function test_aifeature_disable() {
 
   const uninstallArgs = uninstallStub.getCall(0).args[0];
   ok(
-    uninstallArgs.engineIds.includes(FEATURES["link-preview"].engineId),
+    uninstallArgs.engineIds.includes(FEATURES["link-preview"].engineIds[0]),
     "uninstall called with correct engine ID"
   );
   is(

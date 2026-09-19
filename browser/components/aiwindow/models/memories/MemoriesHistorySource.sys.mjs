@@ -1102,7 +1102,10 @@ async function resolveUrlsBySummarySimilarity(memories, distanceThreshold) {
         continue;
       }
 
-      const tensor = await semanticManager.embedder.embed(queryText);
+      const tensor = await semanticManager.embedder.embed(queryText, {
+        featureId: "sw-memories",
+        activity: "query-history",
+      });
       const vector = PlacesUtils.tensorToSQLBindable(
         lazy.extractVectorFromTensor(tensor)
       );

@@ -195,8 +195,13 @@ add_task(function test_manager_usesSmartWindowTopicModelSlot() {
     // itself resolves from the smart-window-tab-topic Remote Settings record.
     Assert.equal(
       topicGeneration.featureId,
+      "sw-auto-tab-grouping",
+      "manager attributes the topic model to Smart Window auto tab grouping"
+    );
+    Assert.equal(
+      topicGeneration.config,
       "smart-window-tab-topic",
-      "manager uses the Smart Window topic featureId, not the shared one"
+      "manager uses the Smart Window topic config, not the shared one"
     );
     Assert.equal(
       topicGeneration.engineId,

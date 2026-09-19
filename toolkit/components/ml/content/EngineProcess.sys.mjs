@@ -134,9 +134,18 @@ export const DEFAULT_MODELS = Object.freeze({
 });
 
 /**
- * Lists Firefox internal features.
+ * The shared text embedder engine; see
+ * toolkit/components/ml/content/nlp/EmbeddingsGenerator.sys.mjs.
+ */
+const TEXT_EMBEDDER_ENGINE_IDS = ["simple-text-embedder-engine"];
+
+/**
+ * Lists Firefox internal features: every feature id a caller may pass, the
+ * engines it runs and the closed set of activities its runs may carry.
  *
- * Make sure to set an explicit engine id and add it in toolkit/components/ml/metrics.yml
+ * The first engine id is the default when a caller passes no engineId. A run
+ * names one of the feature's activities, or none when the list is empty.
+ * Add every feature id to the labels in toolkit/components/ml/metrics.yaml.
  *
  * Engine ids can be shared, there's only one inference runtime running per engine id.
  * When an inference is executed on an engine, if the pipeline options are different
@@ -145,119 +154,176 @@ export const DEFAULT_MODELS = Object.freeze({
  * The only exception is web extension, as the engine id is dynamically created with the extension id.
  */
 export const FEATURES = {
-  // see toolkit/components/pdfjs/content/PdfJsParent.sys.mjs
-  "pdfjs-alt-text": {
-    engineId: "pdfjs",
-    fluentId: "mlmodel-pdfjs",
+  // see toolkit/components/places/PlacesSemanticHistoryManager.sys.mjs
+  "semantic-history": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: ["index-history"],
+  },
+  // see browser/components/urlbar/UrlbarProviderSemanticHistorySearch.sys.mjs
+  "urlbar-places": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: ["query-history"],
   },
   // see browser/components/urlbar/private/MLSuggest.sys.mjs
-  "suggest-intent-classification": {
-    engineId: "ml-suggest-intent",
-  },
-  // see browser/components/urlbar/private/MLSuggest.sys.mjs
-  "suggest-NER": {
-    engineId: "ml-suggest-ner",
-  },
-  // see toolkit/components/aboutinference/content/aboutInference.js
-  "about-inference": {
-    engineId: "about-inference",
-    fluentId: "mlmodel-about-inference",
-  },
-  // see browser/components/tabbrowser/SmartTabGrouping.sys.mjs
-  "smart-tab-topic": {
-    engineId: "smart-tab-topic-engine",
-    fluentId: "mlmodel-smart-tab-topic-engine",
-  },
-  // Smart Window auto tab grouping: a separate topic-model slot so its naming
-  // model can be updated independently of the shared smart-tab-topic model.
-  // see browser/components/aiwindow/ui/modules/AutoTabGroupingSuggestions.sys.mjs
-  "smart-window-tab-topic": {
-    engineId: "smart-window-tab-topic-engine",
-    fluentId: "mlmodel-smart-tab-topic-engine",
+  "urlbar-suggest": {
+    engineIds: ["ml-suggest-intent", "ml-suggest-ner"],
+    activities: ["classify-intent", "extract-entities"],
   },
   // see toolkit/components/formautofill/shared/FormAutofillML.sys.mjs
-  "formfill-classification": {
-    engineId: "formfill-classification-engine",
-    fluentId: "mlmodel-formfill-engine",
-  },
-  // Triple-encoder Approach 3: the field-type classifier is split into a stock
-  // feature-extraction encoder (produces per-field pooled embeddings) and a
+  // The default classifier is one engine; the opt-in two-head classifier is
+  // a stock feature-extraction encoder (per-field pooled embeddings) and a
   // small ONNX fusion "head" (windowed embeddings -> field-type logits).
-  // Both engines are driven from
-  // toolkit/components/formautofill/shared/FormAutofillML.sys.mjs
-  "formfill-encoder": {
-    engineId: "formfill-encoder-engine",
+  "form-autofill": {
+    engineIds: [
+      "formfill-classification-engine",
+      "formfill-encoder-engine",
+      "formfill-head-engine",
+    ],
+    activities: ["classify-field", "embed-field", "score-field"],
     fluentId: "mlmodel-formfill-engine",
   },
-  "formfill-head": {
-    engineId: "formfill-head-engine",
-    fluentId: "mlmodel-formfill-engine",
-  },
-  // see toolkit/components/ml/content/nlp/EmbeddingsGenerator.sys.mjs
-  "simple-text-embedder": {
-    engineId: "simple-text-embedder-engine",
+  // see browser/components/tabbrowser/SmartTabGrouping.sys.mjs
+  "smart-tab-grouping": {
+    engineIds: ["smart-tab-topic-engine", ...TEXT_EMBEDDER_ENGINE_IDS],
+    activities: ["embed-tabs", "label-group"],
+    fluentId: "mlmodel-smart-tab-topic-engine",
   },
   // see browser/components/genai/LinkPreviewModel.sys.mjs
   "link-preview": {
-    engineId: "link-preview",
+    engineIds: ["link-preview"],
+    activities: ["extract-key-points"],
     fluentId: "mlmodel-link-preview",
   },
-  // see browser/components/aiwindow/models/IntentClassifier.sys.mjs
-  "smart-intent": {
-    engineId: "smart-intent",
-  },
-  "smart-intent-en-fr": {
-    engineId: "smart-intent-en-fr",
-  },
-  chat: {
-    engineId: "smart-openai",
-  },
-  "smart-form-fill": {
-    engineId: "smart-openai",
-  },
-  "title-generation": {
-    engineId: "title-generation-engine",
-  },
-  "tab-group-naming": {
-    engineId: "smart-openai",
-  },
-  "conversation-suggestions-sidebar-starter": {
-    engineId: "smart-openai",
-  },
-  "conversation-suggestions-followup": {
-    engineId: "smart-openai",
-  },
-  "resume-activity-conversation-starter": {
-    engineId: "smart-openai",
-  },
-  "memories-initial-generation-system": {
-    engineId: "smart-openai-memories-generation",
-  },
-  "memories-message-classification-system": {
-    engineId: "smart-openai-memories-usage",
-  },
-  "llm-telemetry": {
-    engineId: "llm-telemetry-engine",
-  },
-  //agents
-  "agent-monitor": {
-    engineId: "agent-monitor-engine",
-  },
-  // see browser/components/aiwindow/models/search/SearchAgent.sys.mjs
-  "search-answer-generation": {
-    engineId: "smart-openai",
-  },
-  aitab: {
-    engineId: "aitab-engine",
+  // see toolkit/components/pdfjs/content/PdfJsParent.sys.mjs
+  "pdfjs-alt-text": {
+    engineIds: ["pdfjs"],
+    activities: ["describe-image"],
+    fluentId: "mlmodel-pdfjs",
   },
   // see dom/media/webspeech/recognition/SpeechRecognition.cpp
   "speech-recognition": {
-    engineId: "parakeet-gguf",
+    engineIds: ["parakeet-gguf"],
+    activities: [],
     fluentId: "mlmodel-speech-recognition",
     fileDisplayInfoModule:
       "resource://gre/modules/SpeechRecognitionModelDisplayInfo.sys.mjs",
   },
+  // Engines created through the trial ML web extension API; their engine ids
+  // are derived from the add-on id. see toolkit/components/extensions/parent/ext-trial-ml.js
+  webextension: {
+    engineIds: [],
+    activities: [],
+  },
+  // see toolkit/components/aboutinference/content/aboutInference.js
+  "about-inference": {
+    engineIds: ["about-inference"],
+    activities: [],
+    fluentId: "mlmodel-about-inference",
+  },
+  // Smart Window. see browser/components/aiwindow/models/IntentClassifier.sys.mjs
+  "sw-smartbar": {
+    engineIds: ["smart-intent", "smart-intent-en-fr"],
+    activities: ["classify-intent"],
+  },
+  // see browser/components/aiwindow/models/Chat.sys.mjs
+  "sw-chat": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: [
+      "answer-turn",
+      "answer-with-tool-result",
+      "classify-message",
+      "name-conversation",
+      "grade-conversation",
+      "query-memories",
+    ],
+  },
+  // see browser/components/aiwindow/models/ConversationSuggestions.sys.mjs
+  "sw-suggestions": {
+    engineIds: [],
+    activities: ["draft-starters", "draft-followups", "draft-resume"],
+  },
+  // see browser/components/aiwindow/models/search/SearchWorkflow.sys.mjs
+  "sw-tool-search-web": {
+    engineIds: [],
+    activities: ["answer-search"],
+  },
+  // see browser/components/aiwindow/models/aitab/AITab.sys.mjs
+  "sw-tool-aitab": {
+    engineIds: [],
+    activities: ["generate-page"],
+  },
+  // see browser/components/aiwindow/models/SearchBrowsingHistory.sys.mjs
+  "sw-tool-history-search": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: ["query-history"],
+  },
+  // see browser/components/aiwindow/models/Tools.sys.mjs
+  "sw-tool-open-tabs": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: ["rank-tabs"],
+  },
+  // see browser/components/aiwindow/models/SmartWindowNavigationInfo.sys.mjs
+  "sw-tool-navigation": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: ["index-settings", "query-settings"],
+  },
+  // see browser/components/aiwindow/models/memories/Memories.sys.mjs and
+  // browser/components/aiwindow/services/MemoryStore.sys.mjs
+  "sw-memories": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: [
+      "generate-memories",
+      "filter-memories",
+      "merge-memories",
+      "index-memories",
+      "query-memories",
+      "query-history",
+    ],
+  },
+  // Smart Window auto tab grouping: a separate topic-model slot so its naming
+  // model can be updated independently of the shared smart-tab-topic model.
+  // see browser/components/aiwindow/ui/modules/AutoTabGroupingSuggestions.sys.mjs
+  "sw-auto-tab-grouping": {
+    engineIds: ["smart-window-tab-topic-engine", ...TEXT_EMBEDDER_ENGINE_IDS],
+    activities: ["embed-tabs", "label-group", "name-group"],
+    fluentId: "mlmodel-smart-tab-topic-engine",
+  },
+  // see browser/components/aiwindow/models/SmartFormFillModel.sys.mjs
+  "sw-form-autofill": {
+    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    activities: ["fill-form", "query-memories"],
+  },
+  // see browser/components/aiwindow/models/agents/Monitor.sys.mjs
+  "sw-monitor": {
+    engineIds: [],
+    activities: ["check-page"],
+  },
 };
+
+/**
+ * Throws unless `activity` is one of the feature's activities, or null for a
+ * feature that declares none. Unknown features are not checked.
+ *
+ * @param {string | null | undefined} featureId
+ * @param {string | null | undefined} activity
+ */
+export function validateActivity(featureId, activity) {
+  const feature = featureId ? FEATURES[featureId] : null;
+  if (!feature) {
+    return;
+  }
+  const valid = feature.activities.length
+    ? feature.activities.includes(activity)
+    : activity == null;
+  if (!valid) {
+    throw new Error(
+      `Invalid activity "${activity}" for feature "${featureId}": ` +
+        (feature.activities.length
+          ? `should be one of ${feature.activities.join(", ")}`
+          : "the feature declares no activities")
+    );
+  }
+}
 
 /**
  * Whether telemetry this profile records would actually be submitted.
@@ -970,11 +1036,12 @@ export class PipelineOptions {
         const featureId = options[key];
         if (FEATURES.hasOwnProperty(featureId)) {
           // if featureId is set and engineId is not set, we set it
+          const [defaultEngineId] = FEATURES[featureId].engineIds;
           if (
-            options.engineId == null ||
-            options.engineId === DEFAULT_ENGINE_ID
+            defaultEngineId &&
+            (options.engineId == null || options.engineId === DEFAULT_ENGINE_ID)
           ) {
-            options.engineId = FEATURES[featureId].engineId;
+            options.engineId = defaultEngineId;
             this.engineId = options.engineId;
           }
         } else if (

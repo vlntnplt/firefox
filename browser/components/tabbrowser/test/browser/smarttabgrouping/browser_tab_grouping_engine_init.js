@@ -7,21 +7,19 @@ const { sinon } = ChromeUtils.importESModule(
 );
 
 add_task(async function test_model_revision_topic_engine() {
-  const featureId = "smart-tab-topic";
+  const config = "smart-tab-topic";
   let initData = {
-    featureId,
+    config,
   };
   Assert.equal(
-    SmartTabGroupingManager.getUpdatedInitData(initData, featureId)
-      .modelRevision,
+    SmartTabGroupingManager.getUpdatedInitData(initData, config).modelRevision,
     undefined,
     "No model revision in init should return undefined"
   );
 
   initData.modelRevision = "v0.1.0";
   Assert.equal(
-    SmartTabGroupingManager.getUpdatedInitData(initData, featureId)
-      .modelRevision,
+    SmartTabGroupingManager.getUpdatedInitData(initData, config).modelRevision,
     "v0.1.0",
     "Model revision set should return proper value"
   );
@@ -30,22 +28,20 @@ add_task(async function test_model_revision_topic_engine() {
     set: [["browser.tabs.groups.smart.topicModelRevision", "v0.2.0"]],
   });
   Assert.equal(
-    SmartTabGroupingManager.getUpdatedInitData(initData, featureId)
-      .modelRevision,
+    SmartTabGroupingManager.getUpdatedInitData(initData, config).modelRevision,
     "v0.2.0",
     "Override through nimbus or config should take precedence"
   );
 
   initData = {
-    featureId,
+    config,
   };
 
   await SpecialPowers.pushPrefEnv({
     set: [["browser.tabs.groups.smart.topicModelRevision", "latest"]],
   });
   Assert.equal(
-    SmartTabGroupingManager.getUpdatedInitData(initData, featureId)
-      .modelRevision,
+    SmartTabGroupingManager.getUpdatedInitData(initData, config).modelRevision,
     undefined,
     "'latest' config should return undefined for model revision init "
   );

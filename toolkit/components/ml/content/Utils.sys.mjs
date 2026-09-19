@@ -1079,8 +1079,8 @@ export function engineIdToAddonId(engineId) {
  */
 export function featureEngineIdToFluentId(engineId) {
   for (const config of Object.values(lazy.FEATURES)) {
-    if (config.engineId === engineId) {
-      return config.fluentId;
+    if (config.engineIds.includes(engineId)) {
+      return config.fluentId ?? null;
     }
   }
   return null;
@@ -1102,7 +1102,7 @@ export async function fileDisplayInfoForEngineIds(engineIds, files) {
   for (const config of Object.values(lazy.FEATURES)) {
     if (
       !config.fileDisplayInfoModule ||
-      !engineIds?.includes(config.engineId)
+      !config.engineIds.some(engineId => engineIds?.includes(engineId))
     ) {
       continue;
     }

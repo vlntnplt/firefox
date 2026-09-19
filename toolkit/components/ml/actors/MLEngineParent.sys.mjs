@@ -5,6 +5,13 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 import { MLTelemetry } from "chrome://global/content/ml/MLTelemetry.sys.mjs";
 
 /**
+ * @typedef {object} RunOptions
+ * @property {string | null} [activity] - What the feature runs the engine
+ *   for, one of its activities in FEATURES; recorded on engine_run.
+ * @property {MLTelemetry} [telemetry] - Telemetry to attribute the run to.
+ */
+
+/**
  * @import { MLEngineChild } from "./MLEngineChild.sys.mjs"
  * @import { RemoteSettingsClient } from "resource://services-settings/RemoteSettingsClient.sys.mjs"
  * @import {
@@ -35,6 +42,7 @@ const lazy = XPCOMUtils.declareLazy({
   OPFS: "chrome://global/content/ml/OPFS.sys.mjs",
   BACKENDS: "chrome://global/content/ml/EngineProcess.sys.mjs",
   EngineProcess: "chrome://global/content/ml/EngineProcess.sys.mjs",
+  validateActivity: "chrome://global/content/ml/EngineProcess.sys.mjs",
   stringifyForLog: "chrome://global/content/ml/Utils.sys.mjs",
   console: () =>
     console.createInstance({
@@ -290,7 +298,9 @@ export class MLEngineParent extends JSProcessActorParent {
         ) {
           lazy.console.debug(`Reusing existing engine for ${engineId}`);
           // Coerce the return type since we can't key off of the engineId here.
-          return /** @type {MLEngine<FeatureId>} */ (currentEngine);
+          return /** @type {MLEngine<FeatureId>} */ (
+            MLEngine.forCaller(currentEngine, pipelineOptions)
+          );
         }
         lazy.console.debug(`Replacing existing engine for ${engineId}`);
         currentEngine.stopObservingShutdown();
@@ -347,7 +357,7 @@ export class MLEngineParent extends JSProcessActorParent {
       });
 
       // TODO - What happens if the engine is already killed here?
-      return engine;
+      return MLEngine.forCaller(engine, pipelineOptions);
     } catch (error) {
       // Abort any pending operations as the engine creating failed
       abortController?.abort();
@@ -1049,6 +1059,14 @@ export class MLEngine {
   engineStatus = "uninitialized";
 
   /**
+   * Caller views handed out by forCaller, keyed by feature and flow so that
+   * repeated creations from one caller get the same object.
+   *
+   * @type {Map<string, MLEngine<any>>}
+   */
+  #callerViews = new Map();
+
+  /**
    * Model id the child reported on the last run response: the one resolved
    * from Remote Settings or the task default when the caller pinned none, or
    * the request's own model on engines shared across models.
@@ -1129,6 +1147,58 @@ export class MLEngine {
    */
   static getInstance(engineId) {
     return MLEngine.#instances.get(engineId) || null;
+  }
+
+  /**
+   * Returns a view of a shared engine that attributes its runs to one caller:
+   * `featureId`, `telemetry`, `run` and `runWithGenerator` belong to the
+   * caller, everything else forwards to the engine.
+   *
+   * @param {MLEngine<any>} engine
+   * @param {PipelineOptions} pipelineOptions - The caller's options.
+   * @returns {MLEngine<any>}
+   */
+  static forCaller(engine, { featureId, flowId }) {
+    const key = `${featureId ?? ""}\u0000${flowId ?? ""}`;
+    const cached = engine.#callerViews.get(key);
+    if (cached) {
+      return cached;
+    }
+    const telemetry = new MLTelemetry({ featureId, flowId });
+    const overrides = {
+      featureId,
+      telemetry,
+      run: (request, { activity = null } = {}) =>
+        engine.run(request, { activity, telemetry }),
+      runWithGenerator: (request, { activity = null } = {}) =>
+        engine.runWithGenerator(request, { activity, telemetry }),
+    };
+    const view = new Proxy(engine, {
+      get(target, property) {
+        if (Object.hasOwn(overrides, property)) {
+          return overrides[property];
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+      set(target, property, value) {
+        target[property] = value;
+        return true;
+      },
+    });
+    engine.#callerViews.set(key, view);
+    return view;
+  }
+
+  /**
+   * A view of this engine attributing its runs to another feature, for a
+   * caller that shares an engine it did not create.
+   *
+   * @param {string} featureId
+   * @returns {MLEngine<any>}
+   */
+  forFeature(featureId) {
+    return MLEngine.forCaller(this, { featureId, flowId: null });
   }
 
   /**
@@ -1432,16 +1502,18 @@ export class MLEngine {
         }
         const request = this.#requests.get(requestId);
         if (request) {
+          const telemetry = request.telemetry ?? this.telemetry;
           request.modelId = modelId ?? this.modelId;
           if (error) {
-            this.telemetry.recordRunInferenceFailure({
+            telemetry.recordRunInferenceFailure({
               error,
               engineId: this.engineId,
               modelId: request.modelId,
+              activity: request.activity ?? null,
             });
             request.reject(error);
           } else if (response) {
-            this.telemetry.recordRunInferenceSuccessFlow(
+            telemetry.recordRunInferenceSuccessFlow(
               this.engineId,
               response.metrics
             );
@@ -1576,13 +1648,15 @@ export class MLEngine {
    * Run the inference request
    *
    * @param {EngineRequests[FeatureID]} request
+   * @param {RunOptions} [runOptions]
    * @returns {Promise<EngineResponses[FeatureID]>}
    */
-  async run(request) {
+  async run(request, { activity = null, telemetry = this.telemetry } = {}) {
+    lazy.validateActivity(telemetry.featureId, activity);
     /** @type {PromiseWithResolvers<EngineResponses[FeatureID]>} */
     const resolvers = Promise.withResolvers();
     const requestId = this.#nextRequestId++;
-    const pending = { ...resolvers };
+    const pending = { ...resolvers, telemetry, activity };
     this.#requests.set(requestId, pending);
     let transferables = [];
     if (
@@ -1613,7 +1687,7 @@ export class MLEngine {
 
     const result = await resolvers.promise;
 
-    this.telemetry.recordEngineRun({
+    telemetry.recordEngineRun({
       beforeRun,
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
@@ -1622,6 +1696,7 @@ export class MLEngine {
       backend: this.pipelineOptions.backend,
       backendSourceRevision:
         this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
+      activity,
     });
 
     return result;
@@ -1631,14 +1706,21 @@ export class MLEngine {
    * Run the inference request using an async generator function.
    *
    * @param {EngineRequests[FeatureID]} request - The inference request containing the input data.
+   * @param {RunOptions} [runOptions]
    * @returns {AsyncGenerator<ChunkResponse>} An async generator yielding chunks of generated responses.
    */
-  async *runWithGenerator(request) {
+  async *runWithGenerator(
+    request,
+    { activity = null, telemetry = this.telemetry } = {}
+  ) {
+    lazy.validateActivity(telemetry.featureId, activity);
     lazy.console.debug(`runWithGenerator called for request ${request}`);
     const startTime = ChromeUtils.now();
 
     // Create a promise to track when the engine has fully completed all runs
     const responseChunkResolvers = new ResponseOrChunkResolvers();
+    responseChunkResolvers.telemetry = telemetry;
+    responseChunkResolvers.activity = activity;
 
     const requestId = this.#nextRequestId++;
     this.#requests.set(requestId, responseChunkResolvers);
@@ -1806,7 +1888,7 @@ export class MLEngine {
         ` (${this.pipelineOptions.backend} ${this.modelId})`
     );
 
-    this.telemetry.recordEngineRun({
+    telemetry.recordEngineRun({
       beforeRun: startTime,
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
@@ -1815,6 +1897,7 @@ export class MLEngine {
       backend: this.pipelineOptions.backend,
       backendSourceRevision:
         this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
+      activity,
       tokenCount,
       characterCount,
       timeToFirstChunk:

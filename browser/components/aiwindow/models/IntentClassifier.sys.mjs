@@ -16,8 +16,9 @@ export const INTENT_MODEL_ENGLISH_FRENCH =
   "mozilla/query-intent-detection-en-fr";
 export const DEFAULT_INTENT_MODEL = "mozilla/mobilebert-query-intent-detection";
 
-const INTENT_FEATURE = "smart-intent";
-const INTENT_FEATURE_ENGLISH_FRENCH = "smart-intent-en-fr";
+const INTENT_FEATURE_ID = "sw-smartbar";
+const INTENT_CONFIG = "smart-intent";
+const INTENT_CONFIG_ENGLISH_FRENCH = "smart-intent-en-fr";
 
 const FORCED_CHAT_PHRASES = [
   "amuse me",
@@ -231,12 +232,14 @@ function getIntentModelInfoForLocale() {
   if (lazy.Region.home == "FR") {
     return {
       modelId: INTENT_MODEL_ENGLISH_FRENCH,
-      featureId: INTENT_FEATURE_ENGLISH_FRENCH,
+      config: INTENT_CONFIG_ENGLISH_FRENCH,
+      engineId: INTENT_CONFIG_ENGLISH_FRENCH,
     };
   }
   return {
     modelId: DEFAULT_INTENT_MODEL,
-    featureId: INTENT_FEATURE,
+    config: INTENT_CONFIG,
+    engineId: INTENT_CONFIG,
   };
 }
 
@@ -302,11 +305,15 @@ export const IntentClassifier = {
       }
       const engine = await this._createEngine({
         backend: "best-onnx",
+        featureId: INTENT_FEATURE_ID,
         ...modelInfo,
         taskName: "text-classification",
       });
       const threshold = 0.8;
-      const resp = await engine.run({ args: [[cleanedQuery]] });
+      const resp = await engine.run(
+        { args: [[cleanedQuery]] },
+        { activity: "classify-intent" }
+      );
       // resp example: [{ label: "chat", score: 0.05 }, { label: "search", score: 0.94 }]
       if (
         resp[0].label.toLowerCase() === "search" &&

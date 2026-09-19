@@ -47,7 +47,8 @@ const CUSTOM_EMBEDDER_DIM = 384;
 
 const CUSTOM_EMBEDDER_OPTIONS = {
   taskName: "feature-extraction",
-  featureId: "simple-text-embedder",
+  featureId: "semantic-history",
+  config: "simple-text-embedder",
   modelId: CUSTOM_EMBEDDER_MODEL,
   embeddingDimension: CUSTOM_EMBEDDER_DIM,
   dtype: "q8",

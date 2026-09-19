@@ -113,13 +113,16 @@ const staticEmbeddingsOptions = Object.freeze({
 
 // Registry of engine configurations keyed by engineConfigId. Each entry is
 // the base option dict for that engine; resolveEngineOptions() clones the
-// entry, fills in dimension + per-call overrides, and stamps engineConfigId.
+// entry, fills in dimension + per-call overrides, and stamps engineConfigId
+// and the calling feature. Both share one engine slot and one Remote
+// Settings record; the static entry pins its own model on top of it.
 const ENGINE_OPTIONS = new Map([
   [
     "onnx",
     {
       taskName: "feature-extraction",
-      featureId: "simple-text-embedder",
+      config: "simple-text-embedder",
+      engineId: "simple-text-embedder-engine",
       timeoutMS: -1,
       numThreads: 2,
       backend: "best-onnx",
@@ -129,7 +132,8 @@ const ENGINE_OPTIONS = new Map([
   [
     "static-embeddings",
     {
-      featureId: "simple-text-embedder",
+      config: "simple-text-embedder",
+      engineId: "simple-text-embedder-engine",
       modelId: "mozilla/static-embeddings",
       modelRevision: "v1.0.0",
       taskName: "static-embeddings",
@@ -166,15 +170,17 @@ XPCOMUtils.defineLazyPreferenceGetter(
  * @param {number} [embeddingSize]
  *   Explicit dimension override. Otherwise the engine's preferredDimension
  *   (static) or the dev pref (contextual) is used.
+ * @param {string} [featureId]
+ *   The browser feature the embeddings are for.
  * @returns {object} merged engine options
  */
-function resolveEngineOptions(embeddingType, embeddingSize) {
+function resolveEngineOptions(embeddingType, embeddingSize, featureId) {
   const engineConfigId = EMBEDDING_BACKEND_DEFAULTS[embeddingType];
   if (!engineConfigId) {
     throw new TypeError(`Unknown embedding type ${embeddingType}`);
   }
   const base = ENGINE_OPTIONS.get(engineConfigId);
-  const options = { ...base, engineConfigId };
+  const options = { ...base, engineConfigId, featureId };
 
   if (embeddingType === EMBEDDING_TYPE.STATIC) {
     const dim = embeddingSize ?? options.preferredDimension;
@@ -311,27 +317,52 @@ export class EmbeddingsGeneratorFactory {
    * pref `places.semanticHistory.embeddingType`, falling back to the region
    * and locale.
    *
+   * @param {object} options
+   * @param {string} options.featureId - The browser feature the embeddings
+   *   are for.
    * @returns {EmbeddingsGenerator}
    */
-  forPlaces() {
+  forPlaces({ featureId }) {
+    if (!featureId) {
+      throw new TypeError("forPlaces needs the calling feature's featureId");
+    }
     return new EmbeddingsGenerator(
-      resolveEngineOptions(this.#resolvePlacesEmbeddingType())
+      resolveEngineOptions(
+        this.#resolvePlacesEmbeddingType(),
+        undefined,
+        featureId
+      )
     );
   }
 
   /**
    * Smart Window memories, navigation, and other general callers.
    *
+   * @param {object} options
+   * @param {string} options.featureId - The browser feature the embeddings
+   *   are for.
    * @returns {EmbeddingsGenerator}
    */
-  forGeneral() {
+  forGeneral({ featureId }) {
+    if (!featureId) {
+      throw new TypeError("forGeneral needs the calling feature's featureId");
+    }
     return new EmbeddingsGenerator(
-      resolveEngineOptions(EMBEDDING_TYPE.CONTEXTUAL)
+      resolveEngineOptions(EMBEDDING_TYPE.CONTEXTUAL, undefined, featureId)
     );
   }
 }
 
 export const embeddingsGeneratorFactory = new EmbeddingsGeneratorFactory();
+
+/**
+ * @typedef {object} EmbedOptions
+ * @property {string} activity
+ *   What the feature embeds for, one of its activities in FEATURES.
+ * @property {string} [featureId]
+ *   Attributes the run to another feature sharing this generator's engine
+ *   instead of the one it was created for.
+ */
 
 export class EmbeddingsGenerator {
   #engine = undefined;
@@ -377,6 +408,10 @@ export class EmbeddingsGenerator {
    * embeddings to rerun unless needed and not require the ML Engine to be created
    * (which may trigger a model download) before the dimension can be checked.
    *
+   * `featureId` here is the model config (the Remote Settings record name),
+   * which Places persists under `feature_id` to detect model switches; the
+   * browser feature using the embeddings is not part of the model identity.
+   *
    * @returns {{
    *   featureId: string,
    *   embeddingDimension: number,
@@ -384,8 +419,8 @@ export class EmbeddingsGenerator {
    * }}
    */
   get modelContext() {
-    const { featureId, embeddingDimension, modelId } = this.options || {};
-    return { featureId, embeddingDimension, modelId };
+    const { config, embeddingDimension, modelId } = this.options || {};
+    return { featureId: config, embeddingDimension, modelId };
   }
 
   /**
@@ -467,10 +502,11 @@ export class EmbeddingsGenerator {
    *
    * @param {string} text
    *   The input text to be embedded.
+   * @param {EmbedOptions} [runOptions]
    * @returns {Promise<any>}
    *   A promise that resolves with the embedding result from the engine.
    */
-  async embed(text) {
+  async embed(text, runOptions = {}) {
     await this.ensureEngine();
     if (typeof text !== "string" || text.trim() === "") {
       throw new Error("Invalid input: text must be a non-empty string");
@@ -479,7 +515,7 @@ export class EmbeddingsGenerator {
       args: [text],
       options: { pooling: "mean", normalize: true },
     };
-    return this.engineRun(request);
+    return this.engineRun(request, runOptions);
   }
 
   /**
@@ -493,12 +529,13 @@ export class EmbeddingsGenerator {
    *
    * @param {string[]} texts
    *   The array of texts to be embedded.
+   * @param {EmbedOptions} [runOptions]
    * @returns {Promise<number[][]>}
    *   A promise that resolves to an array of embedding vectors,
    *   where each vector is an array of floats with length equal to
    *  `#embeddingSize`.
    */
-  async embedMany(texts) {
+  async embedMany(texts, runOptions = {}) {
     await this.ensureEngine();
 
     if (!Array.isArray(texts)) {
@@ -510,10 +547,13 @@ export class EmbeddingsGenerator {
     }
 
     // call the engine once with the batch of texts.
-    let batchTensors = await this.engineRun({
-      args: this.options.backend == "static-embeddings" ? texts : [texts],
-      options: { pooling: "mean", normalize: true, max_length: 100 },
-    });
+    let batchTensors = await this.engineRun(
+      {
+        args: this.options.backend == "static-embeddings" ? texts : [texts],
+        options: { pooling: "mean", normalize: true, max_length: 100 },
+      },
+      runOptions
+    );
 
     // If the result is triple nested, extract the inner array.
     if (
@@ -558,8 +598,12 @@ export class EmbeddingsGenerator {
   }
 
   // for easier testing purpose
-  async engineRun(request) {
-    return await this.#engine.run(request);
+  async engineRun(request, { featureId = null, ...runOptions } = {}) {
+    const engine =
+      featureId && this.#engine.forFeature
+        ? this.#engine.forFeature(featureId)
+        : this.#engine;
+    return await engine.run(request, runOptions);
   }
 
   // Helper to wrap createEngine for testing purpose

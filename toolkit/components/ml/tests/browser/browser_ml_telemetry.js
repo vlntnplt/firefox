@@ -188,6 +188,104 @@ add_task(async function test_engine_run_reports_resolved_model() {
 });
 
 /**
+ * Two features sharing one engine each get their own attribution, and the
+ * per-run activity is recorded.
+ */
+add_task(async function test_engine_run_attributed_per_caller() {
+  const { cleanup, remoteClients } = await setup();
+  const creationCount = getGleanCount(
+    "engineCreationSuccess",
+    "semantic-history"
+  );
+
+  const first = await createEngine({
+    ...RAW_PIPELINE_OPTIONS,
+    featureId: "semantic-history",
+  });
+  const second = await createEngine({
+    ...RAW_PIPELINE_OPTIONS,
+    featureId: "urlbar-places",
+    engineId: first.engineId,
+    config: first.pipelineOptions.config,
+  });
+  Assert.equal(second.engineId, first.engineId, "One engine is shared");
+  Assert.equal(
+    getGleanCount("engineCreationSuccess", "semantic-history"),
+    creationCount + 1,
+    "The shared engine was created once"
+  );
+
+  const firstRun = first.run({ data: "one" }, { activity: "index-history" });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  await firstRun;
+  await second.run({ data: "two" }, { activity: "query-history" });
+  await first
+    .forFeature("sw-tool-history-search")
+    .run({ data: "three" }, { activity: "query-history" });
+
+  const runs = Glean.firefoxAiRuntime.engineRun.testGetValue().slice(-3);
+  Assert.deepEqual(
+    runs.map(({ extra }) => [
+      extra.feature_id,
+      extra.activity,
+      extra.engine_id,
+    ]),
+    [
+      ["semantic-history", "index-history", first.engineId],
+      ["urlbar-places", "query-history", first.engineId],
+      ["sw-tool-history-search", "query-history", first.engineId],
+    ],
+    "Each run is attributed to its caller"
+  );
+  Assert.equal(
+    new Set(runs.map(({ extra }) => extra.flow_id)).size,
+    3,
+    "Each caller has its own flow"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
+/**
+ * A run must name one of its feature's activities, and none for a feature
+ * that declares no activities.
+ */
+add_task(async function test_engine_run_rejects_unknown_activity() {
+  const { cleanup, remoteClients } = await setup();
+
+  const engine = await createEngine(RAW_PIPELINE_OPTIONS);
+  const inferencePromise = engine.run({ data: "echo" });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  await inferencePromise;
+
+  await Assert.rejects(
+    engine.run({ data: "echo" }, { activity: "describe-image" }),
+    /Invalid activity "describe-image" for feature "about-inference"/,
+    "about-inference declares no activities"
+  );
+  const view = engine.forFeature("pdfjs-alt-text");
+  await Assert.rejects(
+    view.run({ data: "echo" }),
+    /Invalid activity "null" for feature "pdfjs-alt-text"/,
+    "A feature with activities requires one"
+  );
+  await Assert.rejects(
+    view.run({ data: "echo" }, { activity: "index-history" }),
+    /Invalid activity "index-history" for feature "pdfjs-alt-text"/,
+    "The activity must belong to the feature"
+  );
+  await view.run({ data: "echo" }, { activity: "describe-image" });
+  Assert.equal(
+    Glean.firefoxAiRuntime.engineRun.testGetValue().at(-1).extra.activity,
+    "describe-image"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
+/**
  * Check that we record the engine creation and the inference failure
  */
 add_task(async function test_ml_engine_run_failure() {

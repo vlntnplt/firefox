@@ -234,14 +234,14 @@ const ARCHITECTURES = [
   {
     name: "single-engine",
     twoHead: false,
-    engines: [{ featureId: "formfill-classification" }],
+    engines: [{ config: "formfill-classification" }],
   },
   {
     name: "double-engine",
     twoHead: true,
     engines: [
-      { featureId: "formfill-encoder", metricName: "encoder" },
-      { featureId: "formfill-head", metricName: "head" },
+      { config: "formfill-encoder", metricName: "encoder" },
+      { config: "formfill-head", metricName: "head" },
     ],
   },
 ];

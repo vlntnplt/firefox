@@ -73,7 +73,10 @@ async function runGen(
 ) {
   let text = "";
   let metrics;
-  const generator = engine.runWithGenerator({ prompt, samplers, nPredict });
+  const generator = engine.runWithGenerator(
+    { prompt, samplers, nPredict },
+    { activity: "extract-key-points" }
+  );
   let result;
   do {
     result = await generator.next();

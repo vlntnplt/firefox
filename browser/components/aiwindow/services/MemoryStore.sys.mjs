@@ -719,16 +719,22 @@ export const MemoryStore = {
    * Uses embeddings and cosine similarity for fast, accurate memory retrieval.
    *
    * @param {string} message                  User message to find relevant memories for
-   * @param {number} topK                     Number of top relevant memories to return
+   * @param {object} [options]
+   * @param {number} [options.topK]           Number of top relevant memories to return
    *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_TOP_K})
-   * @param {number} similarityThreshold      Minimum similarity score (0-1) to include
+   * @param {number} [options.similarityThreshold] Minimum similarity score (0-1) to include
    *                                          (default: {@link DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD})
+   * @param {string} [options.featureId]      The feature querying, for ML telemetry
+   *                                          (default: "sw-memories")
    * @returns {Promise<Array<object>>}        List of relevant memories sorted by similarity
    */
   async getRelevantMemories(
     message,
-    topK = DEFAULT_RELEVANT_MEMORIES_TOP_K,
-    similarityThreshold = DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD
+    {
+      topK = DEFAULT_RELEVANT_MEMORIES_TOP_K,
+      similarityThreshold = DEFAULT_RELEVANT_MEMORIES_SIMILARITY_THRESHOLD,
+      featureId = "sw-memories",
+    } = {}
   ) {
     const memories = await this.getMemories({ includeSoftDeleted: false });
 
@@ -738,7 +744,9 @@ export const MemoryStore = {
 
     // Lazy initialize embeddings generator
     if (!this.embeddingsGenerator) {
-      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral();
+      this.embeddingsGenerator = embeddingsGeneratorFactory.forGeneral({
+        featureId: "sw-memories",
+      });
     }
 
     // Re-embed memories only if cache is invalid
@@ -756,13 +764,16 @@ export const MemoryStore = {
           .join(". ")
           .toLowerCase();
       });
-      const result = await this.embeddingsGenerator.embedMany(memoryTexts);
+      const result = await this.embeddingsGenerator.embedMany(memoryTexts, {
+        activity: "index-memories",
+      });
       this.memoryEmbeddingsCache = result.output || result;
       this.memoryCacheKey = currentCacheKey;
     }
 
     const queryResult = await this.embeddingsGenerator.embed(
-      message.toLowerCase()
+      message.toLowerCase(),
+      { featureId, activity: "query-memories" }
     );
     let queryEmbedding = queryResult.output || queryResult;
 
@@ -934,7 +945,7 @@ export const MemoryStore = {
         const { topK, similarityThreshold } = options ?? {};
         const semanticMatches = new Set(
           (
-            await this.getRelevantMemories(value, topK, similarityThreshold)
+            await this.getRelevantMemories(value, { topK, similarityThreshold })
           ).map(mem => mem[field])
         );
         res = res.filter(memory => semanticMatches.has(memory[field]));

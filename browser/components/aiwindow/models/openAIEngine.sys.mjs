@@ -14,6 +14,8 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
 
 const lazy = XPCOMUtils.declareLazy({
   getFxAccountsSingleton: "resource://gre/modules/FxAccounts.sys.mjs",
+  mlAttributionForModelFeature:
+    "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs",
 });
 
 const APIKEY_PREF = "browser.smartwindow.apiKey";
@@ -43,6 +45,17 @@ export class openAIEngine {
    * @type {string | null}
    */
   feature = null;
+
+  /**
+   * The ML feature this instance's runs are attributed to, and the activity
+   * they carry unless a run names another one.
+   *
+   * @type {string | null}
+   */
+  featureId = null;
+
+  /** @type {string | null} */
+  activity = null;
 
   /**
    * Resolved model name for LLM inference. Retained on the instance for
@@ -160,6 +173,11 @@ export class openAIEngine {
     const engineId = `${DEFAULT_ENGINE_ID}-${feature}-${model}`;
     engine.#engineId = engineId;
     engine.feature = feature;
+    if (feature) {
+      const attribution = lazy.mlAttributionForModelFeature(feature);
+      engine.featureId = attribution.featureId;
+      engine.activity = attribution.activity;
+    }
     engine.model = model;
     engine.#serviceType = serviceType;
     engine.#purpose = purpose;
@@ -253,7 +271,8 @@ export class openAIEngine {
    * @param {string} purpose      The purpose of the request, used for telemetry tracking
    * @param {string | null} modelId  The resolved model ID (already contains fallback logic)
    * @param {string | null} flowId   Flow ID for correlating frontend and backend telemetry
-   * @param {string | null} featureId - Feature name passed to PipelineOptions
+   * @param {string | null} feature - The model config (a MODEL_FEATURES
+   *   value), the engine's config; its ML feature id is the engine's featureId
    * @param {string} baseURL - The endpoint base URL for this engine instance
    * @param {string} apiKey - The API key for this engine instance
    * @returns {Promise<object>} - The configured engine instance
@@ -264,7 +283,7 @@ export class openAIEngine {
     purpose,
     modelId = null,
     flowId = null,
-    featureId = null,
+    feature = null,
     baseURL,
     apiKey
   ) {
@@ -286,7 +305,10 @@ export class openAIEngine {
         backend: "openai",
         baseURL,
         engineId,
-        featureId,
+        featureId: feature
+          ? lazy.mlAttributionForModelFeature(feature).featureId
+          : null,
+        config: feature,
         flowId,
         modelId,
         modelRevision: "main",
@@ -306,22 +328,25 @@ export class openAIEngine {
    * Wrapper around engine.run to send message to the LLM
    * Will eventually use `usage` from the LiteLLM API response for token telemetry
    *
-   * @param {Map<string, any>} content  OpenAI formatted messages to be sent to the LLM
+   * @param {Map<string, any>} content  OpenAI formatted messages to be sent to the LLM;
+   *   `activity` names the run's activity instead of this instance's default
    * @returns {object}                  LLM response
    */
   async run(content) {
-    return await this._runWithAuth(content);
+    const { activity = this.activity, ...request } = content;
+    return await this._runWithAuth(request, activity);
   }
 
   /**
    * Helper method to handle 401 authentication errors and retry with new token.
    *
    * @param {Map<string, any>} content  OpenAI formatted messages to be sent to the LLM
+   * @param {string | null} activity    The run's activity for ML telemetry
    * @returns {object}                  LLM response
    */
-  async _runWithAuth(content) {
+  async _runWithAuth(content, activity = this.activity) {
     try {
-      return await this.engineInstance.run(content);
+      return await this.engineInstance.run(content, { activity });
     } catch (ex) {
       // Skip the token retry flow when using a custom endpoint,
       // as the retry logic only applies to FxAccounts tokens.
@@ -345,7 +370,7 @@ export class openAIEngine {
       const updatedContent = { ...content, fxAccountToken: newToken };
 
       try {
-        return await this.engineInstance.run(updatedContent);
+        return await this.engineInstance.run(updatedContent, { activity });
       } catch (retryEx) {
         if (!this._is401Error(retryEx)) {
           throw retryEx;
@@ -411,9 +436,11 @@ export class openAIEngine {
    */
   async *_runWithGeneratorAuth(options) {
     // AbortSignal cannot be cloned via postMessage (structured clone algorithm).
-    const { signal, ...engineOptions } = options;
+    const { signal, activity = this.activity, ...engineOptions } = options;
     try {
-      const generator = this.engineInstance.runWithGenerator(engineOptions);
+      const generator = this.engineInstance.runWithGenerator(engineOptions, {
+        activity,
+      });
       for await (const chunk of generator) {
         if (signal?.aborted) {
           return;
@@ -443,7 +470,9 @@ export class openAIEngine {
       const updatedOptions = { ...engineOptions, fxAccountToken: newToken };
 
       try {
-        const generator = this.engineInstance.runWithGenerator(updatedOptions);
+        const generator = this.engineInstance.runWithGenerator(updatedOptions, {
+          activity,
+        });
         for await (const chunk of generator) {
           if (signal?.aborted) {
             return;
@@ -472,7 +501,8 @@ export class openAIEngine {
    * Wrapper around engine.runWithGenerator to send message to the LLM
    * Will eventually use `usage` from the LiteLLM API response for token telemetry
    *
-   * @param {Map<string, any>} options  OpenAI formatted messages with streaming and tooling options to be sent to the LLM
+   * @param {Map<string, any>} options  OpenAI formatted messages with streaming and tooling options to be sent to the LLM;
+   *   `activity` names the run's activity instead of this instance's default
    * @returns {AsyncGenerator}          LLM streaming response
    */
   runWithGenerator(options) {
