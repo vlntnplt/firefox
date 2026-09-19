@@ -2,16 +2,10 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-const {
-  DEFAULT_ENGINE_ID,
-  MODEL_FEATURES,
-  openAIEngine,
-  renderPrompt,
-  SERVICE_TYPES,
-  PURPOSES,
-} = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
-);
+const { MODEL_FEATURES, openAIEngine, renderPrompt, SERVICE_TYPES, PURPOSES } =
+  ChromeUtils.importESModule(
+    "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
+  );
 
 const { sinon } = ChromeUtils.importESModule(
   "resource://testing-common/Sinon.sys.mjs"
@@ -87,10 +81,16 @@ add_task(async function test_createOpenAIEngine_with_chat_feature() {
     Assert.equal(opts.baseURL, ENDPOINT, "baseURL should come from pref");
     Assert.equal(
       opts.engineId,
-      `${DEFAULT_ENGINE_ID}-${MODEL_FEATURES.CHAT}-${opts.modelId}`,
-      "engineId should be derived from the feature name and model"
+      "sw-mlpa-completions",
+      "one engine serves the MLPA endpoint"
     );
-    Assert.ok(opts.modelId, "modelId should be set");
+    Assert.equal(opts.config, "mlpa-completions", "config names the endpoint");
+    Assert.equal(opts.featureId, "sw-chat", "the chat record is sw-chat");
+    Assert.equal(
+      opts.modelId,
+      undefined,
+      "the model travels with each request"
+    );
     Assert.equal(opts.modelRevision, "main", "modelRevision should be main");
     Assert.equal(
       opts.taskName,

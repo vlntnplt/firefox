@@ -127,17 +127,14 @@ export class TelemetryPromptEngine {
       apiKey: "",
       backend: "openai",
       baseURL: lazy.openAIEngine.endpoint,
+      ...lazy.openAIEngine.engineIdentity(lazy.openAIEngine.endpoint),
       featureId: "sw-chat",
-      config: "llm-telemetry",
-      engineId: "llm-telemetry-engine",
       flowId: null,
-      modelId: promptRecord.model ?? null,
       modelRevision: "main",
       taskName: "text-generation",
       serviceType: promptRecord.service_type ?? "ai",
       purpose: promptRecord.purpose ?? "chat",
       extraHeaders,
-      maxRetries: 0,
     });
 
     return engine;
@@ -187,6 +184,10 @@ export class TelemetryPromptEngine {
       {
         fxAccountToken,
         args: [{ role: "system", content: prompt }],
+        modelId: this.#promptRecord.model ?? null,
+        serviceType: this.#promptRecord.service_type ?? "ai",
+        purpose: this.#promptRecord.purpose ?? "chat",
+        maxRetries: 0,
       },
       { activity: "grade-conversation" }
     );

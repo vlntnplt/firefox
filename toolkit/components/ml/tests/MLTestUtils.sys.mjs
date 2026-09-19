@@ -14,12 +14,12 @@
  */
 
 /**
- * @typedef {string | string[] | ChunkResponse | ChunkResponse[] | EngineResponses["chat"]} MockedResponse
+ * @typedef {string | string[] | ChunkResponse | ChunkResponse[] | EngineResponses["mlpa-completions"]} MockedResponse
  */
 
 /**
  * @typedef {object} MockedRequest
- * @property {EngineRequests["chat"]} request
+ * @property {EngineRequests["mlpa-completions"]} request
  * @property {(response: MockedResponse) => void} resolve
  * @property {(reason: any) => void} reject
  */
@@ -335,7 +335,7 @@ export class MockLLMEngine {
    * into a chunks only in the runWithGenerator method.
    *
    * @param {EngineRequests[FeatureID]} request
-   * @returns {Promise<EngineResponses["chat"]>}
+   * @returns {Promise<EngineResponses["mlpa-completions"]>}
    */
   async run(request) {
     const requestId = this.#nextRequestId++;

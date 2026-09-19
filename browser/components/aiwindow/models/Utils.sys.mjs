@@ -124,11 +124,6 @@ const modelPrefObserver = {
 Services.prefs.addObserver(MODEL_PREF, modelPrefObserver);
 
 /**
- * Default engine ID used for all AI Window features
- */
-export const DEFAULT_ENGINE_ID = "smart-openai";
-
-/**
  * Feature identifiers for AI Window model, configurations and prompts.
  * These are used to look up model configs, prompts, and inference parameters
  * from Remote Settings or local defaults.

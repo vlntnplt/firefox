@@ -455,7 +455,7 @@ describe("SmartWindowRequestResponseTelemetry", () => {
 
     const chatCreateCalls = createEngineSpy
       .getCalls()
-      .filter(call => call.args[0]?.config === "chat");
+      .filter(call => call.args[0]?.purpose === "chat");
     Assert.greaterOrEqual(
       chatCreateCalls.length,
       1,

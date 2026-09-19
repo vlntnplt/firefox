@@ -165,9 +165,14 @@ add_task(
         "baseURL should come from pref"
       );
       Assert.equal(
-        opts.modelId,
+        engine.model,
         "nonexistent-model",
-        "modelId should use custom model with custom endpoint"
+        "the custom model is sent with each request"
+      );
+      Assert.equal(
+        opts.engineId,
+        "sw-custom-completions",
+        "a custom endpoint gets its own shared engine"
       );
     } finally {
       sb.restore();
@@ -817,7 +822,7 @@ add_task(async function test_Chat_fetchWithHistory_uses_modelId_from_pref() {
     });
     conversation.addAssistantMessage("text", "");
 
-    await openAIEngine.build({
+    const engine = await openAIEngine.build({
       model: customModelId,
       serviceType: SERVICE_TYPES.AI,
       purpose: PURPOSES.CHAT,
@@ -835,11 +840,10 @@ add_task(async function test_Chat_fetchWithHistory_uses_modelId_from_pref() {
       createEngineStub.calledOnce,
       "_createEngine should be called once"
     );
-    const createEngineArgs = createEngineStub.firstCall.args[0];
     Assert.equal(
-      createEngineArgs.modelId,
+      engine.model,
       customModelId,
-      "Engine should be created with the custom model from pref"
+      "The custom model from the pref is sent with each request"
     );
   } finally {
     sb.restore();

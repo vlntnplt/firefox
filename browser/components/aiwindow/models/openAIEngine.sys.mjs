@@ -22,7 +22,8 @@ const APIKEY_PREF = "browser.smartwindow.apiKey";
 const ENDPOINT_PREF = "browser.smartwindow.endpoint";
 const CUSTOM_ENDPOINT_PREF = "browser.smartwindow.customEndpoint";
 const CUSTOM_MODEL_CHOICE_ID = "0";
-const DEFAULT_ENGINE_ID = "smart-openai";
+const MLPA_ENDPOINT_NAME = "mlpa";
+const CUSTOM_ENDPOINT_NAME = "custom";
 
 /**
  * The default endpoint used for preset models
@@ -39,16 +40,15 @@ export class openAIEngine {
   static _createEngine = createEngine;
 
   /**
-   * Main feature name. Retained on the instance so _recreateEngine() can
-   * rebuild after 401 retry without the caller re-supplying it.
+   * The model config (a MODEL_FEATURES value) this instance was built for.
    *
    * @type {string | null}
    */
   feature = null;
 
   /**
-   * The ML feature this instance's runs are attributed to, and the activity
-   * they carry unless a run names another one.
+   * The ML feature the shared endpoint engine attributes this instance's runs
+   * to, and the activity they carry unless a run names another one.
    *
    * @type {string | null}
    */
@@ -58,40 +58,25 @@ export class openAIEngine {
   activity = null;
 
   /**
-   * Resolved model name for LLM inference. Retained on the instance for
-   * _recreateEngine() (same reason as `feature`).
+   * Resolved model name for LLM inference, sent with each request.
    *
    * @type {string | null}
    */
   model = null;
 
   /**
-   * Engine ID used for creating the engine instance
-   *
-   * @type {string | null}
-   */
-  #engineId = null;
-
-  /**
-   * Service type used for creating the engine instance
+   * Service type sent with each request ("ai", "memories", "agent").
    *
    * @type {string | null}
    */
   #serviceType = null;
 
   /**
-   * Purpose used for creating the engine instance
+   * Purpose header sent with each request, used by the backend for routing.
    *
    * @type {string | null}
    */
   #purpose = null;
-
-  /**
-   * Flow ID for correlating frontend and backend telemetry.
-   *
-   * @type {string | null}
-   */
-  #flowId = null;
 
   /**
    * Base URL for this engine instance. Resolved during build time from
@@ -100,13 +85,6 @@ export class openAIEngine {
    * @type {string | null}
    */
   #baseURL = null;
-
-  /**
-   * Resolved API key for this engine instance.
-   *
-   * @type {string | null}
-   */
-  #apiKey = null;
 
   /**
    * Checks whether a custom endpoint is configured via pref.
@@ -124,6 +102,25 @@ export class openAIEngine {
    */
   get isCustomEndpoint() {
     return this.#baseURL !== null && this.#baseURL !== openAIEngine.endpoint;
+  }
+
+  /**
+   * The engine every call to an endpoint shares. The model, purpose and
+   * service type travel with each request, so nothing else distinguishes
+   * calls at the engine level.
+   *
+   * @param {string} baseURL
+   * @returns {{ engineId: string, config: string }}
+   */
+  static engineIdentity(baseURL) {
+    const endpoint =
+      baseURL === openAIEngine.endpoint
+        ? MLPA_ENDPOINT_NAME
+        : CUSTOM_ENDPOINT_NAME;
+    return {
+      engineId: `sw-${endpoint}-completions`,
+      config: `${endpoint}-completions`,
+    };
   }
 
   /**
@@ -170,8 +167,6 @@ export class openAIEngine {
     apiKey = "",
   }) {
     const engine = new openAIEngine();
-    const engineId = `${DEFAULT_ENGINE_ID}-${feature}-${model}`;
-    engine.#engineId = engineId;
     engine.feature = feature;
     if (feature) {
       const attribution = lazy.mlAttributionForModelFeature(feature);
@@ -181,19 +176,15 @@ export class openAIEngine {
     engine.model = model;
     engine.#serviceType = serviceType;
     engine.#purpose = purpose;
-    engine.#flowId = flowId;
     engine.#baseURL = baseURL;
-    engine.#apiKey = apiKey;
-    engine.engineInstance = await openAIEngine.#createOpenAIEngine(
-      engineId,
+    engine.engineInstance = await openAIEngine.#createOpenAIEngine({
       serviceType,
       purpose,
-      model,
       flowId,
-      feature,
+      featureId: engine.featureId,
       baseURL,
-      apiKey
-    );
+      apiKey,
+    });
     return engine;
   }
 
@@ -264,29 +255,25 @@ export class openAIEngine {
   }
 
   /**
-   * Creates an OpenAI engine instance
+   * Creates (or reuses) the engine for an endpoint.
    *
-   * @param {string} engineId     The identifier for the engine instance
-   * @param {string} serviceType  The type of message to be sent ("ai", "memories", "s2s")
-   * @param {string} purpose      The purpose of the request, used for telemetry tracking
-   * @param {string | null} modelId  The resolved model ID (already contains fallback logic)
-   * @param {string | null} flowId   Flow ID for correlating frontend and backend telemetry
-   * @param {string | null} feature - The model config (a MODEL_FEATURES
-   *   value), the engine's config; its ML feature id is the engine's featureId
-   * @param {string} baseURL - The endpoint base URL for this engine instance
-   * @param {string} apiKey - The API key for this engine instance
+   * @param {object} options
+   * @param {string} options.serviceType  Default service type ("ai", "memories", "agent")
+   * @param {string} options.purpose      Default purpose header
+   * @param {string | null} [options.flowId]   Flow ID for correlating frontend and backend telemetry
+   * @param {string | null} [options.featureId] - The ML feature id runs are attributed to
+   * @param {string} options.baseURL - The endpoint base URL
+   * @param {string} options.apiKey - The API key for the endpoint
    * @returns {Promise<object>} - The configured engine instance
    */
-  static async #createOpenAIEngine(
-    engineId,
+  static async #createOpenAIEngine({
     serviceType,
     purpose,
-    modelId = null,
     flowId = null,
-    feature = null,
+    featureId = null,
     baseURL,
-    apiKey
-  ) {
+    apiKey,
+  }) {
     const extraHeadersPref = Services.prefs.getStringPref(
       "browser.smartwindow.extraHeaders",
       "{}"
@@ -304,13 +291,9 @@ export class openAIEngine {
         apiKey,
         backend: "openai",
         baseURL,
-        engineId,
-        featureId: feature
-          ? lazy.mlAttributionForModelFeature(feature).featureId
-          : null,
-        config: feature,
+        ...openAIEngine.engineIdentity(baseURL),
+        featureId,
         flowId,
-        modelId,
         modelRevision: "main",
         taskName: "text-generation",
         serviceType,
@@ -338,6 +321,22 @@ export class openAIEngine {
   }
 
   /**
+   * The request as the shared endpoint engine expects it: with the model,
+   * service type and purpose this instance was built for.
+   *
+   * @param {object} content
+   * @returns {object}
+   */
+  #request(content) {
+    return {
+      ...content,
+      modelId: this.model,
+      serviceType: this.#serviceType,
+      purpose: this.#purpose,
+    };
+  }
+
+  /**
    * Helper method to handle 401 authentication errors and retry with new token.
    *
    * @param {Map<string, any>} content  OpenAI formatted messages to be sent to the LLM
@@ -346,7 +345,9 @@ export class openAIEngine {
    */
   async _runWithAuth(content, activity = this.activity) {
     try {
-      return await this.engineInstance.run(content, { activity });
+      return await this.engineInstance.run(this.#request(content), {
+        activity,
+      });
     } catch (ex) {
       // Skip the token retry flow when using a custom endpoint,
       // as the retry logic only applies to FxAccounts tokens.
@@ -364,13 +365,13 @@ export class openAIEngine {
         await fxAccounts.removeCachedOAuthToken({ token: oldToken });
       }
 
-      await this._recreateEngine();
-
       const newToken = await openAIEngine.getFxAccountToken();
       const updatedContent = { ...content, fxAccountToken: newToken };
 
       try {
-        return await this.engineInstance.run(updatedContent, { activity });
+        return await this.engineInstance.run(this.#request(updatedContent), {
+          activity,
+        });
       } catch (retryEx) {
         if (!this._is401Error(retryEx)) {
           throw retryEx;
@@ -387,30 +388,6 @@ export class openAIEngine {
         throw retryEx;
       }
     }
-  }
-
-  /**
-   * Recreates the engine instance with current configuration.
-   *
-   * @returns {Promise<void>}
-   * @private
-   */
-  async _recreateEngine() {
-    if (!this.#engineId || !this.#serviceType) {
-      console.warn("Cannot recreate engine: missing engineId or serviceType");
-      return;
-    }
-
-    this.engineInstance = await openAIEngine.#createOpenAIEngine(
-      this.#engineId,
-      this.#serviceType,
-      this.#purpose,
-      this.model,
-      this.#flowId,
-      this.feature,
-      this.#baseURL,
-      this.#apiKey
-    );
   }
 
   /**
@@ -438,9 +415,10 @@ export class openAIEngine {
     // AbortSignal cannot be cloned via postMessage (structured clone algorithm).
     const { signal, activity = this.activity, ...engineOptions } = options;
     try {
-      const generator = this.engineInstance.runWithGenerator(engineOptions, {
-        activity,
-      });
+      const generator = this.engineInstance.runWithGenerator(
+        this.#request(engineOptions),
+        { activity }
+      );
       for await (const chunk of generator) {
         if (signal?.aborted) {
           return;
@@ -464,15 +442,14 @@ export class openAIEngine {
         await fxAccounts.removeCachedOAuthToken({ token: oldToken });
       }
 
-      await this._recreateEngine();
-
       const newToken = await openAIEngine.getFxAccountToken();
       const updatedOptions = { ...engineOptions, fxAccountToken: newToken };
 
       try {
-        const generator = this.engineInstance.runWithGenerator(updatedOptions, {
-          activity,
-        });
+        const generator = this.engineInstance.runWithGenerator(
+          this.#request(updatedOptions),
+          { activity }
+        );
         for await (const chunk of generator) {
           if (signal?.aborted) {
             return;

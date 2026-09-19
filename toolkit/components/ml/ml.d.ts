@@ -41,7 +41,7 @@ export type EngineRequests = EnsureAllFeatures<{
   "smart-intent": UntypedEngineRequest;
   "smart-tab-topic": UntypedEngineRequest;
   "formfill-classification": UntypedEngineRequest;
-  chat: UntypedEngineRequest;
+  "mlpa-completions": UntypedEngineRequest;
 
   "suggest-intent-classification": {
     /**
@@ -455,7 +455,7 @@ interface ClassificationMetrics extends BaseMetrics {
 
 export type EngineResponses = EnsureAllFeatures<{
   "about-inference": UntypedEngineResponse;
-  chat: ChatEngineResponse;
+  "mlpa-completions": ChatEngineResponse;
   "link-preview": UntypedEngineResponse;
   "pdfjs-alt-text": UntypedEngineResponse;
   "simple-text-embedder": UntypedEngineResponse;

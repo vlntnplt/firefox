@@ -134,6 +134,15 @@ export const DEFAULT_MODELS = Object.freeze({
 });
 
 /**
+ * The remote completions engines Smart Window shares, one per endpoint; see
+ * browser/components/aiwindow/models/openAIEngine.sys.mjs.
+ */
+const SW_COMPLETIONS_ENGINE_IDS = [
+  "sw-mlpa-completions",
+  "sw-custom-completions",
+];
+
+/**
  * The shared text embedder engine; see
  * toolkit/components/ml/content/nlp/EmbeddingsGenerator.sys.mjs.
  */
@@ -227,7 +236,7 @@ export const FEATURES = {
   },
   // see browser/components/aiwindow/models/Chat.sys.mjs
   "sw-chat": {
-    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    engineIds: [...SW_COMPLETIONS_ENGINE_IDS, ...TEXT_EMBEDDER_ENGINE_IDS],
     activities: [
       "answer-turn",
       "answer-with-tool-result",
@@ -239,17 +248,17 @@ export const FEATURES = {
   },
   // see browser/components/aiwindow/models/ConversationSuggestions.sys.mjs
   "sw-suggestions": {
-    engineIds: [],
+    engineIds: SW_COMPLETIONS_ENGINE_IDS,
     activities: ["draft-starters", "draft-followups", "draft-resume"],
   },
   // see browser/components/aiwindow/models/search/SearchWorkflow.sys.mjs
   "sw-tool-search-web": {
-    engineIds: [],
+    engineIds: SW_COMPLETIONS_ENGINE_IDS,
     activities: ["answer-search"],
   },
   // see browser/components/aiwindow/models/aitab/AITab.sys.mjs
   "sw-tool-aitab": {
-    engineIds: [],
+    engineIds: SW_COMPLETIONS_ENGINE_IDS,
     activities: ["generate-page"],
   },
   // see browser/components/aiwindow/models/SearchBrowsingHistory.sys.mjs
@@ -270,7 +279,7 @@ export const FEATURES = {
   // see browser/components/aiwindow/models/memories/Memories.sys.mjs and
   // browser/components/aiwindow/services/MemoryStore.sys.mjs
   "sw-memories": {
-    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    engineIds: [...SW_COMPLETIONS_ENGINE_IDS, ...TEXT_EMBEDDER_ENGINE_IDS],
     activities: [
       "generate-memories",
       "filter-memories",
@@ -284,18 +293,22 @@ export const FEATURES = {
   // model can be updated independently of the shared smart-tab-topic model.
   // see browser/components/aiwindow/ui/modules/AutoTabGroupingSuggestions.sys.mjs
   "sw-auto-tab-grouping": {
-    engineIds: ["smart-window-tab-topic-engine", ...TEXT_EMBEDDER_ENGINE_IDS],
+    engineIds: [
+      "smart-window-tab-topic-engine",
+      ...SW_COMPLETIONS_ENGINE_IDS,
+      ...TEXT_EMBEDDER_ENGINE_IDS,
+    ],
     activities: ["embed-tabs", "label-group", "name-group"],
     fluentId: "mlmodel-smart-tab-topic-engine",
   },
   // see browser/components/aiwindow/models/SmartFormFillModel.sys.mjs
   "sw-form-autofill": {
-    engineIds: TEXT_EMBEDDER_ENGINE_IDS,
+    engineIds: [...SW_COMPLETIONS_ENGINE_IDS, ...TEXT_EMBEDDER_ENGINE_IDS],
     activities: ["fill-form", "query-memories"],
   },
   // see browser/components/aiwindow/models/agents/Monitor.sys.mjs
   "sw-monitor": {
-    engineIds: [],
+    engineIds: SW_COMPLETIONS_ENGINE_IDS,
     activities: ["check-page"],
   },
 };
