@@ -640,3 +640,69 @@ add_task(async function test_openai_fxaccount_token() {
     await stopMockOpenAI(mockServer);
   }
 });
+
+/**
+ * A remote engine serves an endpoint: the model comes with each request, no
+ * task default is filled in, and engine_run reports the request's model.
+ */
+add_task(async function test_openai_model_per_request() {
+  const { cleanup } = await setup();
+  const bodies = [];
+  const { server: mockServer, port } = startMockOpenAI({
+    onBody: body => bodies.push(body),
+  });
+
+  const engineInstance = await createEngine({
+    featureId: "about-inference",
+    taskName: "text-generation",
+    apiKey: "ollama",
+    baseURL: `http://localhost:${port}/v1`,
+    backend: "openai",
+  });
+
+  try {
+    await engineInstance.run({
+      args: [{ role: "user", content: "hi" }],
+      modelId: "per-request-model",
+    });
+
+    Assert.equal(
+      bodies.at(-1)?.model,
+      "per-request-model",
+      "The request's model reaches the endpoint"
+    );
+    Assert.equal(
+      engineInstance.pipelineOptions.modelId,
+      null,
+      "No task default model is filled in for a remote engine"
+    );
+    const { extra } = Glean.firefoxAiRuntime.engineRun.testGetValue().at(-1);
+    Assert.equal(
+      extra.model_id,
+      "per-request-model",
+      "engine_run reports the request's model"
+    );
+
+    for await (const chunk of engineInstance.runWithGenerator({
+      args: [{ role: "user", content: "hi" }],
+      modelId: "per-request-stream",
+      streamOptions: { enabled: true },
+    })) {
+      void chunk;
+    }
+    Assert.equal(
+      engineInstance.modelId,
+      "per-request-stream",
+      "A streamed run reports its model to the parent"
+    );
+    Assert.equal(
+      Glean.firefoxAiRuntime.engineRun.testGetValue().at(-1).extra.model_id,
+      "per-request-stream",
+      "engine_run reports a streamed run's model"
+    );
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+    await stopMockOpenAI(mockServer);
+  }
+});

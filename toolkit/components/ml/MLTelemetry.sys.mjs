@@ -335,22 +335,31 @@ export class MLTelemetry {
   /**
    * Records a failed inference run event.
    *
-   * @param {string|object} error - The error class/message or object.
-   * @param {string} [flow_id=this.#flowId] - The flow ID. Uses instance flowId if not provided.
+   * @param {object} options
+   * @param {unknown} options.error - The error class/message or object.
+   * @param {string | null} [options.engineId]
+   * @param {string | null} [options.modelId]
+   * @param {string} [options.flow_id=this.flowId]
    */
-  recordRunInferenceFailure(error, flow_id = this.flowId) {
+  recordRunInferenceFailure({
+    error,
+    engineId = null,
+    modelId = null,
+    flow_id = this.flowId,
+  }) {
     // Ensure error is always a string
     const errorString = error instanceof Error ? error.message : String(error);
 
-    Glean.firefoxAiRuntime.runInferenceFailure.record({
+    const payload = {
       flow_id,
+      featureId: this.#featureId,
+      engineId,
+      modelId,
       error: errorString,
-    });
+    };
+    Glean.firefoxAiRuntime.runInferenceFailure.record(payload);
 
-    this.logEventToConsole(this.recordRunInferenceFailure, {
-      flow_id,
-      error: errorString,
-    });
+    this.logEventToConsole(this.recordRunInferenceFailure, payload);
   }
 
   /**

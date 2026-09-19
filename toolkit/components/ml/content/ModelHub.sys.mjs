@@ -1861,7 +1861,7 @@ export class ModelHub {
       modelHubRootUrl,
       modelHubUrlTemplate,
       progressCallback,
-      featureId: featureId || engineId,
+      featureId,
       sessionId: sessionId || `${engineId}-${Date.now()}`,
     });
 

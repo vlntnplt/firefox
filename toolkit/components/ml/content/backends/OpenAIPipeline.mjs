@@ -405,16 +405,13 @@ export class OpenAIPipeline {
   ) {
     lazy.console.debug("Running OpenAI pipeline");
     try {
-      const {
-        baseURL,
-        apiKey,
-        modelId,
-        serviceType,
-        purpose,
-        extraHeaders,
-        engineId,
-        maxRetries,
-      } = this.#options;
+      const { baseURL, apiKey, extraHeaders, engineId } = this.#options;
+      // One engine serves an endpoint: the model, purpose, service type and
+      // retry budget travel with each request, the engine options are defaults.
+      const modelId = request.modelId ?? this.#options.modelId;
+      const serviceType = request.serviceType ?? this.#options.serviceType;
+      const purpose = request.purpose ?? this.#options.purpose;
+      const maxRetries = request.maxRetries ?? this.#options.maxRetries;
       const fxAccountToken = request.fxAccountToken
         ? request.fxAccountToken
         : null;

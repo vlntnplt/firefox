@@ -411,8 +411,9 @@ class EngineDispatcher {
     let mergedOptions = new lazy.PipelineOptions(remoteSettingsOptions);
     mergedOptions.updateOptions(pipelineOptions);
 
-    // If the merged options don't have a modelId and we have a default modelId, we set it
-    if (!mergedOptions.modelId) {
+    // If the merged options don't have a modelId and we have a default modelId, we set it.
+    // A remote endpoint engine takes its model from each request instead.
+    if (!mergedOptions.modelId && mergedOptions.backend !== "openai") {
       const defaultModelEntry = this.#taskName
         ? lazy.DEFAULT_MODELS[this.#taskName]
         : null;
@@ -652,6 +653,7 @@ class EngineDispatcher {
               error: null,
               resourcesBefore,
               resourcesAfter,
+              modelId: request?.modelId ?? this.pipelineOptions?.modelId,
             });
           } catch (error) {
             port.postMessage({
@@ -659,6 +661,7 @@ class EngineDispatcher {
               requestId,
               response: null,
               error,
+              modelId: request?.modelId ?? this.pipelineOptions?.modelId,
             });
           }
           this.#status = "IDLE";

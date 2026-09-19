@@ -1049,6 +1049,19 @@ export class MLEngine {
   engineStatus = "uninitialized";
 
   /**
+   * Model id the child reported on the last run response: the one resolved
+   * from Remote Settings or the task default when the caller pinned none, or
+   * the request's own model on engines shared across models.
+   *
+   * @type {string | null}
+   */
+  resolvedModelId = null;
+
+  get modelId() {
+    return this.pipelineOptions.modelId ?? this.resolvedModelId;
+  }
+
+  /**
    * Whether this engine is currently registered as an "ipc:content-shutdown"
    * observer. Used to avoid removing an observer that was never added, which
    * would throw NS_ERROR_ILLEGAL_VALUE.
@@ -1406,12 +1419,26 @@ export class MLEngine {
         break;
       }
       case "EnginePort:RunResponse": {
-        const { response, error, requestId, resourcesBefore, resourcesAfter } =
-          data;
+        const {
+          response,
+          error,
+          requestId,
+          resourcesBefore,
+          resourcesAfter,
+          modelId,
+        } = data;
+        if (modelId) {
+          this.resolvedModelId = modelId;
+        }
         const request = this.#requests.get(requestId);
         if (request) {
+          request.modelId = modelId ?? this.modelId;
           if (error) {
-            this.telemetry.recordRunInferenceFailure(error);
+            this.telemetry.recordRunInferenceFailure({
+              error,
+              engineId: this.engineId,
+              modelId: request.modelId,
+            });
             request.reject(error);
           } else if (response) {
             this.telemetry.recordRunInferenceSuccessFlow(
@@ -1555,7 +1582,8 @@ export class MLEngine {
     /** @type {PromiseWithResolvers<EngineResponses[FeatureID]>} */
     const resolvers = Promise.withResolvers();
     const requestId = this.#nextRequestId++;
-    this.#requests.set(requestId, resolvers);
+    const pending = { ...resolvers };
+    this.#requests.set(requestId, pending);
     let transferables = [];
     if (
       request &&
@@ -1590,7 +1618,7 @@ export class MLEngine {
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
       engineId: this.engineId,
-      modelId: this.pipelineOptions.modelId,
+      modelId: pending.modelId ?? this.modelId,
       backend: this.pipelineOptions.backend,
       backendSourceRevision:
         this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
@@ -1724,7 +1752,7 @@ export class MLEngine {
           "MLEngineParent",
           { startTime: chunkStartTime },
           `chunk generated ${markerText}` +
-            ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
+            ` (${this.pipelineOptions.backend} ${this.modelId})`
         );
 
         chunkStartTime = ChromeUtils.now();
@@ -1775,7 +1803,7 @@ export class MLEngine {
       "MLEngineParent",
       { startTime },
       `runWithGenerator generated ${markerText}` +
-        ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
+        ` (${this.pipelineOptions.backend} ${this.modelId})`
     );
 
     this.telemetry.recordEngineRun({
@@ -1783,7 +1811,7 @@ export class MLEngine {
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
       engineId: this.engineId,
-      modelId: this.pipelineOptions.modelId,
+      modelId: responseChunkResolvers.modelId ?? this.modelId,
       backend: this.pipelineOptions.backend,
       backendSourceRevision:
         this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,

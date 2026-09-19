@@ -7,7 +7,7 @@ const RAW_PIPELINE_OPTIONS = {
   taskName: "moz-echo",
   timeoutMS: -1,
   modelId: "Mozilla/test",
-  featureId: "test-feature",
+  featureId: "about-inference",
   backend: "test-backend",
 };
 
@@ -19,7 +19,7 @@ const { MLTelemetry } = ChromeUtils.importESModule(
   "chrome://global/content/ml/MLTelemetry.sys.mjs"
 );
 
-function getGleanCount(metricsName, engineId = "default-engine") {
+function getGleanCount(metricsName, label = "about-inference") {
   var metrics = Glean.firefoxAiRuntime[metricsName];
 
   // events
@@ -28,7 +28,7 @@ function getGleanCount(metricsName, engineId = "default-engine") {
   }
 
   // labeled timing distribution
-  return metrics[engineId]?.testGetValue()?.count || 0;
+  return metrics[label]?.testGetValue()?.count || 0;
 }
 
 const TELEMETRY_TEST_STUB_URL =
@@ -122,8 +122,8 @@ add_task(async function test_default_telemetry() {
     checkNumber("memory_bytes");
     checkNumber("system_memory_mb");
 
-    Assert.equal(extra.feature_id, "test-feature");
-    Assert.equal(extra.engine_id, "default-engine");
+    Assert.equal(extra.feature_id, "about-inference");
+    Assert.equal(extra.engine_id, "about-inference");
     Assert.equal(extra.model_id, "Mozilla/test");
     Assert.equal(extra.backend, "test-backend");
   }
@@ -154,6 +154,33 @@ add_task(async function test_default_telemetry() {
   Assert.equal(
     getGleanCount("engineCreationFailure"),
     engineCreationFailureCount
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
+/**
+ * Check that engine_run reports the model the child resolved from Remote
+ * Settings when the caller did not pin one.
+ */
+add_task(async function test_engine_run_reports_resolved_model() {
+  const { cleanup, remoteClients } = await setup();
+  const options = { ...RAW_PIPELINE_OPTIONS };
+  delete options.modelId;
+
+  const engineInstance = await createEngine(options);
+  const inferencePromise = engineInstance.run({ data: "echo" });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  await inferencePromise;
+
+  const { extra } = Glean.firefoxAiRuntime.engineRun.testGetValue().at(-1);
+  Assert.equal(extra.feature_id, "about-inference");
+  Assert.equal(extra.engine_id, "about-inference");
+  Assert.equal(
+    extra.model_id,
+    "mozilla/distilvit",
+    "The model resolved from Remote Settings is reported"
   );
 
   await EngineProcess.destroyMLEngine();
@@ -202,6 +229,15 @@ add_task(async function test_ml_engine_run_failure() {
     getGleanCount("runInferenceFailure"),
     runInferenceFailureCount + 1
   );
+  {
+    const { extra } = Glean.firefoxAiRuntime.runInferenceFailure
+      .testGetValue()
+      .at(-1);
+    Assert.equal(extra.featureId, "about-inference");
+    Assert.equal(extra.engineId, "about-inference");
+    Assert.equal(extra.modelId, "Mozilla/test");
+    Assert.ok(extra.error, "The error is reported");
+  }
 
   Assert.equal(
     getGleanCount("engineCreationFailure"),

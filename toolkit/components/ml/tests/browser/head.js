@@ -926,6 +926,7 @@ function readRequestBody(request) {
  * @param {object} [options]
  * @param {string} [options.echo] - Text echoed back on the non-streaming path.
  * @param {Function|null} [options.onRequest] - Called with each raw request.
+ * @param {Function|null} [options.onBody] - Called with each parsed request body.
  * @param {boolean} [options.holdStreamOpenAfterFinish] - When true, the
  *   streaming tool-call turn stops talking after finish_reason and never closes
  *   the connection, so the client is the only thing that can end the turn.
@@ -933,6 +934,7 @@ function readRequestBody(request) {
 function startMockOpenAI({
   echo = "This gets echoed.",
   onRequest = null,
+  onBody = null,
   holdStreamOpenAfterFinish = false,
 } = {}) {
   const server = new HttpServer();
@@ -962,6 +964,7 @@ function startMockOpenAI({
     } catch (_) {
       body = {};
     }
+    onBody?.(body);
 
     const wantsStream = !!body.stream;
     const tools = Array.isArray(body.tools) ? body.tools : [];
