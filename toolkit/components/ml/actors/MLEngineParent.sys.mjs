@@ -9,7 +9,7 @@ import { MLTelemetry } from "chrome://global/content/ml/MLTelemetry.sys.mjs";
  * @import { RemoteSettingsClient } from "resource://services-settings/RemoteSettingsClient.sys.mjs"
  * @import {
  *   ChunkResponse,
- *   EngineFeatureIds,
+ *   EngineConfigIds,
  *   EngineResponses,
  *   EngineRequests,
  *   ParsedModelHubUrl,
@@ -238,7 +238,7 @@ export class MLEngineParent extends JSProcessActorParent {
   /**
    * Creates a new MLEngine.
    *
-   * @template {EngineFeatureIds} FeatureId
+   * @template {EngineConfigIds} FeatureId
    *
    * If there's an existing engine with the same pipelineOptions, it will be reused.
    *
@@ -426,7 +426,7 @@ export class MLEngineParent extends JSProcessActorParent {
       case "MLEngine:GetInferenceOptions":
         this.checkTaskName(message.json.taskName);
         return MLEngineParent.getInferenceOptions(
-          message.json.featureId,
+          message.json.config,
           message.json.taskName,
           message.json.modelId
         );
@@ -658,25 +658,26 @@ export class MLEngineParent extends JSProcessActorParent {
   }
 
   /**
-   * Gets the inference options from remote settings given a feature id or task name.
+   * Gets the inference options from remote settings given a config name or
+   * task name.
    *
-   * Each feature can store default options in Remote Settings.
+   * A config is the `featureId` field of an `ml-inference-options` record.
+   * We fallback to taskName if there is no config provided or no record
+   * matches it.
    *
-   * We fallback to taskName if there is no featureId provided.
-   *
-   * @param {string} featureId - id of the feature
+   * @param {string} config - name of the model configuration
    * @param {string} taskName - name of the inference task
    * @param {string|null} modelId - name of the model id
    * @returns {Promise<RemoteSettingsInferenceOptions | { runtimeFilename: string }>}
    */
 
-  static async getInferenceOptions(featureId, taskName, modelId) {
+  static async getInferenceOptions(config, taskName, modelId) {
     const client = MLEngineParent.#getRemoteClient(
       RS_INFERENCE_OPTIONS_COLLECTION
     );
 
     /** @type {Record<string, string>} */
-    const filters = featureId ? { featureId } : { taskName };
+    const filters = config ? { featureId: config } : { taskName };
     if (modelId) {
       filters.modelId = modelId;
     }
@@ -684,9 +685,9 @@ export class MLEngineParent extends JSProcessActorParent {
     /** @type {Array<RecordsML["ml-inference-options"]>} */
     let records = /** @type {any[]} */ (await client.get({ filters }));
 
-    // If no records found and we searched by featureId, retry with taskName
-    if (records.length === 0 && featureId) {
-      lazy.console.debug(`No record for feature id "${featureId}"`);
+    // If no records found and we searched by config, retry with taskName
+    if (records.length === 0 && config) {
+      lazy.console.debug(`No record for config "${config}"`);
       /** @type {Record<string, string>} */
       const fallbackFilters = { taskName };
       if (modelId) {
@@ -701,7 +702,7 @@ export class MLEngineParent extends JSProcessActorParent {
     // Handle case where multiple records exist
     if (records.length > 1) {
       throw new Error(
-        `Found more than one inference options record for "${featureId}" and "${taskName}", and no matching modelId in pipelineOptions`
+        `Found more than one inference options record for "${config}" and "${taskName}", and no matching modelId in pipelineOptions`
       );
     }
 
@@ -1015,7 +1016,7 @@ class ResponseOrChunkResolvers {
  * potentially large amounts of memory to run models, with the speed and ease of running
  * the engine.
  *
- * @template {EngineFeatureIds} FeatureID
+ * @template {EngineConfigIds} FeatureID
  */
 export class MLEngine {
   /**
@@ -1188,7 +1189,7 @@ export class MLEngine {
   /**
    * Initialize the MLEngine.
    *
-   * @template {EngineFeatureIds} FeatureId
+   * @template {EngineConfigIds} FeatureId
    *
    * @param {object} config - The configuration object for the instance.
    * @param {MLEngineParent} config.mlEngineParent - The parent machine learning engine associated with this instance.

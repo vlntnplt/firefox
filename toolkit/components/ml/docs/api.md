@@ -61,7 +61,8 @@ Options passed to the `createEngine` function are verified and converted into a 
 Below are the options available:
 
 - **taskName**: The name of the task the pipeline is configured for.
-- **featureId**: The identifier for the feature to be used by the pipeline.
+- **featureId**: The identifier for the browser feature using the pipeline.
+- **config**: The name of the model configuration to resolve from Remote Settings. Defaults to `featureId`.
 - **engineId**: The identifier for the engine to be used by the pipeline.
 - **timeoutMS**: The maximum amount of time in milliseconds the worker will run (-1 to never expire).
 - **modelHub**: The model hub to use, can be `huggingface` or `mozilla`. When used, `modelHubRootUrl` and `modelHubUrlTemplate` are ignored.
@@ -95,8 +96,12 @@ using values pulled from Remote Settings when the task id is recognized.
 To learn about the different inference tasks, refer to this Hugging Face
 documentation: [Tasks](https://huggingface.co/tasks)
 
-**featureId** is used to uniquely identify the feature that will be used by the pipeline
-and store corresponding options in Remote Settings -- {ref}`See the ml-inference-options collection <inference-remote-settings>`.
+**featureId** identifies the browser feature using the pipeline, for telemetry and for
+looking up its engine id in `FEATURES`.
+
+**config** selects the record holding the pipeline options in Remote Settings -- {ref}`See the ml-inference-options collection <inference-remote-settings>`.
+It defaults to `featureId`, so a feature with its own record needs no explicit config, and
+several features can share one record by naming it.
 
 **engineId** is used to manage the lifecycle of the engine. When not provided, it defaults to
 `default-engine`. Everytime a new engine is created using `createEngine`, the API will ensure that

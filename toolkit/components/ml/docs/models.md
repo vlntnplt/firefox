@@ -71,9 +71,10 @@ That allows us to set the default running options for each task.
 This is also how we can update a model without changing Firefox's code:
 setting a new revision for a model in Remote Settings will trigger a new download for our users.
 
-Records in `ml-inference-options` are uniquely identified by `featureId`. When not provided,
-it falls back to `taskName`. This collection will provide all the options required for that
-feature.
+Records in `ml-inference-options` are uniquely identified by their `featureId` field, which
+the `config` engine option selects (it defaults to the engine's `featureId`). When no record
+matches, the lookup falls back to `taskName`. This collection will provide all the options
+required for that configuration.
 
 For example, the PDF.js image-to-text record is:
 
@@ -90,7 +91,7 @@ For example, the PDF.js image-to-text record is:
 }
 ```
 
-If you are adding in Firefox a new inference call, create a new unique `featureId` in {searchfox}`FEATURES <toolkit/components/ml/content/EngineProcess.sys.mjs>` and add a record in `ml-inference-options` with the task settings.
+If you are adding in Firefox a new inference call, create a new unique `featureId` in {searchfox}`FEATURES <toolkit/components/ml/content/EngineProcess.sys.mjs>` and add a record in `ml-inference-options` with the task settings, or point `config` at an existing record.
 
 By doing this, you will be able to create an engine with this simple call:
 

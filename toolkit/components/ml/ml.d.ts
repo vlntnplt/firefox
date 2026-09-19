@@ -69,10 +69,11 @@ export type EngineRequests = EnsureAllFeatures<{
 }>;
 
 /**
- * We key the @see {MLEngine#run} method off of the featureId and the `MLEngine` create
- * options.
+ * Keys of the typed engine maps: the `config` an engine resolves (the
+ * Remote Settings record name), which is the featureId unless the feature
+ * runs several engines. @see {MLEngine#run} is keyed off of it.
  */
-export type EngineFeatureIds =
+export type EngineConfigIds =
   | "about-inference"
   | "link-preview"
   | "pdfjs-alt-text"
@@ -87,18 +88,19 @@ export type EngineFeatureIds =
  * If a feature is missing, this will turn the type into a `never` and cause type issues.
  */
 type EnsureAllFeatures<T> =
-  Exclude<EngineFeatureIds, keyof T> extends never ? T : never;
+  Exclude<EngineConfigIds, keyof T> extends never ? T : never;
 
 type BasicEngineOptions = Partial<{
   taskName: string;
-  featureId: EngineFeatureIds;
+  featureId: string;
+  config: EngineConfigIds;
   timeoutMS: number;
   numThreads: number;
   backend: string;
 }>;
 
 /**
- * A map of the featureId to the engine create options.
+ * A map of the config to the engine create options.
  */
 export type EngineCreateOptions = EnsureAllFeatures<{
   "about-inference": BasicEngineOptions;
@@ -115,7 +117,7 @@ export type EngineCreateOptions = EnsureAllFeatures<{
 /**
  * This is a type-friendly way to pass around engine options keyed off of the FeatureId.
  */
-export type EngineOptions<FeatureId extends EngineFeatureIds> =
+export type EngineOptions<FeatureId extends EngineConfigIds> =
   EngineRequests[FeatureId]["options"];
 
 /**
@@ -187,8 +189,12 @@ export type MLPerfEngineOptionOverrides = {
 
 /** An engine whose activity is measured by an ML performance scenario. */
 export interface MLPerfEngineConfig {
-  /** The feature ID supplied by production engine options. */
-  featureId: string;
+  /** The config supplied by production engine options. */
+  config?: string;
+
+  /** The feature ID supplied by production engine options, used as the key
+   * when the feature has one engine and no config is given. */
+  featureId?: string;
 
   /** Component inserted into shared metric names for multi-engine scenarios. */
   metricName?: string;
@@ -202,8 +208,8 @@ export interface MLPerfEngineConfig {
 
 /** A completed production engine creation observed during a scenario. */
 export interface MLPerfEngineCreationObservation {
-  /** The feature ID supplied by production engine options. */
-  featureId: string;
+  /** The config of the created engine. */
+  config: string;
 
   /** The engine-creation start time. */
   start: number;
@@ -231,11 +237,11 @@ export interface MLPerfObservedRunResult {
 /** A completed engine run observed during a scenario. */
 export interface MLPerfEngineRunObservation
   extends MLPerfObservedRunResult, MLPerfEngineRunDetails {
-  /** The feature ID supplied by production engine options. */
-  featureId: string;
+  /** The config of the engine that ran. */
+  config: string;
 
   /** The engine used for the run. */
-  engine: MLEngine<EngineFeatureIds>;
+  engine: MLEngine<EngineConfigIds>;
 
   /** The run start time. */
   start: number;

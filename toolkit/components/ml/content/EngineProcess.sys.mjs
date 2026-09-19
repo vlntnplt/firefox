@@ -472,14 +472,21 @@ export class PipelineOptions {
   useExternalDataFormat = false;
 
   /**
-   * The name of the feature to be used by the pipeline.
-   *
-   * This field can be used to uniquely identify an inference and
-   * overwrite taskName when doing lookups in Remote Settings.
+   * The browser feature the engine serves. Used for telemetry and to look up
+   * the engine id in FEATURES.
    *
    * @type {?string}
    */
   featureId = null;
+
+  /**
+   * The model configuration to resolve from Remote Settings: the `featureId`
+   * field of an `ml-inference-options` record. Defaults to featureId, and
+   * falls back to taskName when no record matches.
+   *
+   * @type {?string}
+   */
+  config = null;
 
   /**
    * The name of the task the pipeline is configured for.
@@ -907,6 +914,7 @@ export class PipelineOptions {
     const allowedKeys = [
       "engineId",
       "featureId",
+      "config",
       "taskName",
       "modelHub",
       "modelHubRootUrl",
@@ -1046,6 +1054,10 @@ export class PipelineOptions {
 
       this[key] = options[key];
     });
+
+    if (this.config == null && this.featureId != null) {
+      this.config = this.featureId;
+    }
   }
 
   /**
@@ -1057,6 +1069,7 @@ export class PipelineOptions {
     return {
       engineId: this.engineId,
       featureId: this.featureId,
+      config: this.config,
       taskName: this.taskName,
       modelHub: this.modelHub,
       modelHubRootUrl: this.modelHubRootUrl,
@@ -1450,7 +1463,7 @@ export class EngineProcess {
 /**
  * Creates a new `MLEngine` instance with the provided options.
  *
- * @template {EngineFeatureIds} FeatureID
+ * @template {EngineConfigIds} FeatureID
  *
  * @param {object} options - Configuration options for the ML engine.
  * @param {?function(ProgressAndStatusCallbackParams):void} [notificationsCallback] - A function to call to indicate notifications.

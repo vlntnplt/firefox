@@ -517,6 +517,7 @@ add_task(async function test_ml_engine_get_status_by_engine_id() {
         useExternalDataFormat: false,
         engineId: "default-engine",
         featureId: null,
+        config: null,
         taskName: "moz-echo",
         timeoutMS: 1000,
         modelHubRootUrl:

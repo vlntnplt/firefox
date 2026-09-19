@@ -17,7 +17,7 @@ const lazy = XPCOMUtils.declareLazy({
  * @import {
  *   EngineRequests,
  *   EngineResponses,
- *   EngineFeatureIds,
+ *   EngineConfigIds,
  *   EngineCreateOptions,
  *   EngineOptions
  * } from "../../../../toolkit/components/ml/ml.d.ts"
@@ -39,7 +39,7 @@ const NAME_PUNCTUATION_EXCEPT_DOT = NAME_PUNCTUATION.filter(p => p !== ".");
  */
 class _MLSuggest {
   /**
-   * @type {Partial<{ [K in EngineFeatureIds]: MLEngine<K> }>}
+   * @type {Partial<{ [K in EngineConfigIds]: MLEngine<K> }>}
    */
   #modelEngines = {};
 
@@ -62,7 +62,7 @@ class _MLSuggest {
   /**
    * Helper to wrap createEngine for testing purposes.
    *
-   * @template {EngineFeatureIds} FeatureId
+   * @template {EngineConfigIds} FeatureId
    *
    * @param {EngineOptions<FeatureId>} options
    *   Configuration options for the ML engine.
@@ -169,7 +169,7 @@ class _MLSuggest {
   /**
    * Initializes a engine model.
    *
-   * @template {EngineFeatureIds} FeatureId
+   * @template {EngineConfigIds} FeatureId
    *
    * @param {EngineCreateOptions[FeatureId]} options
    *   Configuration options for the ML engine.
@@ -177,11 +177,12 @@ class _MLSuggest {
    *   The engine, or null if it could not be created.
    */
   async #initializeModelEngine(options) {
-    /** @type {EngineFeatureIds} */
-    const featureId = options.featureId;
+    const config = /** @type {EngineConfigIds} */ (
+      options.config ?? options.featureId
+    );
 
     // uses cache if engine was used
-    let engine = this.#modelEngines[featureId];
+    let engine = this.#modelEngines[config];
     if (engine) {
       return engine;
     }
@@ -193,13 +194,13 @@ class _MLSuggest {
       // back to the wasm backend, so anything reaching here (no model, not
       // enough memory, crashed inference process) leaves us without
       // suggestions rather than being fatal for the caller.
-      console.error(`Failed to create the ${featureId} engine: ${e}`);
+      console.error(`Failed to create the ${config} engine: ${e}`);
       return null;
     }
 
-    // Cache the engine. Cast the featureId to "any" here since there's not an easy
+    // Cache the engine. Cast the config to "any" here since there's not an easy
     // way to assert
-    this.#modelEngines[featureId] = /** @type {MLEngine<any>} */ (engine);
+    this.#modelEngines[config] = /** @type {MLEngine<any>} */ (engine);
     return engine;
   }
 

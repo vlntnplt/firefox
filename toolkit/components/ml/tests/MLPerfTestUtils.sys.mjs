@@ -5,7 +5,7 @@
 /**
  * @import {
  *   EngineCreationInterceptionOptions,
- *   EngineFeatureIds,
+ *   EngineConfigIds,
  *   MLPerfEngineConfig,
  *   MLPerfEngineRunDetails,
  *   MLPerfEngineRunCapture,
@@ -204,42 +204,54 @@ function createInterceptionOptions(overrides = {}) {
 }
 
 /**
+ * The key a measured engine is tracked under: its config, which is the
+ * featureId unless the feature runs several engines.
+ *
+ * @param {{ config?: string, featureId?: string }} engine
+ * @returns {string | undefined}
+ */
+function engineKey(engine) {
+  return engine.config ?? engine.featureId;
+}
+
+/**
  * Validates and indexes the engines measured by a scenario.
  *
  * @param {MLPerfEngineConfig[]} engines - The configured engines.
- * @returns {Map<string, MLPerfEngineConfig>} Engines keyed by feature ID.
+ * @returns {Map<string, MLPerfEngineConfig>} Engines keyed by config.
  */
 function indexEngines(engines) {
-  const enginesByFeatureId = new Map();
+  const enginesByKey = new Map();
 
   for (const engine of engines) {
-    if (!engine.featureId) {
-      throw new TypeError("Each measured engine must have a featureId.");
-    }
-
-    if (enginesByFeatureId.has(engine.featureId)) {
-      throw new Error(
-        `The engine feature ID "${engine.featureId}" is configured more than once.`
+    const key = engineKey(engine);
+    if (!key) {
+      throw new TypeError(
+        "Each measured engine must have a config or featureId."
       );
     }
 
-    enginesByFeatureId.set(engine.featureId, engine);
+    if (enginesByKey.has(key)) {
+      throw new Error(`The engine "${key}" is configured more than once.`);
+    }
+
+    enginesByKey.set(key, engine);
   }
 
-  return enginesByFeatureId;
+  return enginesByKey;
 }
 
 /**
  * Captures completed runs for a set of engine features until cleanup.
  *
- * @param {Map<string, MLPerfEngineConfig>} enginesByFeatureId - Engines keyed by feature ID.
+ * @param {Map<string, MLPerfEngineConfig>} enginesByKey - Engines keyed by config.
  * @returns {MLPerfEngineRunCapture} The observations and cleanup callback.
  */
-function startEngineRunCapture(enginesByFeatureId) {
+function startEngineRunCapture(enginesByKey) {
   /** @type {MLPerfEngineRunObservation[]} */
   const engineRuns = [];
 
-  if (!enginesByFeatureId.size) {
+  if (!enginesByKey.size) {
     return {
       engineRuns,
 
@@ -263,7 +275,7 @@ function startEngineRunCapture(enginesByFeatureId) {
   /**
    * Records a completed engine run.
    *
-   * @param {MLEngine<EngineFeatureIds>} engine - The engine that completed the
+   * @param {MLEngine<EngineConfigIds>} engine - The engine that completed the
    *   run.
    * @param {MLPerfEngineConfig} config - The measured engine configuration.
    * @param {number} start - The run start time.
@@ -274,7 +286,7 @@ function startEngineRunCapture(enginesByFeatureId) {
    */
   const recordRun = (engine, config, start, result, details) => {
     engineRuns.push({
-      featureId: config.featureId,
+      config: engineKey(config),
       engine,
       start,
       end: ChromeUtils.now(),
@@ -287,11 +299,11 @@ function startEngineRunCapture(enginesByFeatureId) {
   /**
    * Returns the measured configuration for an engine.
    *
-   * @param {MLEngine<EngineFeatureIds>} engine - The engine to inspect.
+   * @param {MLEngine<EngineConfigIds>} engine - The engine to inspect.
    * @returns {MLPerfEngineConfig | null} The measured configuration.
    */
   const configForEngine = engine =>
-    enginesByFeatureId.get(engine.pipelineOptions.featureId) ?? null;
+    enginesByKey.get(engineKey(engine.pipelineOptions)) ?? null;
 
   MLEngine.prototype.run = async function (request) {
     const config = configForEngine(this);
@@ -455,7 +467,7 @@ async function measureScenarioInvocation(
     peakMemorySampleIntervalMs = 100,
   } = {}
 ) {
-  const enginesByFeatureId = indexEngines(engines);
+  const enginesByKey = indexEngines(engines);
   let creationPromises = [];
   /** @type {MLPerfEngineRunCapture | null} */
   let runCapture = null;
@@ -464,13 +476,13 @@ async function measureScenarioInvocation(
   let peakMemory;
 
   try {
-    runCapture = startEngineRunCapture(enginesByFeatureId);
+    runCapture = startEngineRunCapture(enginesByKey);
 
-    if (captureEngineCreation && enginesByFeatureId.size) {
-      creationPromises = Array.from(enginesByFeatureId.values(), engine => ({
+    if (captureEngineCreation && enginesByKey.size) {
+      creationPromises = Array.from(enginesByKey.values(), engine => ({
         engine,
         promise: MLTestUtils.interceptEngineCreation(
-          engine.featureId,
+          engineKey(engine),
           createInterceptionOptions(engine.overrides)
         ).then(
           creation => ({ creation }),
@@ -485,7 +497,7 @@ async function measureScenarioInvocation(
     measurements = await scenario(context);
   } finally {
     try {
-      if (captureEngineCreation && enginesByFeatureId.size) {
+      if (captureEngineCreation && enginesByKey.size) {
         MLTestUtils.cleanupEngineCreationInterceptions();
       }
     } finally {
@@ -508,7 +520,7 @@ async function measureScenarioInvocation(
       const { start, end } = result.creation;
 
       return {
-        featureId: engine.featureId,
+        config: engineKey(engine),
         start,
         end,
       };
@@ -617,7 +629,7 @@ function engineMetricPrefix(metricPrefix, engine) {
  * @param {string} metricPrefix - The feature's metric prefix.
  * @param {MLPerfLifecycle} lifecycle - The measured engine lifecycle.
  * @param {MLPerfScenarioObservation} observation - The measured scenario.
- * @param {Map<string, MLPerfEngineConfig>} enginesByFeatureId - Engines keyed by feature ID.
+ * @param {Map<string, MLPerfEngineConfig>} enginesByKey - Engines keyed by config.
  * @returns {void}
  */
 function addObservationMeasurements(
@@ -625,14 +637,14 @@ function addObservationMeasurements(
   metricPrefix,
   lifecycle,
   observation,
-  enginesByFeatureId
+  enginesByKey
 ) {
   addMeasurements(journal, metricPrefix, lifecycle, observation.measurements);
 
   for (const creation of observation.engineCreations) {
     const prefix = engineMetricPrefix(
       metricPrefix,
-      enginesByFeatureId.get(creation.featureId)
+      enginesByKey.get(creation.config)
     );
 
     journal.add(
@@ -644,7 +656,7 @@ function addObservationMeasurements(
   for (const run of observation.engineRuns) {
     const prefix = engineMetricPrefix(
       metricPrefix,
-      enginesByFeatureId.get(run.featureId)
+      enginesByKey.get(run.config)
     );
 
     journal.add(`${prefix}-engine-run-time-${lifecycle}`, run.end - run.start);
@@ -695,15 +707,15 @@ function addObservationMeasurements(
  * Validates engine configuration and indexes it by feature ID.
  *
  * @param {MLPerfEngineConfig[]} engines - The configured engines.
- * @returns {Map<string, MLPerfEngineConfig>} Engines keyed by feature ID.
+ * @returns {Map<string, MLPerfEngineConfig>} Engines keyed by config.
  */
 function validateEngineConfigs(engines) {
-  const enginesByFeatureId = indexEngines(engines);
+  const enginesByKey = indexEngines(engines);
   const metricNames = new Set();
 
   for (const engine of engines) {
     validateIterationCount(
-      `${engine.featureId}.expectedRuns`,
+      `${engineKey(engine)}.expectedRuns`,
       engine.expectedRuns ?? 1
     );
 
@@ -716,7 +728,7 @@ function validateEngineConfigs(engines) {
 
     if (engines.length > 1 && !engine.metricName) {
       throw new Error(
-        `The engine "${engine.featureId}" needs a metricName in a multi-engine scenario.`
+        `The engine "${engineKey(engine)}" needs a metricName in a multi-engine scenario.`
       );
     }
 
@@ -731,7 +743,7 @@ function validateEngineConfigs(engines) {
     }
   }
 
-  return enginesByFeatureId;
+  return enginesByKey;
 }
 
 /**
@@ -751,7 +763,7 @@ function assertPinnedBackend(ctx, observation, backend) {
       ctx.Assert.equal(
         resolved,
         backend,
-        `${engine.pipelineOptions.featureId} resolved to the pinned backend`
+        `${engineKey(engine.pipelineOptions)} resolved to the pinned backend`
       );
     }
   }
@@ -768,13 +780,13 @@ function assertPinnedBackend(ctx, observation, backend) {
 function assertExpectedEngineRuns(ctx, observation, engines) {
   for (const engine of engines) {
     const runCount = observation.engineRuns.filter(
-      run => run.featureId === engine.featureId
+      run => run.config === engineKey(engine)
     ).length;
 
     ctx.Assert.equal(
       runCount,
       engine.expectedRuns ?? 1,
-      `${engine.featureId} ran the expected number of times`
+      `${engineKey(engine)} ran the expected number of times`
     );
   }
 }
@@ -792,14 +804,14 @@ function assertWarmEngineReuse(ctx, warmup, observation, engines) {
   for (const engine of engines) {
     const warmupEngines = new Set(
       warmup.engineRuns
-        .filter(run => run.featureId === engine.featureId)
+        .filter(run => run.config === engineKey(engine))
         .map(run => run.engine)
     );
     const reused = observation.engineRuns
-      .filter(run => run.featureId === engine.featureId)
+      .filter(run => run.config === engineKey(engine))
       .every(run => warmupEngines.has(run.engine));
 
-    ctx.Assert.ok(reused, `${engine.featureId} reused its warm engine`);
+    ctx.Assert.ok(reused, `${engineKey(engine)} reused its warm engine`);
   }
 }
 
@@ -882,7 +894,7 @@ async function runPerfScenario(
     engines = pinEngineBackends(engines, backend);
   }
 
-  const enginesByFeatureId = validateEngineConfigs(engines);
+  const enginesByKey = validateEngineConfigs(engines);
   const journal = createJournal(ctx, metricSuffix);
 
   /**
@@ -960,7 +972,7 @@ async function runPerfScenario(
         metricPrefix,
         "first-use",
         firstUse,
-        enginesByFeatureId
+        enginesByKey
       );
     }
 
@@ -977,7 +989,7 @@ async function runPerfScenario(
         metricPrefix,
         "cold",
         observation,
-        enginesByFeatureId
+        enginesByKey
       );
     }
 
@@ -1000,7 +1012,7 @@ async function runPerfScenario(
           metricPrefix,
           "warm",
           observation,
-          enginesByFeatureId
+          enginesByKey
         );
       }
     }

@@ -116,6 +116,42 @@ add_task(async function test_ml_engine_pick_feature_id() {
 });
 
 /**
+ * `config` selects the Remote Settings record independently of featureId.
+ */
+add_task(async function test_ml_engine_pick_config() {
+  const records = [
+    {
+      featureId: "pdfjs-alt-text",
+      taskName: "moz-echo",
+      modelId: "mozilla/distilvit",
+      modelRevision: "v1.0",
+      dtype: "fp16",
+      id: "74a71cfd-1734-44e6-85c0-69cf3e874138",
+    },
+  ];
+  const { cleanup, remoteClients } = await setup({ records });
+
+  const engineInstance = await createEngine({
+    featureId: "about-inference",
+    config: "pdfjs-alt-text",
+    taskName: "moz-echo",
+  });
+  const inferencePromise = engineInstance.run({ data: "This gets echoed." });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  const res = await inferencePromise;
+
+  Assert.equal(res.output.dtype, "fp16", "The named config's record was used");
+  Assert.equal(
+    engineInstance.pipelineOptions.config,
+    "pdfjs-alt-text",
+    "The config is kept on the pipeline options"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
+/**
  * Tests the generic pipeline API
  */
 add_task(async function test_ml_generic_pipeline() {

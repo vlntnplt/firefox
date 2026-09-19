@@ -7,7 +7,7 @@
  *   ChunkResponse,
  *   EngineCreationInterception,
  *   EngineCreationInterceptionOptions,
- *   EngineFeatureIds,
+ *   EngineConfigIds,
  *   EngineRequests,
  *   EngineResponses,
  * } from "../ml.d.ts"
@@ -91,15 +91,16 @@ function restoreEngineCreation() {
  * @returns {ReturnType<MLEngineParent["getEngine"]>} The production engine.
  */
 async function getEngineWithInterception(params) {
-  const { featureId } = params.pipelineOptions;
-  const interceptor = engineCreationInterceptors.get(featureId);
+  const { config, featureId } = params.pipelineOptions;
+  const key = config ?? featureId;
+  const interceptor = engineCreationInterceptors.get(key);
 
   if (!interceptor) {
     return originalGetEngine.call(this, params);
   }
 
   const getEngine = originalGetEngine;
-  engineCreationInterceptors.delete(featureId);
+  engineCreationInterceptors.delete(key);
 
   const { expectedOptions, overrides, resolve, reject } = interceptor;
   const start = ChromeUtils.now();
@@ -114,7 +115,7 @@ async function getEngineWithInterception(params) {
 
       if (actualValue !== expectedValue) {
         throw new Error(
-          `Expected engine option "${name}" for "${featureId}" to be ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actualValue)}.`
+          `Expected engine option "${name}" for "${key}" to be ${JSON.stringify(expectedValue)}, got ${JSON.stringify(actualValue)}.`
         );
       }
     }
@@ -138,24 +139,26 @@ async function getEngineWithInterception(params) {
 }
 
 /**
- * Observes the next engine creation with the given feature ID.
+ * Observes the next engine creation with the given config (the Remote
+ * Settings record name, which is the featureId unless the feature runs
+ * several engines).
  *
- * @param {string} featureId - The expected feature ID.
- * @param {EngineCreationInterceptionOptions} [config={}] - The interception
+ * @param {string} config - The expected config.
+ * @param {EngineCreationInterceptionOptions} [options={}] - The interception
  *   options.
- * @param {Partial<PipelineOptions>} [config.expectedOptions={}] -
+ * @param {Partial<PipelineOptions>} [options.expectedOptions={}] -
  *   Engine-creation options to assert against.
- * @param {Partial<PipelineOptions>} [config.overrides={}] - Engine-creation
+ * @param {Partial<PipelineOptions>} [options.overrides={}] - Engine-creation
  *   options to override.
  * @returns {Promise<EngineCreationInterception>} The observed creation.
  */
 function interceptEngineCreation(
-  featureId,
+  config,
   { expectedOptions = {}, overrides = {} } = {}
 ) {
-  if (engineCreationInterceptors.has(featureId)) {
+  if (engineCreationInterceptors.has(config)) {
     throw new Error(
-      `An engine creation interceptor is already armed for "${featureId}".`
+      `An engine creation interceptor is already armed for "${config}".`
     );
   }
 
@@ -166,7 +169,7 @@ function interceptEngineCreation(
 
   const { promise, resolve, reject } = Promise.withResolvers();
 
-  engineCreationInterceptors.set(featureId, {
+  engineCreationInterceptors.set(config, {
     expectedOptions,
     overrides,
     resolve,
@@ -183,13 +186,13 @@ function interceptEngineCreation(
  * @throws {Error} If an engine creation remains armed.
  */
 function cleanupEngineCreationInterceptions() {
-  const armedFeatureIds = Array.from(engineCreationInterceptors.keys());
+  const armedConfigs = Array.from(engineCreationInterceptors.keys());
   engineCreationInterceptors.clear();
   restoreEngineCreation();
 
-  if (armedFeatureIds.length) {
+  if (armedConfigs.length) {
     throw new Error(
-      `Engine creation interceptors were still armed for: ${armedFeatureIds.join(", ")}.`
+      `Engine creation interceptors were still armed for: ${armedConfigs.join(", ")}.`
     );
   }
 }
@@ -262,7 +265,7 @@ function createServer(markup, code) {
  *
  * See toolkit/components/ml/tests/browser/browser_ml_mock_llm_engine.js for example usage.
  *
- * @template {EngineFeatureIds} FeatureID
+ * @template {EngineConfigIds} FeatureID
  */
 export class MockLLMEngine {
   #nextRequestId = 0;
