@@ -39,7 +39,6 @@ export type EngineRequests = EnsureAllFeatures<{
   "pdfjs-alt-text": UntypedEngineRequest;
   "simple-text-embedder": UntypedEngineRequest;
   "smart-intent": UntypedEngineRequest;
-  "smart-tab-embedding": UntypedEngineRequest;
   "smart-tab-topic": UntypedEngineRequest;
   "formfill-classification": UntypedEngineRequest;
   chat: UntypedEngineRequest;
@@ -79,7 +78,6 @@ export type EngineFeatureIds =
   | "pdfjs-alt-text"
   | "simple-text-embedder"
   | "smart-intent"
-  | "smart-tab-embedding"
   | "smart-tab-topic"
   | "formfill-classification"
   | "suggest-intent-classification"
@@ -108,7 +106,6 @@ export type EngineCreateOptions = EnsureAllFeatures<{
   "pdfjs-alt-text": BasicEngineOptions;
   "simple-text-embedder": BasicEngineOptions;
   "smart-intent": BasicEngineOptions;
-  "smart-tab-embedding": BasicEngineOptions;
   "smart-tab-topic": BasicEngineOptions;
   "formfill-classification": BasicEngineOptions;
   "suggest-intent-classification": BasicEngineOptions;
@@ -457,7 +454,6 @@ export type EngineResponses = EnsureAllFeatures<{
   "pdfjs-alt-text": UntypedEngineResponse;
   "simple-text-embedder": UntypedEngineResponse;
   "smart-intent": UntypedEngineResponse;
-  "smart-tab-embedding": UntypedEngineResponse;
   "smart-tab-topic": UntypedEngineResponse;
   "formfill-classification": UntypedEngineResponse;
   "suggest-intent-classification": Array<{

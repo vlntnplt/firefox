@@ -189,10 +189,7 @@ add_task(async function testModelHubCard() {
       totalSize: 5 * 1024 * 1024,
       // Testing that a Firefox feature that is mistakenly missing a
       // corresponding fluent id is omitted.
-      usedByFirefoxFeatures: [
-        "non-existing-feature",
-        "smart-tab-embedding-engine",
-      ],
+      usedByFirefoxFeatures: ["non-existing-feature", "smart-tab-topic-engine"],
       // Testing that a non existing extension is omitted.
       usedByAddonIds: ["non-existing@test-extension", extWithIcon.id],
     },
@@ -239,7 +236,7 @@ add_task(async function testModelHubCard() {
     expectedUsedBy: [
       {
         iconURL: FEATURE_ICON,
-        fluentId: featureEngineIdToFluentId("smart-tab-embedding-engine"),
+        fluentId: featureEngineIdToFluentId("smart-tab-topic-engine"),
       },
       {
         iconURL: /\/test-icon\.png$/,
@@ -364,10 +361,7 @@ add_task(async function testModelHubDetails() {
     modelIconURL: "", // testing that empty icon sets to defult svg
     // Testing that a Firefox feature that is mistakenly missing a
     // corresponding fluent id is omitted.
-    usedByFirefoxFeatures: [
-      "non-existing-feature",
-      "smart-tab-embedding-engine",
-    ],
+    usedByFirefoxFeatures: ["non-existing-feature", "smart-tab-topic-engine"],
     // Testing that a non existing extension is omitted.
     usedByAddonIds: ["non-existing@test-extension", extWithIcon.id],
     engineIds: [],
@@ -410,7 +404,7 @@ add_task(async function testModelHubDetails() {
     expectedUsedBy: [
       {
         iconURL: FEATURE_ICON,
-        fluentId: featureEngineIdToFluentId("smart-tab-embedding-engine"),
+        fluentId: featureEngineIdToFluentId("smart-tab-topic-engine"),
       },
       {
         iconURL: /\/test-icon\.png$/,

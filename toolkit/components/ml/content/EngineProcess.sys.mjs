@@ -163,11 +163,6 @@ export const FEATURES = {
     engineId: "about-inference",
     fluentId: "mlmodel-about-inference",
   },
-  // see browser/components/tabbrowser/SmartTabGrouping.sys.mjs,
-  "smart-tab-embedding": {
-    engineId: "smart-tab-embedding-engine",
-    fluentId: "mlmodel-smart-tab-embedding-engine",
-  },
   // see browser/components/tabbrowser/SmartTabGrouping.sys.mjs
   "smart-tab-topic": {
     engineId: "smart-tab-topic-engine",

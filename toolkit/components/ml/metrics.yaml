@@ -116,7 +116,6 @@ firefox.ai.runtime:
       - webextension
       - link-preview
       - default-engine
-      - smart-tab-embedding-engine
       - smart-tab-topic-engine
       - smart-intent
       - smart-openai
