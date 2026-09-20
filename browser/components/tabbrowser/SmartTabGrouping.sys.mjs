@@ -440,7 +440,7 @@ export class SmartTabGroupingManager extends AIFeature {
       await this.getEmbeddingsGenerator().ensureEngine();
       // warm up the engine
       await this.getEmbeddingsGenerator().embedMany(["test"], {
-        activity: "embed-tabs",
+        activity: "warm-up",
       });
     } catch (e) {}
   }
@@ -624,6 +624,7 @@ export class SmartTabGroupingManager extends AIFeature {
     let embeddings = precomputedEmbeddings;
     if (precomputedEmbeddings.length === 0) {
       embeddings = await this._generateEmbeddings(
+        "suggest-tabs",
         tabData.map((td, index) => {
           let text = SmartTabGroupingManager.preprocessText(td[EMBED_TEXT_KEY]);
           // augment with group name if it's present
@@ -897,6 +898,7 @@ export class SmartTabGroupingManager extends AIFeature {
 
     // generate embeddings for both anchor and candidate titles
     const titleEmbeddings = await this._generateEmbeddings(
+      "suggest-tabs",
       anchorTabsPrep
         .concat(candidateTabsPrep)
         .map(tab => SmartTabGroupingManager.preprocessText(tab[EMBED_TEXT_KEY]))
@@ -905,7 +907,9 @@ export class SmartTabGroupingManager extends AIFeature {
     let groupEmbedding;
     let groupSimilaritiesCos = null;
     if (groupLabel) {
-      groupEmbedding = await this._generateEmbeddings([groupLabel]);
+      groupEmbedding = await this._generateEmbeddings("embed-group-label", [
+        groupLabel,
+      ]);
       // cosine(group, candidate_title) in [-1,1]
       groupSimilaritiesCos = this.getAverageSimilarity(
         groupEmbedding,
@@ -1115,17 +1119,19 @@ export class SmartTabGroupingManager extends AIFeature {
   /**
    * Generates embeddings from a list of tab data structures
    *
-   * @param  tabList List of tabs with label (title) and description keys
+   * @param {string} activity The feature step the embeddings are for, one
+   *   of the "smart-tab-grouping" activities in EngineProcess.sys.mjs
+   * @param  textToEmbedList List of strings to embed
    * @returns {Promise<*[]>} List of embeddings (2d array)
    * @private
    */
-  async _generateEmbeddings(textToEmbedList) {
+  async _generateEmbeddings(activity, textToEmbedList) {
     if (!textToEmbedList?.length) {
       return [];
     }
     // embedMany mean-pools + normalizes and returns one vector per string.
     return this.getEmbeddingsGenerator().embedMany(textToEmbedList, {
-      activity: "embed-tabs",
+      activity,
     });
   }
 
@@ -1332,6 +1338,7 @@ export class SmartTabGroupingManager extends AIFeature {
       this.docEmbeddings = precomputedEmbeddings;
     } else {
       this.docEmbeddings = await this._generateEmbeddings(
+        "embed-tabs",
         structuredData.map(a =>
           SmartTabGroupingManager.preprocessText(a[EMBED_TEXT_KEY])
         )

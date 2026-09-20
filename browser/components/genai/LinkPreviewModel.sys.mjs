@@ -120,7 +120,7 @@ export async function runSmokeTest({ engine, buildID }) {
         samplers: SMOKE_SAMPLERS,
         nPredict: SMOKE_N_PREDICT,
       },
-      { activity: "extract-key-points" }
+      { activity: "smoke-test" }
     )) {
       text += chunk.text || "";
     }

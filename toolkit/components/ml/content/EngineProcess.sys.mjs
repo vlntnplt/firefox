@@ -153,7 +153,10 @@ const TEXT_EMBEDDER_ENGINE_IDS = ["simple-text-embedder-engine"];
  * engines it runs and the closed set of activities its runs may carry.
  *
  * The first engine id is the default when a caller passes no engineId. A run
- * names one of the feature's activities, or none when the list is empty.
+ * names one of the feature's activities, or none when the list is empty. An
+ * activity names a step of the feature's process, not the engine's job, and
+ * the list follows the order of that process. A run made only to prime an
+ * engine is "warm-up".
  * Add every feature id to the labels in toolkit/components/ml/metrics.yaml.
  *
  * Engine ids can be shared, there's only one inference runtime running per engine id.
@@ -194,13 +197,27 @@ export const FEATURES = {
   // see browser/components/tabbrowser/SmartTabGrouping.sys.mjs
   "smart-tab-grouping": {
     engineIds: ["smart-tab-topic-engine", ...TEXT_EMBEDDER_ENGINE_IDS],
-    activities: ["embed-tabs", "label-group"],
+    activities: [
+      "warm-up",
+      // Embed a group's tabs and the candidates to suggest additions.
+      "suggest-tabs",
+      // Embed a group's label to score the candidates against it.
+      "embed-group-label",
+      // Embed every tab to cluster the window.
+      "embed-tabs",
+      // Generate a group name with the topic model.
+      "label-group",
+    ],
     fluentId: "mlmodel-smart-tab-topic-engine",
   },
   // see browser/components/genai/LinkPreviewModel.sys.mjs
   "link-preview": {
     engineIds: ["link-preview"],
-    activities: ["extract-key-points"],
+    activities: [
+      "extract-key-points",
+      // A fixed prompt hashed once per build to detect output drift.
+      "smoke-test",
+    ],
     fluentId: "mlmodel-link-preview",
   },
   // see toolkit/components/pdfjs/content/PdfJsParent.sys.mjs
@@ -239,6 +256,7 @@ export const FEATURES = {
     engineIds: [...SW_COMPLETIONS_ENGINE_IDS, ...TEXT_EMBEDDER_ENGINE_IDS],
     activities: [
       "answer-turn",
+      // The completion that follows a tool call.
       "answer-with-tool-result",
       "classify-message",
       "name-conversation",
@@ -298,7 +316,16 @@ export const FEATURES = {
       ...SW_COMPLETIONS_ENGINE_IDS,
       ...TEXT_EMBEDDER_ENGINE_IDS,
     ],
-    activities: ["embed-tabs", "label-group", "name-group"],
+    activities: [
+      // The SmartTabGrouping steps, run under this feature id.
+      "warm-up",
+      "suggest-tabs",
+      "embed-group-label",
+      "embed-tabs",
+      "label-group",
+      // Name a group with the completions engine.
+      "name-group",
+    ],
     fluentId: "mlmodel-smart-tab-topic-engine",
   },
   // see browser/components/aiwindow/models/SmartFormFillModel.sys.mjs

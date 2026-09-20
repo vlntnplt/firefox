@@ -97,7 +97,7 @@ add_task(
     manager.setDataTitleKey("title");
 
     let embeddedTexts = null;
-    manager._generateEmbeddings = async texts => {
+    manager._generateEmbeddings = async (_activity, texts) => {
       embeddedTexts = texts;
       return texts.map((_, i) => (i % 2 ? [0, 1] : [1, 0]));
     };

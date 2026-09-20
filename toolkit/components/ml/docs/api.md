@@ -109,7 +109,9 @@ attribute their telemetry to that caller's `featureId` and `flowId`, so two feat
 an engine stay distinguishable. Both take a second argument `{ activity }` naming what the
 feature runs the engine for (for example `index-history` and `query-history` on the shared
 embedder), one of the feature's activities in `FEATURES`; it is recorded on `engine_run`
-and a run naming an unknown activity is rejected.
+and a run naming an unknown activity is rejected. An activity names a step of the feature's
+process rather than the engine's job (`suggest-tabs`, not `embed`), and a run made only to
+prime an engine is `warm-up`.
 
 **engineId** is used to manage the lifecycle of the engine. When not provided, it defaults to
 `default-engine`. Everytime a new engine is created using `createEngine`, the API will ensure that
