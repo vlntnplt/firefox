@@ -244,7 +244,9 @@ class MockMLEngineForEmbed {
 
 add_task(async function test_ensureEngine_replaces_a_dead_engine() {
   for (const engineStatus of ["closed", "crashed"]) {
-    const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+    const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral({
+      featureId: "about-inference",
+    });
     const dead = Object.assign(new MockMLEngineForEmbed(), { engineStatus });
     const fresh = Object.assign(new MockMLEngineForEmbed(), {
       engineStatus: "ready",
