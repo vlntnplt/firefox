@@ -77,6 +77,15 @@ skip-if = [
   "verify",
 ]
 
+["browser_ml_native_teardown_memory.js"]
+skip-if = [
+  "asan",
+  "debug",
+  "os == 'android'",
+  "tsan",
+  "verify",
+]
+
 ["browser_ml_native_ort_availability.js"]
 support-files = [
   "ml_native_ort_available_stub.worker.mjs",

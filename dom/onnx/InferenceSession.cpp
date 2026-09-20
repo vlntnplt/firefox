@@ -509,6 +509,13 @@ already_AddRefed<Promise> InferenceSession::Run(
     outputs[i] = nullptr;
   }
   OrtValue** ptr = outputs.Elements();
+  auto outputsGuard = MakeScopeExit([&] {
+    for (auto* v : outputs) {
+      if (v) {
+        sAPI->ReleaseValue(v);
+      }
+    }
+  });
 
   {
     AUTO_PROFILER_MARKER_UNTYPED("Ort::Run", ML_INFERENCE, {});
@@ -538,7 +545,9 @@ already_AddRefed<Promise> InferenceSession::Run(
       return p.forget();
     }
 
-    OrtTypeInfo* typeInfo;
+    OrtTypeInfo* typeInfo = nullptr;
+    auto typeInfoGuard =
+        MakeScopeExit([&] { sAPI->ReleaseTypeInfo(typeInfo); });
     status = sAPI->SessionGetOutputTypeInfo(mSession, i, &typeInfo);
     if (status) {
       LOGD("GetOutputTypeInfo failed: {}", status.Message());
@@ -546,7 +555,9 @@ already_AddRefed<Promise> InferenceSession::Run(
       return p.forget();
     }
 
-    OrtTensorTypeAndShapeInfo* typeAndShapeInfo;
+    OrtTensorTypeAndShapeInfo* typeAndShapeInfo = nullptr;
+    auto typeAndShapeInfoGuard = MakeScopeExit(
+        [&] { sAPI->ReleaseTensorTypeAndShapeInfo(typeAndShapeInfo); });
     status = sAPI->GetTensorTypeAndShape(outputs[i], &typeAndShapeInfo);
     if (status) {
       LOGD("GetTensorTypeAndShape failed: {}", status.Message());
@@ -599,8 +610,6 @@ already_AddRefed<Promise> InferenceSession::Run(
         "Output tensor", ML_INFERENCE,
         MarkerOptions(MarkerTiming::IntervalUntilNowFrom(start)), "{}: {}",
         outputNames[i], outputTensor->ToString().get());
-
-    sAPI->ReleaseTensorTypeAndShapeInfo(typeAndShapeInfo);
 
     auto elem = rv.Entries().AppendElement();
     elem->mKey = outputNames[i];
