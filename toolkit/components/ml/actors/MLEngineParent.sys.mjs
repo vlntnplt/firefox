@@ -293,14 +293,7 @@ export class MLEngineParent extends JSProcessActorParent {
           return /** @type {MLEngine<FeatureId>} */ (currentEngine);
         }
         lazy.console.debug(`Replacing existing engine for ${engineId}`);
-        if (currentEngine.isObserving) {
-          try {
-            Services.obs.removeObserver(currentEngine, "ipc:content-shutdown");
-            currentEngine.isObserving = false;
-          } catch (e) {
-            lazy.console.error("Failed to remove observer", e);
-          }
-        }
+        currentEngine.stopObservingShutdown();
 
         await MLEngine.removeInstance(
           engineId,
@@ -1064,6 +1057,22 @@ export class MLEngine {
   isObserving = false;
 
   /**
+   * Stops observing inference process shutdowns. A closed or crashed engine
+   * keeps that status whatever happens to the process afterwards.
+   */
+  stopObservingShutdown() {
+    if (!this.isObserving) {
+      return;
+    }
+    this.isObserving = false;
+    try {
+      Services.obs.removeObserver(this, "ipc:content-shutdown");
+    } catch (e) {
+      lazy.console.error("Failed to remove observer", e);
+    }
+  }
+
+  /**
    * Unique identifier for the engine.
    *
    * @type {string}
@@ -1171,6 +1180,7 @@ export class MLEngine {
         `The inference process was shutdown (pid=${pid}), childId=${childID}`
       );
       this.setEngineStatus("crashed");
+      this.stopObservingShutdown();
       throw err;
     }
   }
@@ -1426,6 +1436,7 @@ export class MLEngine {
         // The engine was terminated, and if a new run is needed a new port
         // will need to be requested.
         this.setEngineStatus("closed");
+        this.stopObservingShutdown();
         newPortResolvers?.reject(
           new Error("Engine was terminated before initialization completed.")
         );

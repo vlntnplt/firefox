@@ -230,6 +230,33 @@ class MockMLEngineForEmbed {
   }
 }
 
+add_task(async function test_ensureEngine_replaces_a_dead_engine() {
+  for (const engineStatus of ["closed", "crashed"]) {
+    const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
+    const dead = Object.assign(new MockMLEngineForEmbed(), { engineStatus });
+    const fresh = Object.assign(new MockMLEngineForEmbed(), {
+      engineStatus: "ready",
+    });
+    embeddingsGenerator.setEngine(dead);
+    const createEngine = sinon
+      .stub(embeddingsGenerator, "createEngine")
+      .resolves(fresh);
+
+    Assert.strictEqual(
+      await embeddingsGenerator.ensureEngine(),
+      fresh,
+      `A ${engineStatus} engine is replaced.`
+    );
+    Assert.strictEqual(
+      await embeddingsGenerator.ensureEngine(),
+      fresh,
+      "The replacement is kept."
+    );
+    Assert.ok(createEngine.calledOnce, "One engine was created.");
+    sinon.restore();
+  }
+});
+
 add_task(async function test_embed_valid_input() {
   const embeddingsGenerator = new EmbeddingsGeneratorFactory().forGeneral();
   sinon.stub(embeddingsGenerator, "createEngineIfNotPresent").callsFake(() => {

@@ -444,7 +444,7 @@ export class EmbeddingsGenerator {
   async createEngineIfNotPresent() {
     if (!this.#engine) {
       try {
-        this.#engine = await lazy.createEngine(this.options);
+        this.#engine = await this.createEngine(this.options);
       } catch (ex) {
         lazy.console.error(`Unable to initialize the ML engine. Error:` + ex);
         throw new Error("Unable to initialize the ML engine.", { cause: ex });
@@ -535,7 +535,7 @@ export class EmbeddingsGenerator {
    *   A promise resolving to the initialized engine.
    */
   async ensureEngine() {
-    if (this.#engine?.engineStatus == "closed") {
+    if (["closed", "crashed"].includes(this.#engine?.engineStatus)) {
       this.#promiseEngine = null;
       this.#engine = null;
     }

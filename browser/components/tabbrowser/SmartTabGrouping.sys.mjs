@@ -413,10 +413,11 @@ export class SmartTabGroupingManager extends AIFeature {
   /**
    *
    * @param {MLEngine} engine the engine to check
-   * @return {boolean} true if the engine has not been initialized or closed
+   * @return {boolean} true if the engine has not been initialized, was closed
+   *   or crashed with its inference process
    */
   static isEngineClosed(engine) {
-    return !engine || engine?.engineStatus === "closed";
+    return !engine || ["closed", "crashed"].includes(engine.engineStatus);
   }
 
   /**

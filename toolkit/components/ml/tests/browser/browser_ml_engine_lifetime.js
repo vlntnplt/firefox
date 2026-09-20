@@ -633,3 +633,56 @@ add_task(
     await cleanup();
   }
 );
+
+/**
+ * A terminated engine keeps its "closed" status when the inference process
+ * later dies abnormally; only the engines still open become "crashed".
+ */
+add_task(async function test_ml_engine_closed_engine_ignores_process_crash() {
+  const { cleanup, remoteClients } = await setup();
+
+  const closedEngine = await createEngine({
+    taskName: "moz-echo",
+    engineId: "closed-engine",
+    timeoutMS: -1,
+  });
+  const closedRun = closedEngine.run({ data: "closed" });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  Assert.equal((await closedRun).output.echo, "closed");
+
+  const liveEngine = await createEngine({
+    taskName: "moz-echo",
+    engineId: "live-engine",
+    timeoutMS: -1,
+  });
+  const liveRun = liveEngine.run({ data: "live" });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  Assert.equal((await liveRun).output.echo, "live");
+
+  await closedEngine.terminate(
+    /* shutDownIfEmpty */ false,
+    /* replacement */ false
+  );
+  Assert.equal(closedEngine.engineStatus, "closed");
+
+  const process = ChromeUtils.getAllDOMProcesses().find(
+    p => p.remoteType == "inference"
+  );
+  Assert.ok(process, "The inference process is running.");
+  Cc["@mozilla.org/processtools-service;1"]
+    .getService(Ci.nsIProcessToolsService)
+    .kill(process.osPid);
+
+  await TestUtils.waitForCondition(
+    () => liveEngine.engineStatus == "crashed",
+    "The open engine notices the process death."
+  );
+  Assert.equal(
+    closedEngine.engineStatus,
+    "closed",
+    "The terminated engine keeps its closed status."
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
