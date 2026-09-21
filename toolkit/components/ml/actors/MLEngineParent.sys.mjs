@@ -1059,6 +1059,13 @@ export class MLEngine {
   engineStatus = "uninitialized";
 
   /**
+   * The error that moved the engine to "error" or "crashed", null otherwise.
+   *
+   * @type {?Error}
+   */
+  error = null;
+
+  /**
    * Caller views handed out by forCaller, keyed by feature and flow so that
    * repeated creations from one caller get the same object.
    *
@@ -1263,7 +1270,7 @@ export class MLEngine {
       const err = new Error(
         `The inference process was shutdown (pid=${pid}), childId=${childID}`
       );
-      this.setEngineStatus("crashed");
+      this.setEngineStatus("crashed", err);
       this.stopObservingShutdown();
       throw err;
     }
@@ -1301,7 +1308,7 @@ export class MLEngine {
      */
     const hardTeardown = err => {
       try {
-        mlEngine.setEngineStatus?.("error");
+        mlEngine.setEngineStatus?.("error", err);
       } catch {}
       try {
         mlEngine.#port?.close?.();
@@ -1380,9 +1387,11 @@ export class MLEngine {
    * Sets the engine status and emits a statusChanged event.
    *
    * @param {"uninitialized" | "ready" | "error" | "closed" | "crashed"} status - The new status of the engine.
+   * @param {?Error} [error] - What moved the engine to "error" or "crashed".
    */
-  setEngineStatus(status) {
+  setEngineStatus(status, error = null) {
     this.engineStatus = status;
+    this.error = error;
     this.emit("statusChanged", status);
   }
 
@@ -1444,7 +1453,7 @@ export class MLEngine {
         transferables
       );
     } catch (error) {
-      this.setEngineStatus("error");
+      this.setEngineStatus("error", error);
       cleanupOnError(error);
       try {
         await newPortResolvers.promise;
@@ -1458,7 +1467,7 @@ export class MLEngine {
       this.setEngineStatus("ready");
     } catch (error) {
       // If the resolver rejected for any other reason, still tidy up
-      this.setEngineStatus("error");
+      this.setEngineStatus("error", error);
       cleanupOnError(error);
       throw error;
     }
