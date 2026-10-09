@@ -281,6 +281,7 @@ export class TextGenerationEngine {
       engine.telemetry.recordEngineCreationSuccessFlow({
         engineId,
         duration: ChromeUtils.now() - start,
+        deviceKind: engine.#generator.deviceKind,
       });
     } catch (error) {
       engine.telemetry.recordEngineCreationFailure({
@@ -417,6 +418,7 @@ export class TextGenerationEngine {
       modelId: this.pipelineOptions.modelId,
       backend: this.pipelineOptions.backend,
       backendSourceRevision: lazy.LLAMA_CPP_VERSION,
+      deviceKind: this.#generator?.deviceKind,
       ...(stats.streaming ? stats.metrics(result) : {}),
     });
   }
