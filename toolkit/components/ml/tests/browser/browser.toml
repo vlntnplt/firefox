@@ -53,6 +53,8 @@ support-files = ["ml_engine_e2e_cancel_stub.worker.mjs"]
 
 ["browser_ml_engine_rs_hub.js"]
 
+["browser_ml_hwinference_device_discovery.js"]
+
 ["browser_ml_hwinference_process.js"]
 
 ["browser_ml_inference_session_error.js"]

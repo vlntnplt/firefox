@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <cstddef>
+#include <cstring>
 
 #include <functional>
 #include "mozilla/HashTable.h"
@@ -13,8 +14,10 @@
 #include "nsTArray.h"
 
 #include "mozilla/Logging.h"
+#include "mozilla/dom/BindingUtils.h"
 #include "nsFmtString.h"
 #include "GeckoProfiler.h"
+#include "mozilla/ml/MLProfilerMarkers.h"
 
 mozilla::LazyLogModule gLlamaBackendLog("GeckoMLLlamaBackendNative");
 
@@ -86,6 +89,78 @@ ggml_type GgmlTypeFromKVCacheDtype(LlamaKVCacheDtype aDtype) {
       break;
   }
   return GGML_TYPE_F16;
+}
+
+// ggml owns device strings for the library's lifetime.
+static nsCString Borrowed(const char* aStr) {
+  nsCString str;
+  str.AssignLiteral(aStr, strlen(aStr));
+  return str;
+}
+
+static nsCString DeviceId(const ggml_backend_dev_props& aProps) {
+  return Borrowed(aProps.device_id ? aProps.device_id : aProps.name);
+}
+
+static dom::HWInferenceDeviceKind DeviceKind(enum ggml_backend_dev_type aType) {
+  switch (aType) {
+    case GGML_BACKEND_DEVICE_TYPE_CPU:
+      return dom::HWInferenceDeviceKind::Cpu;
+    case GGML_BACKEND_DEVICE_TYPE_GPU:
+    case GGML_BACKEND_DEVICE_TYPE_IGPU:
+      return dom::HWInferenceDeviceKind::Gpu;
+    case GGML_BACKEND_DEVICE_TYPE_ACCEL:
+      return dom::HWInferenceDeviceKind::Npu;
+    case GGML_BACKEND_DEVICE_TYPE_META:
+      break;
+  }
+  MOZ_CRASH("not a device");
+}
+
+// Initialises an accelerator for real and frees it; the CPU always passes.
+static bool ProbeDevice(const LlamaLibWrapper* aLib,
+                        ggml_backend_dev_t aDevice) {
+  if (aLib->ggml_backend_dev_type(aDevice) == GGML_BACKEND_DEVICE_TYPE_CPU) {
+    return true;
+  }
+  ggml_backend_t backend = aLib->ggml_backend_dev_init(aDevice, nullptr);
+  if (!backend) {
+    return false;
+  }
+  aLib->ggml_backend_free(backend);
+  return true;
+}
+
+const nsTArray<Device>& Devices(const LlamaLibWrapper* aLib) {
+  static const nsTArray<Device> sDevices = [aLib]() {
+    nsTArray<Device> devices;
+    for (size_t i = 0; i < aLib->ggml_backend_dev_count(); ++i) {
+      ggml_backend_dev_t dev = aLib->ggml_backend_dev_get(i);
+      ggml_backend_dev_props props;
+      aLib->ggml_backend_dev_get_props(dev, &props);
+      if (props.type == GGML_BACKEND_DEVICE_TYPE_META) {
+        continue;
+      }
+      const TimeStamp probeStart = TimeStamp::Now();
+      const bool usable = ProbeDevice(aLib, dev);
+      PROFILER_MARKER(
+          ML_TEXT_GENERATION_TRACK, ML_SETUP,
+          MarkerTiming::IntervalUntilNowFrom(probeStart), MLDeviceProbeMarker,
+          ProfilerString8View::WrapNullTerminatedString(props.name), usable);
+      if (!usable) {
+        LOGW("{}: {} failed to initialise, skipped", __PRETTY_FUNCTION__,
+             props.name);
+        continue;
+      }
+      Device* device = devices.AppendElement(Device{dev, DeviceId(props),
+                                                    Borrowed(props.description),
+                                                    DeviceKind(props.type)});
+      LOGD("{}: {}: {} ({})", __PRETTY_FUNCTION__, device->mId,
+           device->mDescription, dom::GetEnumString(device->mKind));
+    }
+    return devices;
+  }();
+  return sDevices;
 }
 
 // Whether GPU offload can actually be used on this machine. Some configurations
