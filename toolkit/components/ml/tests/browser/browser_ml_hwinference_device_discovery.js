@@ -18,3 +18,27 @@ add_task(async function test_device_discovery() {
     Assert.notEqual(device.id, "", `${device.description} has an id`);
   }
 });
+
+add_task(async function test_placement() {
+  const devices = await HWInference.listDevices();
+  const cpu = devices.find(device => device.kind === "cpu");
+
+  const byKind = await createTinyStoriesGenerator({
+    placement: { kinds: ["cpu"] },
+  });
+  Assert.equal(byKind.device, cpu.id, "A kind placement loads on the CPU");
+  Assert.equal(byKind.deviceKind, "cpu", "The generator reports its kind");
+  byKind.terminate();
+
+  const byId = await createTinyStoriesGenerator({
+    placement: { devices: ["no-such-device", cpu.id] },
+  });
+  Assert.equal(byId.device, cpu.id, "An unknown id falls through");
+  byId.terminate();
+
+  await Assert.rejects(
+    createTinyStoriesGenerator({ placement: { devices: ["no-such-device"] } }),
+    /placement/,
+    "A placement no device matches rejects"
+  );
+});

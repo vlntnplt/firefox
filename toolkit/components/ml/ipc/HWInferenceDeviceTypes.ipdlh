@@ -17,5 +17,11 @@ struct DeviceDescriptor {
   HWInferenceBackend[] backends;
 };
 
+// Fallback order; devices wins over kinds, both empty is the process default.
+struct DevicePlacement {
+  nsCString[] devices;
+  HWInferenceDeviceKind[] kinds;
+};
+
 }  // namespace hwinference
 }  // namespace mozilla

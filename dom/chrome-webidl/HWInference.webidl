@@ -27,6 +27,15 @@ dictionary HWInferenceDevice {
   required sequence<HWInferenceBackend> backends;
 };
 
+/**
+ * Ordered by preference: the first device that loads the model serves it.
+ * devices wins over kinds; both empty means the process default.
+ */
+dictionary HWInferencePlacement {
+  sequence<UTF8String> devices = [];
+  sequence<HWInferenceDeviceKind> kinds = [];
+};
+
 [ChromeOnly, Exposed=Window]
 namespace HWInference {
   /** Starts the browser inference process if needed. */
