@@ -716,6 +716,7 @@ tasks:
                 # matched sanitizer variants (asan/tsan), which abort on
                 # upstream ggml UB in the native llama.cpp backend.
                 linux2404-64-shippable/opt: ['mozilla-central']
+                macosx1500-aarch64-shippable/opt: ['mozilla-central']
                 default: []
         max-run-time: 1800
         mozharness:
