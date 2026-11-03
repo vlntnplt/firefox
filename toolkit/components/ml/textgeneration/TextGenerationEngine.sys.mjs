@@ -223,10 +223,10 @@ function toGenerateRequestFromChatCompletion(request) {
   const params = request.inferenceParams ?? {};
   /** @type {TextGenerationRequest} */
   const generateRequest = { messages, samplers: toSamplers(params) };
-  const maxTokens = params.max_completion_tokens ?? params.max_tokens;
-  if (maxTokens != null) {
-    generateRequest.maxTokens = maxTokens;
-  }
+  // Chat completions generate until the model stops; the generator clamps
+  // the budget to its context.
+  generateRequest.maxTokens =
+    params.max_completion_tokens ?? params.max_tokens ?? 0xffffffff;
   return generateRequest;
 }
 

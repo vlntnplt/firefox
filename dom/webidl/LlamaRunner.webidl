@@ -356,7 +356,8 @@ dictionary LlamaChatOptions {
   long minOutputBufferSize = 1;
 
   /**
-   * Maximum number of generation steps (tokens).
+   * Maximum number of generation steps (tokens). 0 generates until the
+   * context is full.
    */
   long maxGeneratedTokens = 512;
 
