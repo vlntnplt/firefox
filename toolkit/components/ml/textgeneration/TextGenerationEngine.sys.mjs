@@ -39,6 +39,7 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  * @property {number} [nPredict]
  * @property {number} [minOutputBufferSize]
  * @property {TextGenerationSampler[]} [samplers]
+ * @property {object} [jsonSchema] Constrains the output to this JSON schema.
  * @property {number[]} [stopTokens]
  * @property {boolean} [stopOnEndOfGenerationTokens]
  */
@@ -48,10 +49,10 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  *
  * @typedef {object} ChatCompletionRequest
  * @property {Array<{ role: string, content: unknown, tool_calls?: unknown[] }>} args
- * @property {Record<string, any>} [inferenceParams] temperature, top_p and
- *   max_completion_tokens / max_tokens apply; response_format is not enforced.
- *   `samplers` is the chain the model is served with, which temperature and
- *   top_p adjust.
+ * @property {Record<string, any>} [inferenceParams] temperature, top_p,
+ *   max_completion_tokens / max_tokens and response_format apply; `samplers`
+ *   is the chain the model is served with, which temperature and top_p
+ *   adjust.
  * @property {unknown[]} [tools]
  * @property {string} [token]
  * @property {string} [chatId]
@@ -75,7 +76,46 @@ const lazy = XPCOMUtils.declareLazy({
     "moz-src:///toolkit/components/ml/actors/MLEngineParent.sys.mjs",
   MLTelemetry: "chrome://global/content/ml/MLTelemetry.sys.mjs",
   generateUUID: "chrome://global/content/ml/Utils.sys.mjs",
+  JSON_GRAMMAR:
+    "moz-src:///toolkit/components/ml/textgeneration/JSONSchemaGrammar.sys.mjs",
+  jsonSchemaToGrammar:
+    "moz-src:///toolkit/components/ml/textgeneration/JSONSchemaGrammar.sys.mjs",
 });
+
+/**
+ * @param {object} schema
+ * @returns {TextGenerationSampler}
+ */
+function toGrammarSampler(schema) {
+  return { type: "grammar", grammar: lazy.jsonSchemaToGrammar(schema) };
+}
+
+/**
+ * @param {{ type?: string, json_schema?: { schema?: object } }} [responseFormat]
+ * @returns {TextGenerationSampler | null}
+ */
+function toResponseFormatSampler(responseFormat) {
+  switch (responseFormat?.type) {
+    case undefined:
+    case "text":
+      return null;
+    case "json_object":
+      return { type: "grammar", grammar: lazy.JSON_GRAMMAR };
+    case "json_schema": {
+      const schema = responseFormat.json_schema?.schema;
+      if (!schema) {
+        throw new Error(
+          "TextGenerationEngine: response_format.json_schema.schema is required"
+        );
+      }
+      return toGrammarSampler(schema);
+    }
+    default:
+      throw new Error(
+        `TextGenerationEngine: unsupported response_format "${responseFormat.type}"`
+      );
+  }
+}
 
 /** @param {TextGenerationResourceSnapshot} snapshot */
 const toEngineResources = snapshot => ({
@@ -144,6 +184,12 @@ function toGenerateRequest(request) {
   }
   if (request.samplers != null) {
     generateRequest.samplers = request.samplers;
+  }
+  if (request.jsonSchema) {
+    generateRequest.samplers = [
+      toGrammarSampler(request.jsonSchema),
+      ...(generateRequest.samplers ?? []),
+    ];
   }
   if (request.stopTokens != null) {
     generateRequest.stopTokens = request.stopTokens;
@@ -221,8 +267,13 @@ function toGenerateRequestFromChatCompletion(request) {
     };
   });
   const params = request.inferenceParams ?? {};
+  const samplers = toSamplers(params);
+  const grammar = toResponseFormatSampler(params.response_format);
+  if (grammar) {
+    samplers.unshift(grammar);
+  }
   /** @type {TextGenerationRequest} */
-  const generateRequest = { messages, samplers: toSamplers(params) };
+  const generateRequest = { messages, samplers };
   // Chat completions generate until the model stops; the generator clamps
   // the budget to its context.
   generateRequest.maxTokens =

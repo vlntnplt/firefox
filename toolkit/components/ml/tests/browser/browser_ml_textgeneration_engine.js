@@ -268,3 +268,96 @@ add_task(async function test_engine_chat_completion_request() {
     await cleanup();
   }
 });
+
+// The TinyStories vocabulary has no brackets or braces, so the schemas here
+// only use terminals it can spell; browser_ml_smollm2_chat.js covers objects.
+add_task(async function test_engine_json_schema() {
+  const { cleanup } = await setup({
+    prefs: [["browser.ml.llama.hwInference", true]],
+  });
+  const schema = { enum: ["no", "a", "the"] };
+  let engine;
+  try {
+    engine = await createEngine({
+      ...TINYSTORIES_ENGINE_OPTIONS,
+      engineId: "hwi-json-schema",
+    });
+
+    const completion = await engine.run({
+      args: TINYSTORIES_STORYTELLER_PROMPT,
+      inferenceParams: {
+        max_completion_tokens: 8,
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "word", schema },
+        },
+      },
+    });
+    Assert.ok(
+      schema.enum.includes(JSON.parse(completion.finalOutput)),
+      `response_format constrains the completion: ${completion.finalOutput}`
+    );
+
+    const sampled = await engine.run({
+      args: TINYSTORIES_STORYTELLER_PROMPT,
+      inferenceParams: {
+        temperature: 0.7,
+        max_completion_tokens: 8,
+        response_format: {
+          type: "json_schema",
+          json_schema: { name: "word", schema },
+        },
+      },
+    });
+    Assert.ok(
+      schema.enum.includes(JSON.parse(sampled.finalOutput)),
+      `The grammar also bounds a sampled run: ${sampled.finalOutput}`
+    );
+
+    const llama = await engine.run({
+      prompt: TINYSTORIES_STORYTELLER_PROMPT,
+      nPredict: 8,
+      samplers: TINYSTORIES_GREEDY_SAMPLERS,
+      jsonSchema: schema,
+    });
+    Assert.ok(
+      schema.enum.includes(JSON.parse(llama.finalOutput)),
+      `jsonSchema constrains the llama request shape: ${llama.finalOutput}`
+    );
+
+    await Assert.rejects(
+      engine.run({
+        args: TINYSTORIES_STORYTELLER_PROMPT,
+        inferenceParams: {
+          response_format: {
+            type: "json_schema",
+            json_schema: { schema: { type: "string", pattern: "^a$" } },
+          },
+        },
+      }),
+      /Unsupported JSON schema keyword: pattern/,
+      "A schema outside the supported subset rejects before generating"
+    );
+    await Assert.rejects(
+      engine.run({
+        args: TINYSTORIES_STORYTELLER_PROMPT,
+        inferenceParams: { response_format: { type: "xml" } },
+      }),
+      /unsupported response_format "xml"/,
+      "An unknown response_format rejects"
+    );
+
+    const after = await engine.run({
+      args: TINYSTORIES_STORYTELLER_PROMPT,
+      inferenceParams: { max_completion_tokens: 4 },
+    });
+    Assert.greater(
+      after.finalOutput.length,
+      0,
+      "The engine still generates after rejected requests"
+    );
+  } finally {
+    await engine?.terminate();
+    await cleanup();
+  }
+});

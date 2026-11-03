@@ -8,3 +8,5 @@ prefs = [
 ]
 
 ["test_download_rs_attachment_failure.js"]
+
+["test_json_schema_grammar.js"]

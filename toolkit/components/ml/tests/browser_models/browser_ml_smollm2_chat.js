@@ -102,3 +102,111 @@ add_task(async function test_smollm2_real_chat_generation() {
     }
   });
 });
+
+const MEMORIES_MERGE_SCHEMA = {
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: ["component_statements", "new_reasoning", "new_statement"],
+    properties: {
+      component_statements: {
+        type: "array",
+        minItems: 2,
+        items: { type: "string" },
+      },
+      new_reasoning: { type: "string" },
+      new_statement: { type: "string", maxLength: 100 },
+    },
+  },
+};
+
+// Only the HWInference engine honours response_format.
+add_task(async function test_smollm2_json_schema() {
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ml.llama.hwInference", true]],
+  });
+  const engine = await createEngine(
+    new PipelineOptions({
+      engineId: "smollm2-json-schema",
+      taskName: "text-generation",
+      backend: BACKENDS.llamaCpp,
+      modelId: "HuggingFaceTB/SmolLM2-360M-Instruct-GGUF",
+      modelRevision: "main",
+      modelHubUrlTemplate: "{model}/{revision}",
+      modelHubRootUrl: "https://model-hub.mozilla.org/",
+      modelFile: "smollm2-360m-instruct-q8_0.gguf",
+      numContext: 1024,
+    })
+  );
+  try {
+    const merged = await engine.run({
+      args: [
+        {
+          role: "system",
+          content:
+            "You merge related statements about a user into one. Return JSON only.",
+        },
+        {
+          role: "user",
+          content:
+            "Merge these statements into exactly one entry:\n" +
+            "- Statement: Shops for trail running shoes\n" +
+            "- Statement: Compares hiking boots online",
+        },
+      ],
+      inferenceParams: {
+        temperature: 0,
+        max_completion_tokens: 256,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "MemoriesMergeCandidates",
+            schema: MEMORIES_MERGE_SCHEMA,
+          },
+        },
+      },
+    });
+    info(`SmolLM2 merge output: ${merged.finalOutput}`);
+    const candidates = JSON.parse(merged.finalOutput);
+    Assert.ok(Array.isArray(candidates), "The output is a JSON array");
+    for (const candidate of candidates) {
+      Assert.deepEqual(
+        Object.keys(candidate).sort(),
+        ["component_statements", "new_reasoning", "new_statement"],
+        "Each candidate has exactly the required keys"
+      );
+      Assert.greaterOrEqual(
+        candidate.component_statements.length,
+        2,
+        "minItems holds"
+      );
+      Assert.lessOrEqual(
+        candidate.new_statement.length,
+        100,
+        "maxLength holds"
+      );
+    }
+
+    const object = await engine.run({
+      args: [
+        {
+          role: "user",
+          content:
+            'Reply with a JSON object with one key "color" naming the sky.',
+        },
+      ],
+      inferenceParams: {
+        temperature: 0,
+        max_completion_tokens: 64,
+        response_format: { type: "json_object" },
+      },
+    });
+    info(`SmolLM2 json_object output: ${object.finalOutput}`);
+    const parsed = JSON.parse(object.finalOutput);
+    Assert.equal(typeof parsed, "object", "json_object yields a JSON object");
+  } finally {
+    await engine.terminate();
+    await EngineProcess.destroyMLEngine();
+  }
+});
