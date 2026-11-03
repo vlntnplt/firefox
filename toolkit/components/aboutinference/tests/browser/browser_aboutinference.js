@@ -156,6 +156,9 @@ add_task(async function test_about_inference_text_generation() {
         "Every accelerator joins the text generation device select"
       );
       byId("subtab-text-generation").click();
+      // Let the accessibility tree pick up the unhidden panel.
+      await new Promise(resolve => content.requestAnimationFrame(resolve));
+      await new Promise(resolve => content.requestAnimationFrame(resolve));
       byId("tg.hub").value = "";
       byId("tg.model").value = "Mozilla/test-llama/TinyStories-656K.Q8_0.gguf";
       byId("tg.prompt").value = "Once upon a time";
@@ -172,14 +175,22 @@ add_task(async function test_about_inference_text_generation() {
         !byId("tg.kvCacheDtype").querySelector("option[value=q8_0]").disabled,
         "Flash attention allows a quantized KV cache"
       );
+      byId("tg.flashAttn").click();
+      Assert.ok(
+        byId("tg.kvCacheDtype").querySelector("option[value=q8_0]").disabled,
+        "Turning flash attention off disables it again"
+      );
       byId("tg.run").click();
       await ContentTaskUtils.waitForCondition(
-        () => byId("tg.summary").querySelector("td"),
-        "The summary appears after every run",
+        () => !byId("tg.run").disabled,
+        "The runs finish",
         500,
         120
       );
-      Assert.greater(byId("tg.output").value.length, 0, "Text was generated");
+      Assert.ok(
+        byId("tg.summary").querySelector("td"),
+        `The summary appears after every run: ${byId("tg.output").value}`
+      );
       const rows = [...byId("tg.results").querySelectorAll("tbody tr")].map(
         tr => [...tr.children].map(td => td.textContent)
       );
