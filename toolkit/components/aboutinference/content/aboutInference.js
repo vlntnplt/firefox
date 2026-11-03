@@ -1423,6 +1423,7 @@ function showSubTab(name) {
   for (const tab of document.querySelectorAll(".subtabs [role='tab']")) {
     const selected = tab.getAttribute("aria-controls") === name;
     tab.setAttribute("aria-selected", String(selected));
+    tab.tabIndex = selected ? 0 : -1;
     document.getElementById(tab.getAttribute("aria-controls")).hidden =
       !selected;
   }
@@ -1432,6 +1433,31 @@ function showSubTab(name) {
   ) {
     listDevices();
   }
+}
+
+function onSubTabKeydown(event) {
+  const tabs = [...event.currentTarget.querySelectorAll("[role='tab']")];
+  const rtl = getComputedStyle(document.documentElement).direction === "rtl";
+  const next = rtl ? "ArrowLeft" : "ArrowRight";
+  const previous = rtl ? "ArrowRight" : "ArrowLeft";
+  let index = tabs.indexOf(event.target);
+  if (index < 0) {
+    return;
+  }
+  if (event.key === next) {
+    index = (index + 1) % tabs.length;
+  } else if (event.key === previous) {
+    index = (index + tabs.length - 1) % tabs.length;
+  } else if (event.key === "Home") {
+    index = 0;
+  } else if (event.key === "End") {
+    index = tabs.length - 1;
+  } else {
+    return;
+  }
+  event.preventDefault();
+  tabs[index].focus();
+  showSubTab(tabs[index].getAttribute("aria-controls"));
 }
 
 /**
@@ -1637,6 +1663,9 @@ window.onload = async function () {
       showSubTab(tab.getAttribute("aria-controls"))
     );
   }
+  document
+    .querySelector(".subtabs")
+    .addEventListener("keydown", onSubTabKeydown);
 
   fillSelect("dtype", DTYPE);
   fillSelect("taskName", TASKS);
