@@ -1086,8 +1086,20 @@ class IndexedDBCache {
       DEFAULT_PRINCIPAL_ORIGIN
     );
 
-    if (totalSize + fileSize > this.#maxSize * ONE_GIB) {
-      throw new Error(`Exceeding cache size limit of ${this.#maxSize}GiB"`);
+    // A download already sits at cacheKey and is part of the usage.
+    let storedSize = 0;
+    try {
+      storedSize = (await (await lazy.OPFS.getFileHandle(cacheKey)).getFile())
+        .size;
+    } catch (error) {
+      if (error.name !== "NotFoundError") {
+        throw error;
+      }
+    }
+    if (totalSize - storedSize + fileSize > this.#maxSize * ONE_GIB) {
+      throw new Error(
+        `Exceeding cache size limit of ${this.#maxSize}GiB: ${totalSize} bytes in use, ${fileSize} bytes for ${cacheKey}`
+      );
     }
 
     // Store the file data if a blob is passed.
