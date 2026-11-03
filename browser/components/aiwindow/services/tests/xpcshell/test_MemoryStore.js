@@ -10,10 +10,14 @@ const { sinon } = ChromeUtils.importESModule(
 const { EmbeddingsGenerator } = ChromeUtils.importESModule(
   "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs"
 );
-const { MemoryStore, makeMemoryId, migrateMemoryStoreVersionOneToTwo } =
-  ChromeUtils.importESModule(
-    "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
-  );
+const {
+  MemoryStore,
+  MemoryStoreImpl,
+  makeMemoryId,
+  migrateMemoryStoreVersionOneToTwo,
+} = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
+);
 
 const { MEMORY_FILTER_COMPARATOR } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/services/MemoryStoreConstants.sys.mjs"
@@ -1729,3 +1733,37 @@ add_task(
     await deleteAllMemories();
   }
 );
+
+add_task(async function test_in_memory_store_does_not_touch_profile_file() {
+  await MemoryStore.ensureInitialized();
+  await MemoryStore.testOnlyFlush();
+  const path = PathUtils.join(PathUtils.profileDir, "memories.json.lz4");
+  const before = await IOUtils.read(path);
+  const profileCount = (await MemoryStore.getMemories()).length;
+
+  const store = new MemoryStoreImpl(null);
+  const memory = await store.addMemory({
+    memory_summary: "Scratch-only memory",
+    reasoning: "Added to an in-memory store",
+  });
+  await store.updateMemory(memory.id, { reasoning: "Updated in memory" });
+  await store.updateMeta({ last_generation_run_ts: Date.now() });
+  await store.requestSave();
+  await store.testOnlyFlush();
+
+  Assert.deepEqual(
+    (await store.getMemories()).map(m => m.memory_summary),
+    ["Scratch-only memory"],
+    "In-memory store should hold its own memory"
+  );
+  Assert.equal(
+    (await MemoryStore.getMemories()).length,
+    profileCount,
+    "Profile store should not see the in-memory store's memories"
+  );
+  const after = await IOUtils.read(path);
+  Assert.ok(
+    after.length === before.length && after.every((b, i) => b === before[i]),
+    "Profile file should be unchanged"
+  );
+});

@@ -56,17 +56,21 @@ const MEMORY_STORE_VERSION = 2;
 // Observer notification topic
 const MEMORY_STORE_CHANGED = "memory-store-changed";
 
-// In-memory state
-let gState = {
-  memories: [],
-  meta: {
-    last_history_memory_ts: 0,
-    last_chat_memory_ts: 0,
-    last_session_memory_ts: 0,
-    last_generation_run_ts: 0,
-  },
-  version: MEMORY_STORE_VERSION,
-};
+/**
+ * @returns {object} An empty store state.
+ */
+function makeEmptyState() {
+  return {
+    memories: [],
+    meta: {
+      last_history_memory_ts: 0,
+      last_chat_memory_ts: 0,
+      last_session_memory_ts: 0,
+      last_generation_run_ts: 0,
+    },
+    version: MEMORY_STORE_VERSION,
+  };
+}
 
 /**
  * Normalizes a raw source-IDs bundle to the canonical
@@ -130,17 +134,7 @@ function isComponentSummaries(v) {
   );
 }
 
-// Whether we've finished initial load
-let gInitialized = false;
 let lazy = {};
-let gInitPromise = null;
-let gJSONFile = null;
-
-// Where we store the file (choose something similar to sessionstore)
-ChromeUtils.defineLazyGetter(lazy, "gStorePath", () => {
-  const profD = Services.dirsvc.get("ProfD", Ci.nsIFile).path;
-  return PathUtils.join(profD, MEMORY_STORE_FILE);
-});
 
 ChromeUtils.defineLazyGetter(lazy, "console", () =>
   console.createInstance({
@@ -269,113 +263,144 @@ export function migrateMemoryStoreVersionOneToTwo(memories) {
 }
 
 /**
- * Internal helper to load (and possibly migrate) memory data from disk.
- *
- * @returns {Promise<void>}
+ * A memory store over a JSON file, or held in memory only.
  */
-async function loadMemories() {
-  gJSONFile = new JSONFile({
-    path: lazy.gStorePath,
-    saveDelayMs: 1000,
-    compression: "lz4",
-    sanitizedBasename: "memories",
-  });
+export class MemoryStoreImpl {
+  #getPath;
+  #recordMetrics;
+  #state = makeEmptyState();
+  #initialized = false;
+  #initPromise = null;
+  #jsonFile = null;
 
-  let markerData = null;
-  if (Services.profiler.IsActive()) {
-    let sizeLabel = "0 B";
-    try {
-      const stat = await IOUtils.stat(lazy.gStorePath);
-      sizeLabel = `${(stat.size / 1048576).toFixed(1)} MiB`;
-    } catch (_e) {}
-    markerData = { startTime: ChromeUtils.now(), sizeLabel };
-  }
-
-  try {
-    await gJSONFile.load();
-  } catch (ex) {
-    console.error("MemoryStore: failed to load state", ex);
-    // If load fails, fall back to default gState.
-    gJSONFile.data = gState;
-    gInitialized = true;
-    return;
-  } finally {
-    if (markerData) {
-      ChromeUtils.addProfilerMarker(
-        "SmartWindow",
-        { startTime: markerData.startTime },
-        `MemoryStore:load_db(${markerData.sizeLabel})`
-      );
-    }
-  }
-
-  // Normalize the loaded data into our expected shape.
-  const data = gJSONFile.data;
-  let isMemoriesMigrated = false;
-  if (!data || typeof data !== "object") {
-    gJSONFile.data = gState;
-  } else {
-    let memories;
-    // Handle backwards compatibility by converting memories stored in older schemas to the current version
-    if (data.version === MEMORY_STORE_VERSION && Array.isArray(data.memories)) {
-      memories = data.memories;
-    } else if (
-      typeof data.version === "number" &&
-      data.version === 1 &&
-      Array.isArray(data.memories)
-    ) {
-      memories = migrateMemoryStoreVersionOneToTwo(data.memories);
-      isMemoriesMigrated = true;
-      data.version = 2;
-    } else {
-      // All memory store JSONs are saved with a version number, but if something went wrong and it wasn't, clear the store
-      lazy.console.warn(
-        "Could not determine MemoryStore version; clearing saved memories"
-      );
-      memories = [];
-    }
-
-    // Add extra v2 schema fields
-    memories.map(mem => {
-      if (!mem.merge_count) {
-        mem.merge_count = 0;
-      }
-      return mem;
-    });
-
-    gState = {
-      memories,
-      meta: {
-        last_history_memory_ts: data.meta?.last_history_memory_ts || 0,
-        last_chat_memory_ts: data.meta?.last_chat_memory_ts || 0,
-        last_session_memory_ts: data.meta?.last_session_memory_ts || 0,
-        last_generation_run_ts: data.meta?.last_generation_run_ts || 0,
-      },
-      version:
-        typeof data.version === "number" ? data.version : MEMORY_STORE_VERSION,
-    };
-    // Ensure JSONFile.data points at our normalized state object.
-    gJSONFile.data = gState;
-
-    // If memories were migrated from an older schema, save
-    if (isMemoriesMigrated) {
-      gJSONFile?.saveSoon();
-      Services.obs.notifyObservers(null, MEMORY_STORE_CHANGED);
-    }
-  }
-
-  gInitialized = true;
-}
-
-// Public API object
-export const MemoryStore = {
   // Observer notification topic
-  MEMORY_STORE_CHANGED,
+  MEMORY_STORE_CHANGED = MEMORY_STORE_CHANGED;
 
   // Embeddings cache for semantic memory search
-  embeddingsGenerator: null,
-  memoryEmbeddingsCache: null,
-  memoryCacheKey: null,
+  embeddingsGenerator = null;
+  memoryEmbeddingsCache = null;
+  memoryCacheKey = null;
+
+  /**
+   * @param {(() => string)|null} getPath
+   *   Returns the path of the backing file; null keeps the store in memory.
+   * @param {object} [options]
+   * @param {boolean} [options.recordMetrics=false]
+   *   Whether this store updates the Glean memory metrics.
+   */
+  constructor(getPath, { recordMetrics = false } = {}) {
+    this.#getPath = getPath;
+    this.#recordMetrics = recordMetrics;
+  }
+
+  /**
+   * Internal helper to load (and possibly migrate) memory data from disk.
+   *
+   * @returns {Promise<void>}
+   */
+  async #loadMemories() {
+    const path = this.#getPath?.();
+    if (!path) {
+      this.#initialized = true;
+      return;
+    }
+    this.#jsonFile = new JSONFile({
+      path,
+      saveDelayMs: 1000,
+      compression: "lz4",
+      sanitizedBasename: "memories",
+    });
+
+    let markerData = null;
+    if (Services.profiler.IsActive()) {
+      let sizeLabel = "0 B";
+      try {
+        const stat = await IOUtils.stat(path);
+        sizeLabel = `${(stat.size / 1048576).toFixed(1)} MiB`;
+      } catch (_e) {}
+      markerData = { startTime: ChromeUtils.now(), sizeLabel };
+    }
+
+    try {
+      await this.#jsonFile.load();
+    } catch (ex) {
+      console.error("MemoryStore: failed to load state", ex);
+      // If load fails, fall back to default state.
+      this.#jsonFile.data = this.#state;
+      this.#initialized = true;
+      return;
+    } finally {
+      if (markerData) {
+        ChromeUtils.addProfilerMarker(
+          "SmartWindow",
+          { startTime: markerData.startTime },
+          `MemoryStore:load_db(${markerData.sizeLabel})`
+        );
+      }
+    }
+
+    // Normalize the loaded data into our expected shape.
+    const data = this.#jsonFile.data;
+    let isMemoriesMigrated = false;
+    if (!data || typeof data !== "object") {
+      this.#jsonFile.data = this.#state;
+    } else {
+      let memories;
+      // Handle backwards compatibility by converting memories stored in older schemas to the current version
+      if (
+        data.version === MEMORY_STORE_VERSION &&
+        Array.isArray(data.memories)
+      ) {
+        memories = data.memories;
+      } else if (
+        typeof data.version === "number" &&
+        data.version === 1 &&
+        Array.isArray(data.memories)
+      ) {
+        memories = migrateMemoryStoreVersionOneToTwo(data.memories);
+        isMemoriesMigrated = true;
+        data.version = 2;
+      } else {
+        // All memory store JSONs are saved with a version number, but if something went wrong and it wasn't, clear the store
+        lazy.console.warn(
+          "Could not determine MemoryStore version; clearing saved memories"
+        );
+        memories = [];
+      }
+
+      // Add extra v2 schema fields
+      memories.map(mem => {
+        if (!mem.merge_count) {
+          mem.merge_count = 0;
+        }
+        return mem;
+      });
+
+      this.#state = {
+        memories,
+        meta: {
+          last_history_memory_ts: data.meta?.last_history_memory_ts || 0,
+          last_chat_memory_ts: data.meta?.last_chat_memory_ts || 0,
+          last_session_memory_ts: data.meta?.last_session_memory_ts || 0,
+          last_generation_run_ts: data.meta?.last_generation_run_ts || 0,
+        },
+        version:
+          typeof data.version === "number"
+            ? data.version
+            : MEMORY_STORE_VERSION,
+      };
+      // Ensure JSONFile.data points at our normalized state object.
+      this.#jsonFile.data = this.#state;
+
+      // If memories were migrated from an older schema, save
+      if (isMemoriesMigrated) {
+        this.#jsonFile?.saveSoon();
+        Services.obs.notifyObservers(null, MEMORY_STORE_CHANGED);
+      }
+    }
+
+    this.#initialized = true;
+  }
 
   /**
    * Initialize the store: set up JSONFile and load from disk.
@@ -383,24 +408,24 @@ export const MemoryStore = {
    * @returns {Promise<void>}
    */
   async ensureInitialized() {
-    if (gInitialized) {
+    if (this.#initialized) {
       return;
     }
 
-    if (!gInitPromise) {
-      gInitPromise = loadMemories();
+    if (!this.#initPromise) {
+      this.#initPromise = this.#loadMemories();
     }
 
-    await gInitPromise;
-  },
+    await this.#initPromise;
+  }
 
   /**
    * Request a debounced write of the current in-memory state to disk.
    */
   async requestSave() {
     await this.ensureInitialized();
-    gJSONFile?.saveSoon();
-  },
+    this.#jsonFile?.saveSoon();
+  }
 
   /**
    * Force writing current in-memory state to disk immediately.
@@ -409,11 +434,11 @@ export const MemoryStore = {
    */
   async testOnlyFlush() {
     await this.ensureInitialized();
-    if (!gJSONFile) {
+    if (!this.#jsonFile) {
       return;
     }
-    await gJSONFile._save();
-  },
+    await this.#jsonFile._save();
+  }
 
   /**
    * @typedef {object} Memory
@@ -535,13 +560,13 @@ export const MemoryStore = {
         merge_count: memoryPartial.merge_count || 0,
       };
 
-      gState.memories.push(memory);
-      gJSONFile?.saveSoon();
+      this.#state.memories.push(memory);
+      this.#jsonFile?.saveSoon();
       Services.obs.notifyObservers(null, MEMORY_STORE_CHANGED);
     }
-    updateMemoriesCountMetric();
+    this.#updateMemoriesCountMetric();
     return memory;
-  },
+  }
 
   /**
    * Update an existing memory by id.
@@ -553,7 +578,7 @@ export const MemoryStore = {
   async updateMemory(id, updates) {
     await this.ensureInitialized();
 
-    const memory = gState.memories.find(i => i.id === id);
+    const memory = this.#state.memories.find(i => i.id === id);
     if (!memory) {
       return null;
     }
@@ -636,10 +661,10 @@ export const MemoryStore = {
 
     memory.updated_at ||= updates.updated_at || Date.now();
 
-    gJSONFile?.saveSoon();
+    this.#jsonFile?.saveSoon();
     Services.obs.notifyObservers(null, MEMORY_STORE_CHANGED);
     return memory;
-  },
+  }
 
   /**
    * Soft delete an memory (set is_deleted = true).
@@ -652,9 +677,9 @@ export const MemoryStore = {
   async softDeleteMemory(id) {
     let memory = await this.updateMemory(id, { is_deleted: true });
     Services.obs.notifyObservers(null, MEMORY_STORE_CHANGED);
-    updateMemoriesCountMetric();
+    this.#updateMemoriesCountMetric();
     return memory;
-  },
+  }
 
   /**
    * hard delete (remove from array).
@@ -666,21 +691,23 @@ export const MemoryStore = {
    */
   async hardDeleteMemory(id, trigger = "other", inUse = null) {
     await this.ensureInitialized();
-    const idx = gState.memories.findIndex(i => i.id === id);
+    const idx = this.#state.memories.findIndex(i => i.id === id);
     if (idx === -1) {
       return false;
     }
-    gState.memories.splice(idx, 1);
-    gJSONFile?.saveSoon();
-    Glean.smartWindow.memoryRemovedPanel.record({
-      memories: gState.memories.length,
-      trigger,
-      in_use: inUse,
-    });
+    this.#state.memories.splice(idx, 1);
+    this.#jsonFile?.saveSoon();
+    if (this.#recordMetrics) {
+      Glean.smartWindow.memoryRemovedPanel.record({
+        memories: this.#state.memories.length,
+        trigger,
+        in_use: inUse,
+      });
+    }
     Services.obs.notifyObservers(null, MEMORY_STORE_CHANGED);
-    updateMemoriesCountMetric();
+    this.#updateMemoriesCountMetric();
     return true;
-  },
+  }
 
   /**
    * Computes a hash of memories for cache invalidation.
@@ -704,7 +731,7 @@ export const MemoryStore = {
     }
 
     return hash;
-  },
+  }
 
   /**
    * Clears the embeddings cache. Used for testing.
@@ -712,7 +739,7 @@ export const MemoryStore = {
   _clearEmbeddingsCache() {
     this.memoryEmbeddingsCache = null;
     this.memoryCacheKey = null;
-  },
+  }
 
   /**
    * Fetches relevant memories for a given user message using semantic similarity.
@@ -781,7 +808,7 @@ export const MemoryStore = {
       .filter(m => m.similarity >= similarityThreshold)
       .sort((a, b) => b.similarity - a.similarity)
       .slice(0, topK);
-  },
+  }
 
   /**
    * Expands a day list like "0-2,4" into a deduped array of day indices, dropping
@@ -808,7 +835,7 @@ export const MemoryStore = {
       }
     }
     return [...days].filter(day => day >= 0 && day < MEMORY_FRECENCY_MAX_DAYS);
-  },
+  }
 
   /**
    * Resolves a filter field against a memory.
@@ -836,7 +863,7 @@ export const MemoryStore = {
       (sum, day) => sum + (map[day] ?? 0),
       0
     );
-  },
+  }
 
   /**
    * Get all memories (optionally filtered and sorted).
@@ -892,7 +919,7 @@ export const MemoryStore = {
   } = {}) {
     await this.ensureInitialized();
 
-    let res = gState.memories;
+    let res = this.#state.memories;
 
     // Filter soft deletion first
     if (!includeSoftDeleted) {
@@ -963,7 +990,7 @@ export const MemoryStore = {
     }
 
     return res;
-  },
+  }
 
   /**
    * Get current meta block.
@@ -972,8 +999,8 @@ export const MemoryStore = {
    */
   async getMeta() {
     await this.ensureInitialized();
-    return structuredClone(gState.meta);
-  },
+    return structuredClone(this.#state.meta);
+  }
 
   /**
    * Update meta information (last timestamps, top_* info, etc).
@@ -988,7 +1015,7 @@ export const MemoryStore = {
    */
   async updateMeta(partialMeta) {
     await this.ensureInitialized();
-    const meta = gState.meta;
+    const meta = this.#state.meta;
     const validatedProps = [
       ["last_history_memory_ts", v => Number.isFinite(v)],
       ["last_chat_memory_ts", v => Number.isFinite(v)],
@@ -1002,17 +1029,46 @@ export const MemoryStore = {
       }
     }
 
-    gJSONFile?.saveSoon();
-    updateMemoriesLastUpdatedMetric();
-  },
-};
+    this.#jsonFile?.saveSoon();
+    this.#updateMemoriesLastUpdatedMetric();
+  }
 
-function updateMemoriesCountMetric() {
+  #updateMemoriesCountMetric() {
+    if (!this.#recordMetrics) {
+      return;
+    }
+    updateMemoriesCountMetric(this.#state);
+  }
+
+  #updateMemoriesLastUpdatedMetric() {
+    if (!this.#recordMetrics) {
+      return;
+    }
+    updateMemoriesLastUpdatedMetric(this.#state);
+  }
+}
+
+/**
+ * The store persisted in the profile directory.
+ */
+export const MemoryStore = new MemoryStoreImpl(
+  () =>
+    PathUtils.join(
+      Services.dirsvc.get("ProfD", Ci.nsIFile).path,
+      MEMORY_STORE_FILE
+    ),
+  { recordMetrics: true }
+);
+
+/**
+ * @param {object} state
+ */
+function updateMemoriesCountMetric(state) {
   let historyCount = 0;
   let conversationCount = 0;
   let sessionCount = 0;
 
-  for (const memory of gState.memories) {
+  for (const memory of state.memories) {
     if (memory.is_deleted) {
       continue;
     }
@@ -1029,15 +1085,18 @@ function updateMemoriesCountMetric() {
   Glean.smartWindow.memoriesCount.conversation.set(conversationCount);
   Glean.smartWindow.memoriesCount.session.set(sessionCount);
 
-  updateMemoriesLastUpdatedMetric();
+  updateMemoriesLastUpdatedMetric(state);
 }
 
-function updateMemoriesLastUpdatedMetric() {
+/**
+ * @param {object} state
+ */
+function updateMemoriesLastUpdatedMetric(state) {
   const lastUpdated =
     Math.max(
-      gState.meta.last_history_memory_ts || 0,
-      gState.meta.last_chat_memory_ts || 0,
-      gState.meta.last_session_memory_ts || 0
+      state.meta.last_history_memory_ts || 0,
+      state.meta.last_chat_memory_ts || 0,
+      state.meta.last_session_memory_ts || 0
     ) || Date.now();
   if (!lastUpdated || lastUpdated <= 0) {
     return;
