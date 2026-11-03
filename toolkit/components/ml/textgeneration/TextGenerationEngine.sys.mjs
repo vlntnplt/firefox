@@ -44,6 +44,21 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  */
 
 /**
+ * The chat completion request shape openAIEngine consumers send to run().
+ *
+ * @typedef {object} ChatCompletionRequest
+ * @property {Array<{ role: string, content: unknown, tool_calls?: unknown[] }>} args
+ * @property {Record<string, any>} [inferenceParams] temperature, top_p and
+ *   max_completion_tokens / max_tokens apply; response_format is not enforced.
+ *   `samplers` is the chain the model is served with, which temperature and
+ *   top_p adjust.
+ * @property {unknown[]} [tools]
+ * @property {string} [token]
+ * @property {string} [chatId]
+ * @property {object} [streamOptions]
+ */
+
+/**
  * @typedef {object} EngineRunResult
  * @property {true} done
  * @property {string} finalOutput
@@ -138,6 +153,91 @@ function toGenerateRequest(request) {
       request.stopOnEndOfGenerationTokens;
   }
   return generateRequest;
+}
+
+const CHAT_COMPLETION_ROLES = new Set(["system", "user", "assistant"]);
+
+/**
+ * @param {{ temperature?: number, top_p?: number, samplers?: TextGenerationSampler[] }} inferenceParams
+ * @returns {TextGenerationSampler[]}
+ */
+function toSamplers({ temperature, top_p, samplers }) {
+  // Chat completion defaults: temperature 1, no nucleus cut; 0 is greedy.
+  if (temperature === 0) {
+    return [];
+  }
+  if (!samplers) {
+    /** @type {TextGenerationSampler[]} */
+    const chain = [];
+    if (top_p != null && top_p < 1) {
+      chain.push({ type: "top-p", topP: top_p });
+    }
+    chain.push({ type: "temperature", temp: temperature ?? 1 });
+    chain.push({ type: "dist" });
+    return chain;
+  }
+  const chain = samplers.map(sampler => ({ ...sampler }));
+  const set = (type, fields, before) => {
+    const step = chain.find(sampler => sampler.type === type);
+    if (step) {
+      Object.assign(step, fields);
+      return;
+    }
+    const index = chain.findIndex(sampler => sampler.type === before);
+    chain.splice(index < 0 ? chain.length : index, 0, { type, ...fields });
+  };
+  if (top_p != null) {
+    set("top-p", { topP: top_p }, "temperature");
+  }
+  if (temperature != null) {
+    set("temperature", { temp: temperature }, "dist");
+  }
+  return chain;
+}
+
+/**
+ * @param {ChatCompletionRequest} request
+ * @returns {TextGenerationRequest}
+ */
+function toGenerateRequestFromChatCompletion(request) {
+  if (request.tools?.length) {
+    throw new Error("TextGenerationEngine: tools are not supported");
+  }
+  const messages = request.args.map(message => {
+    if (message.tool_calls?.length) {
+      throw new Error("TextGenerationEngine: tool calls are not supported");
+    }
+    if (!CHAT_COMPLETION_ROLES.has(message.role)) {
+      throw new Error(
+        `TextGenerationEngine: unsupported message role "${message.role}"`
+      );
+    }
+    if (typeof message.content !== "string") {
+      throw new Error("TextGenerationEngine: message content must be a string");
+    }
+    return {
+      role: /** @type {TextGenerationRole} */ (message.role),
+      content: message.content,
+    };
+  });
+  const params = request.inferenceParams ?? {};
+  /** @type {TextGenerationRequest} */
+  const generateRequest = { messages, samplers: toSamplers(params) };
+  const maxTokens = params.max_completion_tokens ?? params.max_tokens;
+  if (maxTokens != null) {
+    generateRequest.maxTokens = maxTokens;
+  }
+  return generateRequest;
+}
+
+/**
+ * @param {LlamaRunRequest | ChatCompletionRequest} request
+ * @returns {TextGenerationRequest}
+ */
+function toAnyGenerateRequest(request) {
+  return "args" in request
+    ? toGenerateRequestFromChatCompletion(request)
+    : toGenerateRequest(request);
 }
 
 /**
@@ -241,6 +341,11 @@ export class TextGenerationEngine {
   pipelineOptions;
   /** @type {"uninitialized" | "ready" | "closed"} */
   engineStatus = "uninitialized";
+
+  /** The model id, as consumers of a chat completion engine read it. */
+  get model() {
+    return this.pipelineOptions.modelId;
+  }
   /** @type {NotificationsCallback | null} */
   notificationsCallback = null;
   /** @type {InstanceType<typeof lazy.MLTelemetry>} */
@@ -375,20 +480,18 @@ export class TextGenerationEngine {
   }
 
   /**
-   * @param {LlamaRunRequest} request
+   * @param {LlamaRunRequest | ChatCompletionRequest} request
    * @param {(text: string) => void} [onDelta]
    * @returns {Promise<EngineRunResult>}
    */
   async #execute(request, onDelta) {
     const generator = this.#runnableGenerator();
+    const generateRequest = toAnyGenerateRequest(request);
     this.#inFlight = true;
     try {
       const runStart = ChromeUtils.now();
       generator.clear();
-      const result = await generator.generate(
-        toGenerateRequest(request),
-        onDelta
-      );
+      const result = await generator.generate(generateRequest, onDelta);
       const runEnd = ChromeUtils.now();
       return {
         done: true,
@@ -426,7 +529,7 @@ export class TextGenerationEngine {
     });
   }
 
-  /** @param {LlamaRunRequest} request */
+  /** @param {LlamaRunRequest | ChatCompletionRequest} request */
   async run(request) {
     const stats = new StreamStats();
     try {
@@ -439,7 +542,7 @@ export class TextGenerationEngine {
     }
   }
 
-  /** @param {LlamaRunRequest} request */
+  /** @param {LlamaRunRequest | ChatCompletionRequest} request */
   async *runWithGenerator(request) {
     const stats = new StreamStats();
     stats.streaming = true;
