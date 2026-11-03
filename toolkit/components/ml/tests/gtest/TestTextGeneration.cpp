@@ -118,7 +118,7 @@ CopyableTArray<Sampler> GreedySamplers() {
   // WebIDL defaults for the fields each sampler ignores.
   Sampler topK(dom::TextGenerationSamplerType::Top_k, /* topK */ 1,
                /* topP */ 0.95f, /* temp */ 0.80f,
-               /* seed */ 0xFFFFFFFF, CopyableTArray<LogitBias>());
+               /* seed */ 0xFFFFFFFF, CopyableTArray<LogitBias>(), ""_ns);
   Sampler dist = topK;
   dist.type() = dom::TextGenerationSamplerType::Dist;
   samplers.AppendElement(topK);
@@ -245,6 +245,33 @@ TEST_F(TextGenerationTest, GenerateFromModel) {
   EXPECT_GE(result.resources().after().cpuTimeMs(),
             result.resources().before().cpuTimeMs());
   EXPECT_GT(result.resources().after().memoryBytes(), 0u);
+
+  Teardown(session);
+}
+
+// Terminals the TinyStories vocabulary can spell; a grammar it cannot spell
+// leaves no admissible token and llama.cpp aborts.
+TEST_F(TextGenerationTest, GrammarConstrainsGeneration) {
+  Session session = CreateGenerator();
+  ASSERT_TRUE(session.mGenerator);
+  EXPECT_TRUE(WaitForReady(session).isNothing());
+
+  GenerateRequest request = StoryRequest();
+  request.samplers().Clear();
+  request.samplers().AppendElement(Sampler(
+      dom::TextGenerationSamplerType::Grammar, 40, 0.95f, 0.80f, 0xFFFFFFFF,
+      CopyableTArray<LogitBias>(), "root ::= \"no\" | \"a\" | \"the\""_ns));
+
+  GenerateResponse response = Generate(session, request);
+  ASSERT_EQ(response.type(), GenerateResponse::TGenerateResult);
+  const nsCString& content = response.get_GenerateResult().content();
+  EXPECT_TRUE(content == "no"_ns || content == "a"_ns || content == "the"_ns)
+      << content.get();
+
+  // Parses, but has no root rule: rejected without aborting the process.
+  request.samplers()[0].grammar() = "start ::= \"no\""_ns;
+  response = Generate(session, request, /* aErrorExpected */ true);
+  EXPECT_EQ(response.type(), GenerateResponse::TGenerateError);
 
   Teardown(session);
 }

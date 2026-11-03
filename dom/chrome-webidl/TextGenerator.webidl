@@ -15,6 +15,7 @@ enum TextGenerationSamplerType {
   "top-p",
   "temperature",
   "dist",
+  "grammar",
 };
 
 enum TextGenerationFinishReason {
@@ -71,6 +72,12 @@ dictionary TextGenerationSampler {
   float temp = 0.80;
   sequence<TextGenerationLogitBias> logitBias = [];
   unsigned long seed;
+  /**
+   * GBNF with a `root` rule, for the "grammar" sampler. The parser aborts
+   * the inference process on a grammar it rejects: pass only grammars built
+   * by JSONSchemaGrammar.sys.mjs.
+   */
+  UTF8String grammar = "";
 };
 
 dictionary TextGenerationRequest {
@@ -78,6 +85,7 @@ dictionary TextGenerationRequest {
   unsigned long maxTokens = 512;
   /** Generated tokens batched into one delta callback. */
   unsigned long bufferLength = 20;
+  /** A chain without a "dist" sampler ends in greedy selection. */
   sequence<TextGenerationSampler> samplers = [];
   sequence<long> stopTokens = [];
   boolean stopOnEndOfGenerationTokens = true;

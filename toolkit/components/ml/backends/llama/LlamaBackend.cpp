@@ -493,16 +493,8 @@ LlamaBackend::SamplerResult LlamaBackend::InitializeSampler(
   LlamaSamplerUPtr sampler(mLib->llama_sampler_chain_init(
       mLib->llama_sampler_chain_default_params()));
 
-  // Default to greedy decoding when no samplers are specified.
-  // This is a standard inference strategy that requires no tuning
-  // and produces deterministic outputs. Often use for Summarization, QA and
-  // RAG.
-  if (aSamplers.IsEmpty()) {
-    mLib->llama_sampler_chain_add(sampler.get(),
-                                  mLib->llama_sampler_init_greedy());
-  }
-
   auto n_vocab = mLib->llama_vocab_n_tokens(vocab);
+  bool selectsToken = false;
 
   for (const auto& samplerConfig : aSamplers) {
     llama_sampler* samplerElement = nullptr;
@@ -517,8 +509,19 @@ LlamaBackend::SamplerResult LlamaBackend::InitializeSampler(
                         ? samplerConfig.mSeed.Value()
                         : LLAMA_DEFAULT_SEED;
         samplerElement = mLib->llama_sampler_init_dist(seed);
+        selectsToken = true;
         break;
       }
+
+      case LlamaSamplerType::Grammar:
+        samplerElement = mLib->llama_sampler_init_grammar(
+            vocab, samplerConfig.mGrammar.get(), "root");
+        if (!samplerElement) {
+          auto msg = nsFmtCString("{}: Grammar rejected", __PRETTY_FUNCTION__);
+          LOGE("{}", msg);
+          return mozilla::Err(Error{std::move(msg)});
+        }
+        break;
 
       case LlamaSamplerType::Top_k:
         samplerElement = mLib->llama_sampler_init_top_k(samplerConfig.mTopK);
@@ -552,6 +555,12 @@ LlamaBackend::SamplerResult LlamaBackend::InitializeSampler(
     if (samplerElement) {
       mLib->llama_sampler_chain_add(sampler.get(), samplerElement);
     }
+  }
+
+  // llama_sampler_sample asserts when no sampler selected a token.
+  if (!selectsToken) {
+    mLib->llama_sampler_chain_add(sampler.get(),
+                                  mLib->llama_sampler_init_greedy());
   }
 
   LOGV("{} Sampler successfully initialized.", __PRETTY_FUNCTION__);

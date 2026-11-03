@@ -31,6 +31,8 @@ struct Sampler {
   // Only the dist sampler reads this.
   uint32_t seed;
   LogitBias[] logitBias;
+  // Only the grammar sampler reads this.
+  nsCString grammar;
 };
 
 // Appended to the generator's context; Clear() first for a fresh start.

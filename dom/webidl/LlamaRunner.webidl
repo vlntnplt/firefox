@@ -167,6 +167,7 @@ enum LlamaSamplerType {
   "penalties",
   "mirostat",
   "dist",
+  "grammar",
 };
 
 dictionary LlamaLogitBias {
@@ -297,6 +298,11 @@ dictionary LlamaSamplerConfig {
    * List of token-specific logit biases.
    */
   sequence<LlamaLogitBias> logitBias = [];
+
+  /**
+   * GBNF with a `root` rule, for the "grammar" sampler.
+   */
+  UTF8String grammar = "";
 
   /**
    * If true, disables performance metrics.

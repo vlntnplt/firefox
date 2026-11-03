@@ -122,7 +122,7 @@ static GenerateRequest ToGenerateRequest(
     request.samplers().AppendElement(Sampler(
         sampler.mType, sampler.mTopK, sampler.mTopP, sampler.mTemp,
         sampler.mSeed.WasPassed() ? sampler.mSeed.Value() : kDefaultSeed,
-        std::move(logitBias)));
+        std::move(logitBias), sampler.mGrammar));
   }
   return request;
 }

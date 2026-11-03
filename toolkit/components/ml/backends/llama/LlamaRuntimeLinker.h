@@ -86,6 +86,9 @@ namespace mozilla::llama {
   X(struct llama_sampler*, llama_sampler_init_logit_bias,                   \
     (int32_t n_vocab, int32_t n_logit_bias,                                 \
      const llama_logit_bias* logit_bias))                                   \
+  X(struct llama_sampler*, llama_sampler_init_grammar,                      \
+    (const struct llama_vocab* vocab, const char* grammar_str,              \
+     const char* grammar_root))                                             \
   X(void, llama_memory_clear, (llama_memory_t mem, bool data))              \
   X(llama_memory_t, llama_get_memory, (const struct llama_context* ctx))    \
   X(const struct llama_vocab*, llama_model_get_vocab,                       \

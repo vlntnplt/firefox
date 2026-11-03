@@ -59,6 +59,8 @@ static LlamaSamplerType ToLlamaSamplerType(
       return LlamaSamplerType::Temperature;
     case dom::TextGenerationSamplerType::Dist:
       return LlamaSamplerType::Dist;
+    case dom::TextGenerationSamplerType::Grammar:
+      return LlamaSamplerType::Grammar;
   }
   MOZ_CRASH("bad TextGenerationSamplerType");
 }
@@ -172,6 +174,7 @@ static LlamaChatOptions ToLlamaChatOptions(const GenerateRequest& aRequest,
     config->mTopP = sampler.topP();
     config->mTemp = sampler.temp();
     config->mSeed.Construct(sampler.seed());
+    config->mGrammar = sampler.grammar();
     for (const LogitBias& bias : sampler.logitBias()) {
       dom::LlamaLogitBias* entry = config->mLogitBias.AppendElement(fallible);
       MOZ_RELEASE_ASSERT(entry);
