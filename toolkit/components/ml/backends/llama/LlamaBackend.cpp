@@ -4,6 +4,7 @@
 
 #include "LlamaBackend.h"
 
+#include <cmath>
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
@@ -492,6 +493,7 @@ LlamaBackend::SamplerResult LlamaBackend::InitializeSampler(
 
   LlamaSamplerUPtr sampler(mLib->llama_sampler_chain_init(
       mLib->llama_sampler_chain_default_params()));
+  LlamaSamplerUPtr grammar;
 
   auto n_vocab = mLib->llama_vocab_n_tokens(vocab);
   bool selectsToken = false;
@@ -514,9 +516,9 @@ LlamaBackend::SamplerResult LlamaBackend::InitializeSampler(
       }
 
       case LlamaSamplerType::Grammar:
-        samplerElement = mLib->llama_sampler_init_grammar(
-            vocab, samplerConfig.mGrammar.get(), "root");
-        if (!samplerElement) {
+        grammar.reset(mLib->llama_sampler_init_grammar(
+            vocab, samplerConfig.mGrammar.get(), "root"));
+        if (!grammar) {
           auto msg = nsFmtCString("{}: Grammar rejected", __PRETTY_FUNCTION__);
           LOGE("{}", msg);
           return mozilla::Err(Error{std::move(msg)});
@@ -564,7 +566,49 @@ LlamaBackend::SamplerResult LlamaBackend::InitializeSampler(
   }
 
   LOGV("{} Sampler successfully initialized.", __PRETTY_FUNCTION__);
-  return SamplerResult(std::move(sampler));
+  return SamplerResult(Samplers{std::move(sampler), std::move(grammar)});
+}
+
+llama_token LlamaBackend::SampleToken(const Samplers& aSamplers,
+                                      int32_t aLogitIndex,
+                                      nsTArray<llama_token_data>& aCandidates) {
+  llama_sampler* chain = aSamplers.mChain.get();
+  llama_sampler* grammar = aSamplers.mGrammar.get();
+  if (!grammar) {
+    return mLib->llama_sampler_sample(chain, mCtx.get(), aLogitIndex);
+  }
+
+  const float* logits = mLib->llama_get_logits_ith(mCtx.get(), aLogitIndex);
+  const int32_t nVocab =
+      mLib->llama_vocab_n_tokens(mLib->llama_model_get_vocab(mModel.get()));
+  auto setCandidates = [&]() {
+    aCandidates.SetLength(nVocab);
+    for (int32_t i = 0; i < nVocab; i++) {
+      aCandidates[i] = llama_token_data{i, logits[i], 0.0f};
+    }
+    return llama_token_data_array{aCandidates.Elements(), aCandidates.Length(),
+                                  -1, false};
+  };
+
+  llama_token_data_array candidates = setCandidates();
+  mLib->llama_sampler_apply(chain, &candidates);
+  MOZ_RELEASE_ASSERT(candidates.selected >= 0);
+  llama_token token = candidates.data[candidates.selected].id;
+
+  llama_token_data single{token, 1.0f, 0.0f};
+  llama_token_data_array probe{&single, 1, -1, false};
+  mLib->llama_sampler_apply(grammar, &probe);
+  if (single.logit == -INFINITY) {
+    candidates = setCandidates();
+    mLib->llama_sampler_apply(grammar, &candidates);
+    mLib->llama_sampler_apply(chain, &candidates);
+    MOZ_RELEASE_ASSERT(candidates.selected >= 0);
+    token = candidates.data[candidates.selected].id;
+  }
+
+  mLib->llama_sampler_accept(grammar, token);
+  mLib->llama_sampler_accept(chain, token);
+  return token;
 }
 
 ResultStatus LlamaBackend::Generate(
@@ -608,7 +652,8 @@ ResultStatus LlamaBackend::Generate(
     return mozilla::Err(samplerResult.inspectErr());
   }
 
-  auto sampler = samplerResult.unwrap();
+  auto samplers = samplerResult.unwrap();
+  nsTArray<llama_token_data> candidates;
 
   const size_t estimatedNumPromptTokens = aOptions.mPrompt.Length() + 1;
   LOGD("{} Estimated tokenization size is {} {}", __PRETTY_FUNCTION__,
@@ -761,8 +806,7 @@ ResultStatus LlamaBackend::Generate(
 
     LOGV("{}: Sampling the generated probabilities to generate next token {}",
          __PRETTY_FUNCTION__, mModelGeneralName);
-    token = mLib->llama_sampler_sample(sampler.get(), mCtx.get(),
-                                       lastTokenLogitIndex);
+    token = SampleToken(samplers, lastTokenLogitIndex, candidates);
 
     // Sending the end of prompt once we get the first token to ensure
     // all operations are indeed completed.

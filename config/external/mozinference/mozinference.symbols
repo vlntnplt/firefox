@@ -34,6 +34,9 @@ llama_sampler_init_logit_bias
 llama_sampler_init_grammar
 llama_sampler_free
 llama_sampler_sample
+llama_sampler_apply
+llama_sampler_accept
+llama_get_logits_ith
 llama_memory_clear
 llama_get_memory
 llama_model_get_vocab

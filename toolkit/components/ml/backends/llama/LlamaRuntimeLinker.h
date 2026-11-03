@@ -108,6 +108,11 @@ namespace mozilla::llama {
     (struct llama_context * ctx, struct llama_batch batch))                 \
   X(llama_token, llama_sampler_sample,                                      \
     (struct llama_sampler * smpl, struct llama_context * ctx, int32_t idx)) \
+  X(void, llama_sampler_apply,                                              \
+    (struct llama_sampler * smpl, llama_token_data_array * cur_p))          \
+  X(void, llama_sampler_accept,                                             \
+    (struct llama_sampler * smpl, llama_token token))                       \
+  X(float*, llama_get_logits_ith, (struct llama_context * ctx, int32_t i))  \
   X(bool, llama_vocab_is_eog,                                               \
     (const struct llama_vocab* vocab, llama_token token))                   \
   X(int32_t, llama_token_to_piece,                                          \

@@ -132,8 +132,13 @@ class LlamaBackend {
   using LlamaSamplerUPtr =
       mozilla::UniquePtr<llama_sampler, LlamaSamplerDeleter>;
 
-  // sampler result alias
-  using SamplerResult = mozilla::Result<LlamaSamplerUPtr, Error>;
+  // The grammar stays out of the chain: the chain samples first and the
+  // grammar only masks the candidates when it rejects the sampled token.
+  struct Samplers {
+    LlamaSamplerUPtr mChain;
+    LlamaSamplerUPtr mGrammar;
+  };
+  using SamplerResult = mozilla::Result<Samplers, Error>;
 
   // Protected because RefPtr requires a non-public destructor
  protected:
@@ -143,6 +148,9 @@ class LlamaBackend {
   SamplerResult InitializeSampler(
       const mozilla::dom::Sequence<LlamaSamplerConfig>& aSamplers,
       const llama_vocab* vocab);
+
+  llama_token SampleToken(const Samplers& aSamplers, int32_t aLogitIndex,
+                          nsTArray<llama_token_data>& aCandidates);
 
   // Loads on the first device matching aOptions.mPlacement that takes the
   // model.
