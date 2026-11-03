@@ -2274,3 +2274,55 @@ add_task(async function test_migrateStore_renamesWllamaTaskName() {
 
   await deleteCache(cache);
 });
+
+/**
+ * A download already written at its cache path counts once against the size
+ * limit, so a model larger than half the limit still fits.
+ */
+add_task(async function test_PutCountsStoredDownloadOnce() {
+  const size = 4 * 1024 * 1024;
+  // A fixed usage puts the limit between the usage and usage plus the file.
+  const usage = 10 * size;
+  const dbName = `modelFiles-${crypto.randomUUID()}`;
+  await TestIndexedDBCache.deleteDatabaseAndWait(dbName).catch(() => {});
+  const cache = await IndexedDBCache.init({
+    dbName,
+    maxSize: (usage + size / 2) / 1024 ** 3,
+  });
+  cache._testUsage = usage;
+  const location = { model: "org/model", revision: "v1", file: "model.gguf" };
+  const handle = await OPFS.getFileHandle(
+    cache.generateFilePathInOPFS(location),
+    { create: true }
+  );
+  const writable = await handle.createWritable();
+  await writable.write(createBlob(size));
+  await writable.close();
+  const stored = await handle.getFile();
+  try {
+    await cache.put({
+      taskName: "task",
+      ...location,
+      data: stored,
+      headers: { ETag: "ETAG123", fileSize: stored.size },
+    });
+    Assert.ok(
+      await cache.fileExists(location),
+      "The download already in OPFS is admitted"
+    );
+    await Assert.rejects(
+      cache.put({
+        taskName: "task",
+        model: "org/other",
+        revision: "v1",
+        file: "model.gguf",
+        data: createBlob(size),
+        headers: { ETag: "ETAG123" },
+      }),
+      /Exceeding cache size limit/,
+      "A blob of the same size that is not stored yet does not fit"
+    );
+  } finally {
+    await deleteCache(cache);
+  }
+});
