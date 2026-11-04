@@ -76,7 +76,6 @@ export {
 
 import {
   CURRENT_SCHEMA_VERSION,
-  DB_FOLDER_PATH,
   DB_FILE_NAME,
   PREF_BRANCH,
   CONVERSATION_STATUS,
@@ -158,6 +157,7 @@ const STREAM_PERSIST_INTERVAL_MS = 1000;
  */
 class ChatStore {
   #asyncShutdownBlocker;
+  #databaseFilePath;
   #conn;
   #promiseConn;
   #lastRecordedSize;
@@ -172,7 +172,14 @@ class ChatStore {
    */
   #streamingWrites = new Map();
 
-  constructor() {
+  /**
+   * @param {string} [databaseFilePath] Path of the SQLite file; defaults to
+   *   the profile's chat database.
+   */
+  constructor(
+    databaseFilePath = PathUtils.join(PathUtils.profileDir, DB_FILE_NAME)
+  ) {
+    this.#databaseFilePath = databaseFilePath;
     this.#asyncShutdownBlocker = async () => {
       // Flush before closing: #recordDatabaseSize() would otherwise reopen the
       // connection it is racing against. Drop the task afterwards so a write
@@ -1381,8 +1388,8 @@ class ChatStore {
     try {
       for (let file of [
         this.databaseFilePath,
-        PathUtils.join(DB_FOLDER_PATH, this.databaseFileName + "-wal"),
-        PathUtils.join(DB_FOLDER_PATH, this.databaseFileName + "-shm"),
+        this.databaseFilePath + "-wal",
+        this.databaseFilePath + "-shm",
       ]) {
         lazy.log.debug(`Removing ${file}`);
         await IOUtils.remove(file, {
@@ -1709,13 +1716,16 @@ class ChatStore {
   }
 
   get databaseFileName() {
-    return DB_FILE_NAME;
+    return PathUtils.filename(this.#databaseFilePath);
   }
 
   get databaseFilePath() {
-    return PathUtils.join(PathUtils.profileDir, this.databaseFileName);
+    return this.#databaseFilePath;
   }
 }
 
+/**
+ * The store persisted in the profile directory.
+ */
 const chatStore = new ChatStore();
-export { chatStore as ChatStore };
+export { chatStore as ChatStore, ChatStore as ChatStoreImpl };

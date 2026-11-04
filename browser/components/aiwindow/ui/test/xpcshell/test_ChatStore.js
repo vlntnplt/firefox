@@ -12,9 +12,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   sinon: "resource://testing-common/Sinon.sys.mjs",
 });
 
-const { ChatStore, ChatConversation, ChatMessage } = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/ui/modules/ChatStore.sys.mjs"
-);
+const { ChatStore, ChatStoreImpl, ChatConversation, ChatMessage } =
+  ChromeUtils.importESModule(
+    "moz-src:///browser/components/aiwindow/ui/modules/ChatStore.sys.mjs"
+  );
 const { UserRoleOpts } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/ui/modules/ChatMessage.sys.mjs"
 );
@@ -1391,4 +1392,36 @@ add_atomic_task(async function test_memoriesToggled_upsert_updatesValue() {
     false,
     "memoriesToggled should be false after second upsert"
   );
+});
+
+add_atomic_task(async function test_store_on_another_path() {
+  const path = PathUtils.join(PathUtils.profileDir, "scratch-chat.sqlite");
+  const scratch = new ChatStoreImpl(path);
+  try {
+    Assert.equal(scratch.databaseFilePath, path);
+    Assert.equal(scratch.databaseFileName, "scratch-chat.sqlite");
+    Assert.notEqual(
+      ChatStore.databaseFilePath,
+      path,
+      "The profile store keeps its own file"
+    );
+
+    const conversation = new ChatConversation({ pageUrl: "https://a.b/" });
+    conversation.title = "Scratch";
+    conversation.addUserMessage("in the scratch store", "https://a.b/", 0);
+    await scratch.updateConversation(conversation);
+
+    Assert.ok(
+      await scratch.findConversationById(conversation.id),
+      "The scratch store holds the conversation"
+    );
+    Assert.equal(
+      await gChatStore.findConversationById(conversation.id),
+      null,
+      "The profile store does not"
+    );
+  } finally {
+    await scratch.destroyDatabase();
+  }
+  Assert.ok(!(await IOUtils.exists(path)), "destroyDatabase removes the file");
 });
