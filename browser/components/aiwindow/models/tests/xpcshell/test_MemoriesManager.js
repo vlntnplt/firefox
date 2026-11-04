@@ -24,7 +24,7 @@ const {
 } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/memories/MemoriesConstants.sys.mjs"
 );
-const { MemoryStore } = ChromeUtils.importESModule(
+const { MemoryStore, MemoryStoreImpl } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
 );
 const { AIWindow } = ChromeUtils.importESModule(
@@ -259,6 +259,55 @@ add_task(async function test_memoryClassifyMessage_happy_path() {
       messageClassification.intents,
       ["Plan / Organize"],
       "Intents should match the fake response."
+    );
+  } finally {
+    sb.restore();
+  }
+});
+
+/**
+ * Tests classifying and tagging a memory of a given store through a given
+ * conversation, leaving the profile store and the cached conversation alone.
+ */
+add_task(async function test_enrichExistingMemory_on_given_store() {
+  const sb = sinon.createSandbox();
+  const store = new MemoryStoreImpl(null);
+  try {
+    const memory = await store.addMemory({
+      memory_summary: TEST_MESSAGE,
+      reasoning: "User requested.",
+    });
+    const conversation = {
+      clearMessages() {},
+      setSystemMessage() {},
+      addUserMessage() {},
+      run() {
+        return {
+          finalOutput: `{
+            "categories": ["Food & Drink"],
+            "intents": ["Plan / Organize"]
+          }`,
+        };
+      },
+    };
+    const cached = sb.stub(MemoriesManager, "ensureConversationForUsage");
+
+    await MemoriesManager.enrichExistingMemory(memory.id, TEST_MESSAGE, {
+      store,
+      conversation,
+    });
+
+    Assert.ok(cached.notCalled, "The given conversation serves the call");
+    const [tagged] = await store.getMemories();
+    Assert.deepEqual(
+      tagged.tags,
+      ["category:Food & Drink", "intent:Plan / Organize"],
+      "The given store's memory is tagged"
+    );
+    Assert.deepEqual(
+      await MemoryStore.getMemories({ includeSoftDeleted: true }),
+      [],
+      "The profile store stays empty"
     );
   } finally {
     sb.restore();
@@ -572,19 +621,24 @@ add_task(async function test_saveRequestedMemory_happy_path_creates() {
 });
 
 /**
- * Tests the unified entry point short-circuits when neither source is enabled.
+ * Tests the unified entry point short-circuits when both sources are disabled.
  */
 add_task(async function test_generateMemoriesFromSessions_disabled_noop() {
   const sb = sinon.createSandbox();
   try {
-    sb.stub(MemoriesManager, "shouldEnableMemoriesFromSchedulers").returns(
-      false
+    const ensureConversation = sb.spy(
+      MemoriesManager,
+      "ensureConversationForGeneration"
     );
+    const findMessagesByDate = sb.spy(ChatStore, "findMessagesByDate");
     const result = await MemoriesManager.generateMemoriesFromSessions({
+      sources: { history: false, conversation: false },
       maxBatchRetries: 1,
       initialMemoryGenerationRetryDelayMS: 1,
     });
     Assert.deepEqual(result, [], "Should return [] when no source is enabled");
+    Assert.ok(findMessagesByDate.notCalled, "Should not read ChatStore");
+    Assert.ok(ensureConversation.notCalled, "Should not build a conversation");
   } finally {
     sb.restore();
   }

@@ -6,12 +6,13 @@
 const { MemoriesManager } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/memories/MemoriesManager.sys.mjs"
 );
-const { MemoryStore } = ChromeUtils.importESModule(
+const { MemoryStore, MemoryStoreImpl } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs"
 );
-const { ChatStore, ChatConversation } = ChromeUtils.importESModule(
-  "moz-src:///browser/components/aiwindow/ui/modules/ChatStore.sys.mjs"
-);
+const { ChatStore, ChatStoreImpl, ChatConversation } =
+  ChromeUtils.importESModule(
+    "moz-src:///browser/components/aiwindow/ui/modules/ChatStore.sys.mjs"
+  );
 const {
   MEMORY_TYPE_DURABLE_MEMORY,
   MEMORY_TYPE_LONG_TERM_MEMORY,
@@ -38,8 +39,11 @@ const {
 } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/memories/Memories.sys.mjs"
 );
-const { PURPOSES } = ChromeUtils.importESModule(
+const { MODEL_FEATURES, PURPOSES } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/Utils.sys.mjs"
+);
+const { buildConversation } = ChromeUtils.importESModule(
+  "moz-src:///browser/components/aiwindow/models/PromptLoader.sys.mjs"
 );
 const { MockEngineManager } = ChromeUtils.importESModule(
   "resource://testing-common/AIWindowTestUtils.sys.mjs"
@@ -274,6 +278,7 @@ function newestSessionEndMs(count, baseMicros) {
  * batch and then keeping all of them through the closing quality filter.
  *
  * @param {object} pipelineOpts  Forwarded to generateMemoriesFromSessions()
+ * @param {object} [deps]        Forwarded to generateMemoriesFromSessions()
  * @returns {Promise<{
  *   generationPrompts: Array<string>,
  *   keptSummaries: Array<string>,
@@ -282,8 +287,11 @@ function newestSessionEndMs(count, baseMicros) {
  *        `generationPrompts` holds one serialized request per generation batch,
  *        in the order the pipeline issued them.
  */
-async function runSessionGenerationWithMockEngine(pipelineOpts) {
-  const runPromise = MemoriesManager.generateMemoriesFromSessions(pipelineOpts);
+async function runSessionGenerationWithMockEngine(pipelineOpts, deps) {
+  const runPromise = MemoriesManager.generateMemoriesFromSessions(
+    pipelineOpts,
+    deps
+  );
 
   const generationPrompts = [];
   let filterTurn = null;
@@ -2709,3 +2717,114 @@ add_task(
     gMockEngineManager.assertAllRequestsHandled();
   }
 );
+
+/**
+ * Tests the three pipeline entry points against a scratch memory store, a
+ * scratch chat store and a given conversation, leaving the profile stores
+ * untouched.
+ */
+add_task(async function test_pipeline_runs_on_given_stores_and_conversation() {
+  await clearMemories();
+  await MemoryStore.updateMeta({
+    last_session_memory_ts: 0,
+    last_history_memory_ts: 0,
+    last_chat_memory_ts: 0,
+  });
+
+  const store = new MemoryStoreImpl(null);
+  const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  const seeded = await store.addMemory({
+    memory_summary: "Seeded scratch memory",
+    reasoning: "Seeded for the scratch run",
+    created_at: twoDaysAgo,
+    updated_at: twoDaysAgo,
+    last_accessed: twoDaysAgo,
+    ...STRONG_MEMORY_FIELDS,
+  });
+
+  const baseMicros = Date.now() * 1000 - 6 * 60 * 60 * 1000 * 1000;
+  const chatStore = new ChatStoreImpl(
+    PathUtils.join(PathUtils.profileDir, "scratch-chat.sqlite")
+  );
+  const chatBody = "Which trail shoes grip best on wet rock?";
+  const scratchChat = new ChatConversation({});
+  scratchChat.title = "Scratch chat";
+  scratchChat.addUserMessage(chatBody, "https://example.com/", 0);
+  scratchChat.messages.at(-1).createdDate = baseMicros / 1000 + 60 * 1000;
+  await chatStore.updateConversation(scratchChat);
+
+  const sandbox = sinon.createSandbox();
+  try {
+    sandbox
+      .stub(MemoriesManager, "_getRecentHistory")
+      .resolves(buildSessionHistoryRows(2, baseMicros));
+    const conversation = await buildConversation(
+      MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM
+    );
+    const deps = { store, chatStore, conversation };
+
+    const collected = await MemoriesManager.collectSessions({}, deps);
+    Assert.ok(
+      collected.sessions.some(session =>
+        session.chats.some(message => message.content === chatBody)
+      ),
+      "collectSessions reads the scratch chat store."
+    );
+    Assert.equal(collected.watermarkMs, 0, "First run of the scratch store.");
+
+    await MemoriesManager.runMemoryMaintenance(deps);
+    Assert.greater(
+      (await store.getMemories())[0].updated_at,
+      twoDaysAgo,
+      "Maintenance should age the scratch store's memory."
+    );
+
+    const { generationPrompts, persisted } =
+      await runSessionGenerationWithMockEngine(
+        { maxBatchRetries: 1, initialMemoryGenerationRetryDelayMS: 1 },
+        deps
+      );
+    Assert.ok(
+      generationPrompts.join("").includes(chatBody),
+      "The scratch chat store's message should reach the generation prompt."
+    );
+    Assert.equal(persisted.length, 1, "Generation should store one memory.");
+    Assert.greater(
+      await MemoriesManager.getLastSessionMemoryTimestamp(store),
+      0,
+      "The scratch store's watermark should advance."
+    );
+
+    const mergePromise = MemoriesManager.mergeMemories(MERGE_ALL, deps);
+    await respondToMergeRequest(
+      [seeded.memory_summary, persisted[0].memory_summary],
+      "Merged scratch memory"
+    );
+    await mergePromise;
+
+    Assert.deepEqual(
+      (await store.getMemories()).map(memory => memory.memory_summary),
+      ["Merged scratch memory"],
+      "The scratch store should hold the merged result."
+    );
+    Assert.deepEqual(
+      await MemoryStore.getMemories({ includeSoftDeleted: true }),
+      [],
+      "The profile store should stay empty."
+    );
+    Assert.equal(
+      await MemoriesManager.getLastSessionMemoryTimestamp(),
+      0,
+      "The profile store's watermark should not move."
+    );
+    Assert.equal(
+      await ChatStore.findConversationById(scratchChat.id),
+      null,
+      "The profile chat store should not hold the scratch chat."
+    );
+    gMockEngineManager.assertAllRequestsHandled();
+  } finally {
+    sandbox.restore();
+    await chatStore.destroyDatabase();
+  }
+});

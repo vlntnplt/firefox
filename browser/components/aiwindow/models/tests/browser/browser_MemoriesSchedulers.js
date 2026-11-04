@@ -620,6 +620,11 @@ add_task(async function test_chat_pull_excludes_watermark_boundary() {
         generate.calledOnce,
         "A genuinely new message should still trigger generation."
       );
+      Assert.deepEqual(
+        generate.firstCall.args[0],
+        { sources: { history: false, conversation: true } },
+        "The disabled history source should be opted out of generation."
+      );
 
       Assert.equal(
         findMessagesByDate.callCount,
@@ -705,6 +710,11 @@ add_task(async function test_history_pull_excludes_watermark_boundary() {
       });
 
       Assert.ok(generate.calledOnce, "Generation should have run for real.");
+      Assert.deepEqual(
+        generate.firstCall.args[0],
+        { sources: { history: true, conversation: false } },
+        "The disabled chat source should be opted out of generation."
+      );
       Assert.ok(
         getRecentHistory.calledOnce,
         "The run should have made exactly one history pull."

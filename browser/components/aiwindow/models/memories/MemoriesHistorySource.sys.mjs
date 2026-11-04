@@ -105,6 +105,9 @@ let _sensitiveInfoDetector = new SensitiveInfoDetector();
  *        sorting by most recent visit). Note that this caps the number
  *        of visits, not distinct URLs.
  *
+ * @param {object} [opts.db]
+ *        Sqlite connection to query instead of the profile's Places database.
+ *
  * @returns {Promise<Array<{
  *   url: string,
  *   urlHash: number,
@@ -129,6 +132,7 @@ export async function getRecentHistory(opts = {}) {
     days = DEFAULT_DAYS,
     maxResults = DEFAULT_MAX_RESULTS,
     minPageViewtime = DEFAULT_PAGE_VIEWTIME,
+    db: givenDb = null,
   } = opts;
 
   // Places stores visit_date in microseconds since epoch.
@@ -271,8 +275,13 @@ export async function getRecentHistory(opts = {}) {
     LIMIT :limit
     `;
 
+  // A given connection is queried in place of the profile's Places database.
+  const withConnection = (name, task) =>
+    givenDb
+      ? givenDb.executeBeforeShutdown(name, task)
+      : PlacesUtils.withConnectionWrapper(name, task);
   try {
-    const rows = await PlacesUtils.withConnectionWrapper(
+    const rows = await withConnection(
       "smartwindow-getRecentHistory",
       async db => {
         const stmt = await db.execute(SQL, {

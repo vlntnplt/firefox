@@ -443,3 +443,36 @@ add_task(async function test_getRecentChats_filters_sensitive_keywords() {
     clock.restore?.();
   }
 });
+
+add_task(async function test_getRecentChats_reads_the_given_store() {
+  const now = Date.now();
+  const profileStore = sandbox.stub(ChatStore, "findMessagesByDate");
+  const chatStore = {
+    findMessagesByDate: sinon.stub().resolves([
+      new ChatMessage({
+        createdDate: now - 1000,
+        ordinal: 0,
+        role: MESSAGE_ROLE.USER,
+        content: { type: "text", body: "Planning a weekend hike" },
+        pageUrl: new URL("https://example.com/chat"),
+        convId: "conv-1",
+      }),
+    ]),
+  };
+
+  const result = await getRecentChats(now - MS_PER_DAY, 3, 7, { chatStore });
+
+  Assert.ok(profileStore.notCalled, "The profile store is not queried");
+  const [startDate, endDate, role, limit] =
+    chatStore.findMessagesByDate.firstCall.args;
+  Assert.equal(startDate.getTime(), now - MS_PER_DAY, "Start of the window");
+  Assert.greaterOrEqual(endDate.getTime(), now, "End of the window");
+  Assert.equal(role, MESSAGE_ROLE.USER, "User messages only");
+  Assert.equal(limit, 3, "Result limit");
+  Assert.deepEqual(
+    result.map(r => r.content),
+    ["Planning a weekend hike"],
+    "Its messages are mapped like the profile store's"
+  );
+  Assert.greater(result[0].freshness_score, 0.99, "Freshness is computed");
+});

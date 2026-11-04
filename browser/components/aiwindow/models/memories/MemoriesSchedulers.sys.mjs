@@ -364,7 +364,12 @@ export class MemoriesSchedulers {
       // Run memories generation
       lazy.console.debug("Generating memories from sessions...");
       const persistedMemories =
-        await lazy.MemoriesManager.generateMemoriesFromSessions();
+        await lazy.MemoriesManager.generateMemoriesFromSessions({
+          sources: {
+            history: historyEnabled,
+            conversation: conversationEnabled,
+          },
+        });
       this.#lastGenerationMs = Date.now();
       await lazy.MemoriesManager.setLastGenerationRunTimestamp(
         this.#lastGenerationMs

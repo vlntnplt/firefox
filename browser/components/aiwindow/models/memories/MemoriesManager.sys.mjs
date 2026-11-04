@@ -107,6 +107,20 @@ function takeMostRecentSessions(sessions, maxSessions) {
 }
 
 /**
+ * Overrides for a pipeline run; omitted keys use the profile's own state.
+ *
+ * @typedef {object} MemoriesPipelineDeps
+ * @property {import("moz-src:///browser/components/aiwindow/services/MemoryStore.sys.mjs").MemoryStoreImpl} [store]
+ *   Store read and written by the run.
+ * @property {object} [conversation]
+ *   Conversation for the model calls, used instead of the cached one.
+ * @property {object} [chatStore]
+ *   Store the conversation source reads, see getRecentChats.
+ * @property {object} [db]
+ *   Connection the history source queries, see getRecentHistory.
+ */
+
+/**
  * MemoriesManager class
  */
 export class MemoriesManager {
@@ -201,8 +215,10 @@ export class MemoriesManager {
    * If a memory is not deleted, we update its attributes. Attribute updates and the
    * decay check are per-memory daily: each memory tracks its own day in `updated_at`
    * and is skipped until a full day has elapsed for it.
+   *
+   * @param {MemoriesPipelineDeps} [deps]
    */
-  static async runMemoryMaintenance() {
+  static async runMemoryMaintenance({ store = MemoryStore } = {}) {
     const now = Date.now();
 
     // Tracks whether the in-memory state of the MemoryStore changed while this function
@@ -210,13 +226,13 @@ export class MemoriesManager {
     let changed = false;
 
     // Pull all memories, including soft deleted ones
-    const allMemories = await MemoryStore.getMemories({
+    const allMemories = await store.getMemories({
       includeSoftDeleted: true,
     });
 
     // Hard delete any soft deleted memories first
     for (const memory of allMemories.filter(mem => mem.is_deleted)) {
-      await MemoryStore.hardDeleteMemory(memory.id);
+      await store.hardDeleteMemory(memory.id);
       changed = true;
     }
 
@@ -253,75 +269,61 @@ export class MemoriesManager {
 
       // If a memory should be deleted due to decay, hard delete it now that its strength is updated
       if (isShouldDeleteMemoryDueToDecay(memory)) {
-        await MemoryStore.hardDeleteMemory(memory.id);
+        await store.hardDeleteMemory(memory.id);
       }
     }
 
     // If anything was changed to the in-memory MemoryStore, save it to disk
     if (changed) {
-      await MemoryStore.requestSave();
+      await store.requestSave();
     }
   }
 
   /**
-   * Unified entry point: generates and persists memories from cross-modal
-   * session bundles built from the user's recent browsing history AND chats.
+   * The sessions a generation run reads: history rows and chat messages since
+   * the store's watermark (a full lookup on first run), bundled by
+   * {@link buildSessions}, gated and capped to the most recent.
    *
-   *  1. Resolves which sources are enabled (history and/or conversation).
-   *  2. Reads the single {@link getLastSessionMemoryTimestamp} watermark and
-   *     pulls recent history rows and/or chat messages since it (delta), or a
-   *     full lookup on first run. Disabled sources contribute `[]`.
-   *  3. Builds unified sessions via {@link buildSessions}, drops sessions the
-   *     heuristic gate marks `SKIP`, and keeps only the most recent
-   *     {@link MAX_SESSIONS_FIRST_RUN} (first run) or
-   *     {@link MAX_SESSIONS_DELTA_RUN} (delta) survivors, so one run cannot
-   *     issue an unbounded number of LLM calls.
-   *  4. Runs the batched generate -> global filter pipeline.
-   *  5. Persists survivors once and advances the unified watermark to the
-   *     contiguous successfully-processed point.
-   *
-   * @param {object} [pipelineOpts={}]
-   *        Options forwarded to {@link runSessionMemoryPipeline} (e.g.
-   *        `batchSize`, `maxBatchRetries`). Omitted keys fall back to the
-   *        pipeline's own defaults.
-   * @returns {Promise<Memory[]>}  Persisted memories (possibly empty).
+   * @param {object} [sources]
+   * @param {boolean} [sources.history=true]
+   * @param {boolean} [sources.conversation=true]
+   * @param {MemoriesPipelineDeps} [deps]
+   * @returns {Promise<{sessions: Array<object>, watermarkMs: number, latestEndMs: number}>}
+   *   `sessions` are the ones to process; `latestEndMs` is the end of the
+   *   newest session seen, gated or not.
    */
-  static async generateMemoriesFromSessions(pipelineOpts = {}) {
-    const historyEnabled =
-      this.shouldEnableMemoriesFromSchedulers(SOURCE_HISTORY);
-    const conversationEnabled =
-      this.shouldEnableMemoriesFromSchedulers(SOURCE_CONVERSATION);
-
-    if (!historyEnabled && !conversationEnabled) {
-      return [];
-    }
-
-    const watermarkMs = await this.getLastSessionMemoryTimestamp();
+  static async collectSessions(
+    {
+      history: historyEnabled = true,
+      conversation: conversationEnabled = true,
+    } = {},
+    { store = MemoryStore, chatStore, db } = {}
+  ) {
+    const watermarkMs = await this.getLastSessionMemoryTimestamp(store);
     const isDelta = watermarkMs > 0;
     const deltaStartMs = this.getSessionMemoryDeltaStartMs(watermarkMs);
 
-    let historyRows = [];
-    if (historyEnabled) {
-      const recentHistoryOpts = isDelta
-        ? {
-            sinceMicros: deltaStartMs * 1000,
-            maxResults: DEFAULT_HISTORY_DELTA_MAX_RESULTS,
-          }
-        : {
-            days: DEFAULT_HISTORY_FULL_LOOKUP_DAYS,
-            maxResults: DEFAULT_HISTORY_FULL_MAX_RESULTS,
-          };
-      historyRows = await this._getRecentHistory(recentHistoryOpts);
-    }
+    const recentHistoryOpts = isDelta
+      ? {
+          sinceMicros: deltaStartMs * 1000,
+          maxResults: DEFAULT_HISTORY_DELTA_MAX_RESULTS,
+        }
+      : {
+          days: DEFAULT_HISTORY_FULL_LOOKUP_DAYS,
+          maxResults: DEFAULT_HISTORY_FULL_MAX_RESULTS,
+        };
+    const historyRows = historyEnabled
+      ? await this._getRecentHistory({ ...recentHistoryOpts, db })
+      : [];
 
-    let chatMessages = [];
-    if (conversationEnabled) {
-      chatMessages = await this._getRecentChats(
-        deltaStartMs,
-        DEFAULT_CHAT_FULL_MAX_RESULTS,
-        DEFAULT_CHAT_HALF_LIFE_DAYS_FULL_RESULTS
-      );
-    }
+    const chatMessages = conversationEnabled
+      ? await this._getRecentChats(
+          deltaStartMs,
+          DEFAULT_CHAT_FULL_MAX_RESULTS,
+          DEFAULT_CHAT_HALF_LIFE_DAYS_FULL_RESULTS,
+          { chatStore }
+        )
+      : [];
 
     const sessions = buildSessions(historyRows, chatMessages);
     const gatedSessions = sessions.filter(
@@ -335,23 +337,68 @@ export class MemoriesManager {
     const retainedSessions = takeMostRecentSessions(gatedSessions, maxSessions);
     if (retainedSessions.length < gatedSessions.length) {
       lazy.console.debug(
-        "[generateMemoriesFromSessions] " +
+        "[collectSessions] " +
           `Capped ${gatedSessions.length} sessions to the ${maxSessions} most ` +
           `recent; the older ${gatedSessions.length - retainedSessions.length} ` +
           "will not be processed."
       );
     }
+    return {
+      sessions: retainedSessions,
+      watermarkMs,
+      latestEndMs: sessions.reduce(
+        (max, session) => Math.max(max, session.session_end_ms),
+        0
+      ),
+    };
+  }
+
+  /**
+   * Unified entry point: generates and persists memories from cross-modal
+   * session bundles built from the user's recent browsing history AND chats.
+   *
+   *  1. Collects the sessions since the watermark, see
+   *     {@link collectSessions}, from the sources `pipelineOpts.sources`
+   *     enables.
+   *  2. Runs the batched generate -> global filter pipeline.
+   *  3. Persists survivors once and advances the unified watermark to the
+   *     contiguous successfully-processed point.
+   *
+   * @param {object} [pipelineOpts={}]
+   *        Options forwarded to {@link runSessionMemoryPipeline} (e.g.
+   *        `batchSize`, `maxBatchRetries`). Omitted keys fall back to the
+   *        pipeline's own defaults.
+   * @param {object} [pipelineOpts.sources]
+   * @param {boolean} [pipelineOpts.sources.history=true]
+   * @param {boolean} [pipelineOpts.sources.conversation=true]
+   * @param {MemoriesPipelineDeps} [deps]
+   * @returns {Promise<Memory[]>}  Persisted memories (possibly empty).
+   */
+  static async generateMemoriesFromSessions(
+    {
+      sources: {
+        history: historyEnabled = true,
+        conversation: conversationEnabled = true,
+      } = {},
+      ...pipelineOpts
+    } = {},
+    { store = MemoryStore, chatStore, db, conversation: givenConversation } = {}
+  ) {
+    const {
+      sessions: retainedSessions,
+      watermarkMs,
+      latestEndMs,
+    } = await this.collectSessions(
+      { history: historyEnabled, conversation: conversationEnabled },
+      { store, chatStore, db }
+    );
 
     if (!retainedSessions.length) {
       // Since no retainedSessions are present due to SKIP decisions, then advance
       // the watermark past them to avoid re-pulling and re-gating the same
       // trivial sessions next run.
-      const maxSessionEndMs = sessions.reduce(
-        (max, session) => Math.max(max, session.session_end_ms),
-        0
-      );
-      if (maxSessionEndMs > watermarkMs) {
-        await this.setLastSessionMemoryTimestamp(maxSessionEndMs);
+      if (latestEndMs > watermarkMs) {
+        await this.setLastSessionMemoryTimestamp(latestEndMs, store);
       }
       lazy.console.debug(
         "[generateMemoriesFromSessions] " +
@@ -360,7 +407,8 @@ export class MemoriesManager {
       return [];
     }
 
-    const conversation = await this.ensureConversationForGeneration();
+    const conversation =
+      givenConversation ?? (await this.ensureConversationForGeneration());
 
     let result;
     try {
@@ -383,11 +431,15 @@ export class MemoriesManager {
       return [];
     }
 
-    const { persistedMemories } = await this.saveMemories(result.memories);
+    const { persistedMemories } = await this.saveMemories(
+      result.memories,
+      store
+    );
 
     if (result.processedThroughMs > 0) {
       await this.setLastSessionMemoryTimestamp(
-        Math.max(watermarkMs, result.processedThroughMs)
+        Math.max(watermarkMs, result.processedThroughMs),
+        store
       );
     }
 
@@ -404,12 +456,14 @@ export class MemoriesManager {
    *   Number of mergeable memories that must be exceeded before a merge pass
    *   runs. Only overridden by tests, which set it to 0 to exercise merging on
    *   small fixtures.
+   * @param {MemoriesPipelineDeps} [deps]
    */
-  static async mergeMemories({
-    minMemoryCount = MEMORY_MERGE_MIN_MEMORY_COUNT,
-  } = {}) {
+  static async mergeMemories(
+    { minMemoryCount = MEMORY_MERGE_MIN_MEMORY_COUNT } = {},
+    { store = MemoryStore, conversation: givenConversation } = {}
+  ) {
     // Pull all memories, not including soft deleted ones
-    const allMemories = await MemoryStore.getMemories();
+    const allMemories = await store.getMemories();
 
     // Filter out profile facts
     const mergeableMemories = allMemories.filter(
@@ -423,7 +477,8 @@ export class MemoriesManager {
     }
 
     // Create merge candidate memory objects
-    const conversation = await this.ensureConversationForGeneration();
+    const conversation =
+      givenConversation ?? (await this.ensureConversationForGeneration());
     const mergeMemoryCandidates = await getMergeMemoryCandidates(
       conversation,
       mergeableMemories
@@ -434,7 +489,7 @@ export class MemoriesManager {
     // Save merge candidates in the MemoryStore and delete their component memories
     const mergedMemoryIds = new Set();
     for (const finalMergedMemory of finalMergedMemories) {
-      const saved = await MemoryStore.addMemory(finalMergedMemory);
+      const saved = await store.addMemory(finalMergedMemory);
       mergedMemoryIds.add(saved.id);
     }
 
@@ -445,7 +500,7 @@ export class MemoriesManager {
       if (mergedMemoryIds.has(componentMemoryId)) {
         continue;
       }
-      await this.hardDeleteMemoryById(componentMemoryId);
+      await store.hardDeleteMemory(componentMemoryId);
     }
   }
 
@@ -535,10 +590,11 @@ export class MemoriesManager {
    * this seeds from the older of the two so the first unified run does a delta
    * pull rather than re-scanning all history.
    *
+   * @param {object} [store=MemoryStore]
    * @returns {Promise<number>}  Milliseconds since Unix epoch (0 if never run)
    */
-  static async getLastSessionMemoryTimestamp() {
-    const meta = await MemoryStore.getMeta();
+  static async getLastSessionMemoryTimestamp(store = MemoryStore) {
+    const meta = await store.getMeta();
     if (meta.last_session_memory_ts) {
       return meta.last_session_memory_ts;
     }
@@ -565,10 +621,11 @@ export class MemoriesManager {
    * Persists the unified session-memory watermark.
    *
    * @param {number} tsMs  Milliseconds since Unix epoch
+   * @param {object} [store=MemoryStore]
    * @returns {Promise<void>}
    */
-  static async setLastSessionMemoryTimestamp(tsMs) {
-    await MemoryStore.updateMeta({ [LAST_SESSION_MEMORY_TS_ATTRIBUTE]: tsMs });
+  static async setLastSessionMemoryTimestamp(tsMs, store = MemoryStore) {
+    await store.updateMeta({ [LAST_SESSION_MEMORY_TS_ATTRIBUTE]: tsMs });
   }
 
   /**
@@ -602,14 +659,15 @@ export class MemoriesManager {
    *
    * @param {Array<object>|null|undefined} generatedMemories
    *        Array of MemoryPartial-like objects to persist.
+   * @param {object} [store=MemoryStore]
    * @returns {Promise<{ persistedMemories: Array<object> }>}
    */
-  static async saveMemories(generatedMemories) {
+  static async saveMemories(generatedMemories, store = MemoryStore) {
     const persistedMemories = [];
 
     if (Array.isArray(generatedMemories)) {
       for (const memoryPartial of generatedMemories) {
-        const stored = await MemoryStore.addMemory(memoryPartial);
+        const stored = await store.addMemory(memoryPartial);
         persistedMemories.push(stored);
       }
     }
@@ -671,10 +729,17 @@ export class MemoriesManager {
    *
    * @param {string} memoryId
    * @param {string} memorySummary
+   * @param {MemoriesPipelineDeps} [deps]
    */
-  static async enrichExistingMemory(memoryId, memorySummary) {
-    const { categories, intents } =
-      await this.memoryClassifyMessage(memorySummary);
+  static async enrichExistingMemory(
+    memoryId,
+    memorySummary,
+    { store = MemoryStore, conversation } = {}
+  ) {
+    const { categories, intents } = await this.memoryClassifyMessage(
+      memorySummary,
+      { conversation }
+    );
 
     const tags = [];
     if (categories[0]) {
@@ -683,7 +748,7 @@ export class MemoriesManager {
     if (intents[0]) {
       tags.push(`intent:${intents[0]}`);
     }
-    await MemoryStore.updateMemory(memoryId, { tags });
+    await store.updateMemory(memoryId, { tags });
   }
 
   /**
@@ -718,10 +783,15 @@ export class MemoriesManager {
    * Classifies a user message into memory categories and intents.
    *
    * @param {string} message                                                        User message to classify
+   * @param {MemoriesPipelineDeps} [deps]
    * @returns {Promise<Map<{categories: Array<string>, intents: Array<string>}>>}}  Categories and intents into which the message was classified
    */
-  static async memoryClassifyMessage(message) {
-    const conversation = await this.ensureConversationForUsage();
+  static async memoryClassifyMessage(
+    message,
+    { conversation: givenConversation } = {}
+  ) {
+    const conversation =
+      givenConversation ?? (await this.ensureConversationForUsage());
     const { prompt: systemPrompt } = await loadPrompt(
       MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_SYSTEM
     );

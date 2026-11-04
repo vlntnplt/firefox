@@ -39,6 +39,9 @@ let _sensitiveInfoDetector = new SensitiveInfoDetector();
  *        Maximum number of most recent messages to return.
  * @param {number} [halfLifeDays=DEFAULT_HALF_LIFE_DAYS]
  *        Half-life in days for the freshness decay function.
+ * @param {object} [options]
+ * @param {object} [options.chatStore=ChatStore]
+ *        Store to read the messages from instead of the profile's.
  * @returns {Promise<Array<{
  *   createdDate: number,
  *   role: string,
@@ -52,12 +55,13 @@ let _sensitiveInfoDetector = new SensitiveInfoDetector();
 export async function getRecentChats(
   startTime = 0,
   maxResults = DEFAULT_MAX_RESULTS,
-  halfLifeDays = DEFAULT_HALF_LIFE_DAYS
+  halfLifeDays = DEFAULT_HALF_LIFE_DAYS,
+  { chatStore = ChatStore } = {}
 ) {
   // Underlying Chatstore uses Date type but MemoriesStore maintains in TS
   const startDate = new Date(startTime);
   const endDate = new Date();
-  const messages = await ChatStore.findMessagesByDate(
+  const messages = await chatStore.findMessagesByDate(
     startDate,
     endDate,
     MESSAGE_ROLE.USER,

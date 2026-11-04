@@ -1113,3 +1113,37 @@ add_task(async function test_sensitive_keywords_filtering() {
     "URL with sensitive keyword (pregnancy) filtered out"
   );
 });
+
+add_task(async function test_given_connection_is_queried() {
+  await PlacesUtils.history.clear();
+  const now = Date.now();
+  const visit = makeVisit(
+    "https://developer.mozilla.org/en-US/docs/Web/CSS",
+    "CSS | MDN",
+    now,
+    -5 * 60 * 1000
+  );
+  await PlacesUtils.history.insertMany([visit]);
+  await insertPlacesMetadata(visit.url, visit.visits[0].date.getTime());
+
+  const fromPlaces = await getRecentHistory({ days: 1 });
+  Assert.equal(fromPlaces.length, 1, "Places holds the visit");
+
+  const sameConnection = await getRecentHistory({
+    days: 1,
+    db: await PlacesUtils.promiseDBConnection(),
+  });
+  Assert.deepEqual(
+    sameConnection,
+    fromPlaces,
+    "A given connection to Places reads the same rows"
+  );
+
+  const empty = await getRecentHistory({
+    days: 1,
+    db: {
+      executeBeforeShutdown: (name, task) => task({ execute: async () => [] }),
+    },
+  });
+  Assert.deepEqual(empty, [], "Only the given connection is queried");
+});
