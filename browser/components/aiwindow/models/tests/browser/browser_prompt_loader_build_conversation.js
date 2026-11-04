@@ -11,6 +11,10 @@ const { Conversation } = ChromeUtils.importESModule(
   "moz-src:///browser/components/aiwindow/models/Conversation.sys.mjs"
 );
 
+const { TextGenerationEngine } = ChromeUtils.importESModule(
+  "moz-src:///toolkit/components/ml/textgeneration/TextGenerationEngine.sys.mjs"
+);
+
 /**
  * @type {import("../AIWindowTestUtils.sys.mjs")}
  */
@@ -314,6 +318,146 @@ add_task(async function test_buildConversation_reports_missing_major_version() {
       err => err.clientReason === "modelConfigUnavailable"
     );
   } finally {
+    await SpecialPowers.popPrefEnv();
+  }
+});
+
+add_task(async function test_buildConversation_on_device() {
+  const feature = MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM;
+  const samplers = [{ type: "top-k", topK: 64 }, { type: "dist" }];
+  const onDevice = {
+    backend: "llama.cpp",
+    taskName: "text-generation",
+    modelId: "Mozilla/test-model",
+    modelFile: "model.gguf",
+    engineId: "on-device-test",
+    featureId: "test-feature",
+    parameters: { samplers, temperature: 1 },
+  };
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ml.llama.hwInference", true]],
+    clear: [[PREF_MODEL], [PREF_MODEL_CHOICE], [PREF_ENDPOINT]],
+  });
+  const sandbox = sinon.createSandbox();
+  const createOnDevice = sandbox
+    .stub(TextGenerationEngine, "create")
+    .callsFake(async options => ({
+      engineStatus: "ready",
+      model: options.modelId,
+    }));
+  const createRemote = sandbox
+    .stub(openAIEngine, "_createEngine")
+    .resolves({ engineStatus: "ready" });
+
+  try {
+    const conversation = await buildConversation(feature, {
+      onDevice,
+      flowId: "on-device-flow",
+    });
+    Assert.ok(createRemote.notCalled, "The remote endpoint is not used");
+    const [options] = createOnDevice.firstCall.args;
+    for (const [key, value] of Object.entries(onDevice)) {
+      if (key !== "parameters") {
+        Assert.equal(
+          options[key],
+          value,
+          `${key} comes from the configuration`
+        );
+      }
+    }
+    Assert.ok(
+      !("parameters" in options),
+      "The inference parameters stay out of the pipeline options"
+    );
+    Assert.deepEqual(
+      conversation.parameters.samplers,
+      samplers,
+      "The configuration's parameters reach the conversation"
+    );
+    Assert.equal(options.flowId, "on-device-flow", "Flow id is forwarded");
+    Assert.equal(
+      options.purpose,
+      PURPOSES.MEMORY_GENERATION,
+      "The feature's purpose is forwarded"
+    );
+    Assert.equal(
+      conversation.engine.model,
+      onDevice.modelId,
+      "The engine reports the on-device model"
+    );
+    Assert.ok(conversation.isReady, "The conversation reads the engine status");
+    Assert.equal(
+      conversation.feature,
+      feature,
+      "Prompt and parameters come from the feature's record"
+    );
+
+    await buildConversation(feature);
+    Assert.ok(
+      createRemote.calledOnce,
+      "Without a configuration the remote endpoint serves the feature"
+    );
+    Assert.ok(createOnDevice.calledOnce, "No second on-device engine");
+  } finally {
+    sandbox.restore();
+    await SpecialPowers.popPrefEnv();
+  }
+});
+
+add_task(async function test_buildConversation_reuses_an_engine() {
+  const onDevice = {
+    backend: "llama.cpp",
+    taskName: "text-generation",
+    modelId: "Mozilla/test-model",
+    modelFile: "model.gguf",
+    engineId: "on-device-test",
+    featureId: "test-feature",
+  };
+  await SpecialPowers.pushPrefEnv({
+    set: [["browser.ml.llama.hwInference", true]],
+    clear: [[PREF_MODEL], [PREF_MODEL_CHOICE], [PREF_ENDPOINT]],
+  });
+  const sandbox = sinon.createSandbox();
+  const createOnDevice = sandbox
+    .stub(TextGenerationEngine, "create")
+    .callsFake(async (options, notificationsCallback) => {
+      notificationsCallback?.({ progress: 100 });
+      return { engineStatus: "ready", model: options.modelId };
+    });
+  const createRemote = sandbox
+    .stub(openAIEngine, "_createEngine")
+    .resolves({ engineStatus: "ready" });
+
+  try {
+    const notifications = [];
+    const generation = await buildConversation(
+      MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM,
+      { onDevice, notificationsCallback: n => notifications.push(n) }
+    );
+    Assert.deepEqual(
+      notifications,
+      [{ progress: 100 }],
+      "The engine's notifications reach the callback"
+    );
+
+    const classification = await buildConversation(
+      MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_SYSTEM,
+      { engine: generation.engine }
+    );
+    Assert.equal(
+      classification.engine,
+      generation.engine,
+      "The given engine serves the second feature"
+    );
+    Assert.equal(
+      classification.feature,
+      MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_SYSTEM,
+      "Prompt and parameters come from the second feature's record"
+    );
+    Assert.ok(createOnDevice.calledOnce, "One engine is built");
+    Assert.ok(createRemote.notCalled, "The remote endpoint is not used");
+  } finally {
+    sandbox.restore();
     await SpecialPowers.popPrefEnv();
   }
 });

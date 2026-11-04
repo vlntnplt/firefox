@@ -173,9 +173,10 @@ export class Conversation {
     await lazy.ConversationStore.updateConversation(this);
   }
 
-  /** True when the underlying engineInstance is initialized and ready to serve requests. */
+  /** True when the engine is initialized and ready to serve requests. */
   get isReady() {
-    return this.engine?.engineInstance?.engineStatus === "ready";
+    const engine = this.engine?.engineInstance ?? this.engine;
+    return engine?.engineStatus === "ready";
   }
 
   /**

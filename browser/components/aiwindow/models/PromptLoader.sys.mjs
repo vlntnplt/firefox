@@ -32,6 +32,7 @@ import { SmartWindowLocation } from "moz-src:///browser/components/aiwindow/mode
 
 const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
+  createEngine: "chrome://global/content/ml/EngineProcess.sys.mjs",
   getSmartPageName:
     "chrome://browser/content/aiwindow/modules/TrustedInternalURLs.mjs",
 });
@@ -497,12 +498,22 @@ async function selectFeatureConfig(feature, opts = {}) {
 }
 
 /**
- * Resolve the RS record for a feature and build a fresh openAIEngine +
- * inference parameters.
+ * Resolve the RS record for a feature and build a fresh engine + inference
+ * parameters.
  *
  * @param {string} feature
  * @param {object} [opts]
- * @returns {Promise<{engine: openAIEngine, parameters: inferenceParams}>}
+ * @param {string} [opts.flowId] - Telemetry flow id of the engine.
+ * @param {object} [opts.onDevice] - Pipeline options of an engine serving the
+ *   feature on this device in place of the remote endpoint, with the
+ *   inference parameters the model is served with under `parameters`; the
+ *   record's parameters override them. A feature that runs on device exports
+ *   its own.
+ * @param {Function} [opts.notificationsCallback] - Receives the download
+ *   progress of the on-device engine's model.
+ * @param {openAIEngine | TextGenerationEngine} [opts.engine] - Serves the
+ *   feature in place of a new engine.
+ * @returns {Promise<{engine: openAIEngine | TextGenerationEngine, parameters: inferenceParams}>}
  */
 export async function buildEngineForFeature(feature, opts = {}) {
   const mainConfig = await selectFeatureConfig(feature, opts);
@@ -514,6 +525,13 @@ export async function buildEngineForFeature(feature, opts = {}) {
     } catch (_e) {
       parameters = {};
     }
+  }
+  if (opts.engine) {
+    return { engine: opts.engine, parameters };
+  }
+  const { parameters: deviceParameters, ...onDevice } = opts.onDevice ?? {};
+  if (opts.onDevice) {
+    parameters = { ...deviceParameters, ...parameters };
   }
   const serviceType = mainConfig.service_type ?? getDefaultServiceType(feature);
   let purpose =
@@ -543,15 +561,26 @@ export async function buildEngineForFeature(feature, opts = {}) {
     model = chatConfig.inference_model || chatConfig.model;
   }
 
-  const engine = await openAIEngine.build({
-    model,
-    serviceType,
-    purpose,
-    flowId: opts.flowId ?? null,
-    feature,
-    baseURL,
-    apiKey,
-  });
+  const flowId = opts.flowId ?? null;
+  const engine = opts.onDevice
+    ? await lazy.createEngine(
+        {
+          ...onDevice,
+          serviceType,
+          purpose,
+          flowId,
+        },
+        opts.notificationsCallback
+      )
+    : await openAIEngine.build({
+        model,
+        serviceType,
+        purpose,
+        flowId,
+        feature,
+        baseURL,
+        apiKey,
+      });
 
   return { engine, parameters };
 }

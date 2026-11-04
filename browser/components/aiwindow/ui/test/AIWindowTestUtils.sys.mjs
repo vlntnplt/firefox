@@ -22,6 +22,7 @@ import { TestUtils } from "resource://testing-common/TestUtils.sys.mjs";
 import { AuthProvider } from "moz-src:///browser/components/aiwindow/models/AuthProvider.sys.mjs";
 import { Chat } from "moz-src:///browser/components/aiwindow/models/Chat.sys.mjs";
 import { openAIEngine } from "moz-src:///browser/components/aiwindow/models/openAIEngine.sys.mjs";
+import { TextGenerationEngine } from "moz-src:///toolkit/components/ml/textgeneration/TextGenerationEngine.sys.mjs";
 import {
   MODEL_FEATURES,
   PURPOSES,
@@ -138,15 +139,16 @@ export class MockEngineManager {
         this.#chatTurns.add(turn);
         return turn;
       });
+    // When a new engine is requested, remote or on device, create the mock one
+    // and track it in the engines map.
+    const createMockEngine = options =>
+      this.engines.getOrInsertComputed(
+        options.purpose ?? "unknown",
+        () => new MLTestUtils.MockLLMEngine(options)
+      );
     this.mocks = [
-      sinon.stub(openAIEngine, "_createEngine").callsFake(options =>
-        // When a new engine is requested create the mock one and track it in
-        // the engines map.
-        this.engines.getOrInsertComputed(
-          options.purpose ?? "unknown",
-          () => new MLTestUtils.MockLLMEngine(options)
-        )
-      ),
+      sinon.stub(openAIEngine, "_createEngine").callsFake(createMockEngine),
+      sinon.stub(TextGenerationEngine, "create").callsFake(createMockEngine),
       sinon.stub(AuthProvider, "getToken").resolves("mock-fxa-token"),
       fetchWithHistory,
     ];
