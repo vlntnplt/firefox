@@ -73,6 +73,36 @@ const DEFAULT_CHAT_FULL_MAX_RESULTS = 50;
 const DEFAULT_CHAT_HALF_LIFE_DAYS_FULL_RESULTS = 7;
 
 const LAST_SESSION_MEMORY_TS_ATTRIBUTE = "last_session_memory_ts";
+
+/**
+ * Pipeline options and inference parameters of the engine generating memories
+ * on this device, for buildConversation's `onDevice` option.
+ */
+export const MEMORIES_ON_DEVICE_ENGINE = Object.freeze({
+  backend: "llama.cpp",
+  taskName: "text-generation",
+  modelId: "ggml-org/gemma-4-E2B-it-GGUF",
+  modelFile: "gemma-4-E2B-it-Q4_0.gguf",
+  modelRevision: "main",
+  modelHubRootUrl: "https://huggingface.co",
+  modelHubUrlTemplate: "{model}/resolve/{revision}",
+  device: { kinds: ["gpu", "cpu"] },
+  numContext: 8192,
+  // llama.cpp asserts when a prompt exceeds the batch.
+  numBatch: 8192,
+  numUbatch: 512,
+  kvCacheDtype: "f16",
+  flashAttn: false,
+  parameters: {
+    // The sampling google/gemma-4-E2B-it publishes in its generation config.
+    samplers: [
+      { type: "top-k", topK: 64 },
+      { type: "top-p", topP: 0.95 },
+      { type: "temperature", temp: 1 },
+      { type: "dist" },
+    ],
+  },
+});
 const LAST_GENERATION_RUN_TS_ATTRIBUTE = "last_generation_run_ts";
 
 const PREF_FIRSTRUN_HAS_COMPLETED = "browser.smartwindow.firstrun.hasCompleted";
