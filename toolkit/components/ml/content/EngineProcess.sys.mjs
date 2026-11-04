@@ -243,6 +243,9 @@ export const FEATURES = {
   "memories-message-classification-system": {
     engineId: "smart-openai-memories-usage",
   },
+  "memories-on-device-panel": {
+    engineId: "about-inference-memories",
+  },
   "llm-telemetry": {
     engineId: "llm-telemetry-engine",
   },

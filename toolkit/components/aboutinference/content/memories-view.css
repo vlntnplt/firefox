@@ -1,0 +1,295 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxlarge);
+  font-variant-numeric: tabular-nums;
+}
+
+header,
+section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-medium);
+}
+
+h1 {
+  margin: 0;
+  font-size: var(--font-size-xxlarge);
+  font-weight: var(--font-weight-heading);
+}
+
+h2 {
+  margin: 0;
+  font-size: var(--font-size-large);
+  font-weight: var(--font-weight-semibold);
+}
+
+p {
+  margin: 0;
+}
+
+.description,
+.pending,
+.status {
+  color: var(--text-color-deemphasized);
+}
+
+.error {
+  color: var(--text-color-error);
+}
+
+/* Setup */
+
+.setup {
+  --card-padding: var(--space-xlarge);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-medium) var(--space-xxlarge);
+  margin: 0 0 var(--space-xlarge);
+}
+
+dt {
+  color: var(--text-color-deemphasized);
+}
+
+dd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xsmall);
+  margin: 0;
+  font-weight: var(--font-weight-semibold);
+}
+
+dd .status,
+.download {
+  font-weight: normal;
+}
+
+.download {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xsmall);
+  max-width: var(--size-layout-small);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-large);
+  padding-block-start: var(--space-large);
+  border-block-start: var(--border-width) solid var(--border-color-deemphasized);
+}
+
+.setup .error {
+  margin-block-end: var(--space-large);
+}
+
+/* Results */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--size-image-xxlarge), 1fr));
+  gap: var(--space-medium);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxsmall);
+  padding: var(--space-large);
+  border: var(--card-border);
+  border-radius: var(--border-radius-medium);
+  background-color: var(--card-background-color);
+}
+
+.tile .value {
+  font-size: var(--font-size-xlarge);
+  font-weight: var(--font-weight-semibold);
+}
+
+.tile .label {
+  font-size: var(--font-size-small);
+  color: var(--text-color-deemphasized);
+}
+
+.steps {
+  display: grid;
+  grid-template-columns:
+    var(--icon-size-medium) max-content minmax(var(--size-layout-small), 1fr)
+    repeat(3, max-content);
+  align-items: center;
+}
+
+.steps > * {
+  padding-inline-start: var(--space-medium);
+}
+
+.steps > :nth-child(6n + 4),
+.steps > :nth-child(6n + 5),
+.steps > :nth-child(6n + 6) {
+  padding-inline-start: var(--space-xxlarge);
+  text-align: end;
+  white-space: nowrap;
+}
+
+.steps .h {
+  align-self: stretch;
+  color: var(--text-color-deemphasized);
+  font-size: var(--font-size-small);
+  padding-block-end: var(--space-small);
+  border-block-end: var(--border-width) solid var(--border-color-deemphasized);
+}
+
+.steps .r {
+  padding-block: var(--space-medium);
+}
+
+.steps .name {
+  font-weight: var(--font-weight-semibold);
+}
+
+/* Inputs and outputs */
+
+moz-card[type="accordion"] {
+  --card-accordion-closed-icon: url("chrome://global/skin/icons/arrow-right.svg");
+  --card-accordion-open-icon: url("chrome://global/skin/icons/arrow-down.svg");
+}
+
+moz-card[type="accordion"]:dir(rtl) {
+  --card-accordion-closed-icon: url("chrome://global/skin/icons/arrow-left.svg");
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: var(--font-size-small);
+  line-height: 1.5;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th {
+  font-weight: var(--font-weight);
+  color: var(--text-color-deemphasized);
+  text-align: end;
+  padding: var(--space-xsmall) var(--space-small);
+  border-bottom: var(--border-width) solid var(--border-color-deemphasized);
+  white-space: nowrap;
+}
+
+td {
+  text-align: end;
+  padding: var(--space-small);
+  border-bottom: var(--border-width) solid var(--border-color-deemphasized);
+  white-space: nowrap;
+}
+
+tr:last-child > td {
+  border-bottom: 0;
+}
+
+th:first-child,
+td:first-child {
+  padding-inline-start: 0;
+}
+
+th:last-child,
+td:last-child {
+  padding-inline-end: 0;
+}
+
+.text {
+  text-align: start;
+  white-space: normal;
+  width: 100%;
+}
+
+.mark {
+  text-align: start;
+  width: var(--size-image-medium);
+  color: var(--text-color-deemphasized);
+}
+
+.mark.new {
+  color: var(--color-accent-primary);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* The rail: one dot per step on a line, drawn to a few pixels rather than
+ * laid out, so the tokens do not fit. */
+/* stylelint-disable stylelint-plugin-mozilla/use-design-tokens */
+
+.rail {
+  position: relative;
+  align-self: stretch;
+  color: var(--text-color);
+}
+
+.rail::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 5px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: var(--border-color-deemphasized);
+}
+
+.rail.first::before {
+  top: 50%;
+}
+
+.rail.last::before {
+  bottom: 50%;
+}
+
+.rail::after {
+  content: "";
+  position: absolute;
+  inset-inline-start: 1px;
+  top: 50%;
+  margin-top: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--border-radius-circle);
+  background-color: var(--border-color);
+}
+
+.rail.done::after {
+  background-color: var(--text-color);
+}
+
+.rail.active::after {
+  background-color: var(--color-accent-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent-primary) 20%, transparent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in srgb, var(--color-accent-primary) 10%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail.active::after {
+    animation: none;
+  }
+}
+
+.rail.failed::after {
+  background-color: var(--text-color-error);
+}
+
+/* stylelint-enable stylelint-plugin-mozilla/use-design-tokens */

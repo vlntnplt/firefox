@@ -16,9 +16,15 @@
       type="module"
       src="chrome://global/content/model-files-view.mjs"
     ></script>
+    <script
+      type="module"
+      src="chrome://global/content/memories-view.mjs"
+    ></script>
     <script src="chrome://global/content/aboutInference.js"></script>
   </head>
   <body id="body">
+    <!-- Shown on its own at about:inference#memories. -->
+    <div id="memories" hidden="true"></div>
     <div id="categories">
       <div
         class="category category-no-icon"

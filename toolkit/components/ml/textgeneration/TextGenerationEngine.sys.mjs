@@ -346,6 +346,11 @@ export class TextGenerationEngine {
   get model() {
     return this.pipelineOptions.modelId;
   }
+
+  /** Id of the device that loaded the model, see HWInferenceDevice. */
+  get device() {
+    return this.#generator?.device ?? null;
+  }
   /** @type {NotificationsCallback | null} */
   notificationsCallback = null;
   /** @type {InstanceType<typeof lazy.MLTelemetry>} */

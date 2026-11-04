@@ -27,6 +27,19 @@ body {
   flex: 1;
 }
 
+body.memories > :not(#memories) {
+  display: none;
+}
+
+#memories {
+  flex: 1;
+  box-sizing: border-box;
+  /* Wide enough for the pipeline table, narrow enough to read. */
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--space-xxlarge) var(--space-xlarge);
+}
+
 .tab {
   padding: 0.5em 0;
 }

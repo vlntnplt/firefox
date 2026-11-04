@@ -25,6 +25,12 @@ ChromeUtils.defineESModuleGetters(lazy, {
   BACKENDS: "chrome://global/content/ml/EngineProcess.sys.mjs",
 });
 
+const { AppConstants } = ChromeUtils.importESModule(
+  "resource://gre/modules/AppConstants.sys.mjs"
+);
+
+const MEMORIES_AVAILABLE = AppConstants.MOZ_BUILD_APP == "browser";
+
 const {
   ExecutionPriority,
   EngineProcess,
@@ -1419,6 +1425,36 @@ function showTab(button) {
   button.setAttribute("selected", "true");
 }
 
+/**
+ * Shows the category or subtab the location hash names, or the memories
+ * panel on its own for about:inference#memories.
+ */
+function showHash() {
+  const name = location.hash.substring(1);
+  const memories = name === "memories" && MEMORIES_AVAILABLE;
+  document.body.classList.toggle("memories", memories);
+  const panel = document.getElementById("memories");
+  panel.hidden = !memories;
+  if (memories) {
+    if (!panel.firstChild) {
+      panel.appendChild(document.createElement("memories-view"));
+    }
+    return;
+  }
+  const category = document.getElementById(`category-${name}`);
+  if (category) {
+    showTab(category);
+    return;
+  }
+  const tab = document.querySelector(
+    `.subtabs [aria-controls="${CSS.escape(name)}"]`
+  );
+  if (tab && !tab.hidden) {
+    showTab(document.getElementById("category-local-inference"));
+    showSubTab(name);
+  }
+}
+
 function showSubTab(name) {
   for (const tab of document.querySelectorAll(".subtabs [role='tab']")) {
     const selected = tab.getAttribute("aria-controls") === name;
@@ -1436,7 +1472,9 @@ function showSubTab(name) {
 }
 
 function onSubTabKeydown(event) {
-  const tabs = [...event.currentTarget.querySelectorAll("[role='tab']")];
+  const tabs = [
+    ...event.currentTarget.querySelectorAll("[role='tab']:not([hidden])"),
+  ];
   const rtl = getComputedStyle(document.documentElement).direction === "rtl";
   const next = rtl ? "ArrowLeft" : "ArrowRight";
   const previous = rtl ? "ArrowRight" : "ArrowLeft";
@@ -1654,15 +1692,19 @@ window.onload = async function () {
       e.target.classList.contains("category")
     ) {
       showTab(e.target);
+      location.hash = e.target.id.substring("category-".length);
     }
   });
 
   showTab(document.getElementById("category-local-inference"));
   for (const tab of document.querySelectorAll(".subtabs [role='tab']")) {
-    tab.addEventListener("click", () =>
-      showSubTab(tab.getAttribute("aria-controls"))
-    );
+    tab.addEventListener("click", () => {
+      const name = tab.getAttribute("aria-controls");
+      showSubTab(name);
+      location.hash = name;
+    });
   }
+  window.addEventListener("hashchange", showHash);
   document
     .querySelector(".subtabs")
     .addEventListener("keydown", onSubTabKeydown);
@@ -1694,6 +1736,8 @@ window.onload = async function () {
   document
     .getElementById("devices.refresh")
     .addEventListener("click", listDevices);
+
+  showHash();
 
   document.getElementById("console").value = "";
   document

@@ -82,3 +82,101 @@ about-inference-text-generation-col-prefill = Prefill (ms)
 about-inference-text-generation-col-output-tokens = Output tokens
 about-inference-text-generation-col-decode = Decode (ms)
 about-inference-text-generation-col-tokens-per-second = Tokens/s
+
+## Memories panel: an example run of the memories pipeline on this device.
+
+about-inference-memories-title = Smart Window Memories
+about-inference-memories-description = Memory generation, filtering, merging and classification, run on this device. This page uses fixture data and leaves your profile untouched.
+about-inference-memories-setup = Setup
+about-inference-memories-results = Results
+about-inference-memories-inputs = Inputs and outputs
+about-inference-memories-model = Model
+about-inference-memories-model-loading = loading
+about-inference-memories-model-ready = loaded
+about-inference-memories-backend = Backend
+about-inference-memories-device-label = Device
+about-inference-memories-device-pending = GPU if available
+# Variables:
+#   $device (String) - Vendor name of the device that loaded the model.
+#   $kind (String) - Kind of that device: "cpu", "gpu" or "npu".
+about-inference-memories-device =
+    { $device } { $kind ->
+        [gpu] GPU
+        [npu] NPU
+       *[cpu] CPU
+    }
+about-inference-memories-cleanup =
+  .label = Remove the model after the run
+about-inference-memories-run =
+  .label = Run
+# Variables:
+#   $sessions (Number) - Browsing sessions the pipeline reads.
+#   $searches (Number) - Web searches across the sessions.
+#   $titles (Number) - Visited page titles across the sessions.
+#   $chats (Number) - Chat messages across the sessions.
+about-inference-memories-sessions =
+    .heading = Sessions · { $sessions } sessions · { $searches } searches · { $titles } titles · { $chats } chat turns
+# Variables:
+#   $count (Number) - Memories in the store.
+about-inference-memories-store-summary =
+    .heading = Memory store · { $count } memories
+about-inference-memories-col-memory = memory
+about-inference-memories-col-type = type
+about-inference-memories-col-strength = strength
+about-inference-memories-col-sources = sources
+
+## Memories panel: headline figures of a run, then one row per pipeline step.
+
+about-inference-memories-tile-inference = inference time
+about-inference-memories-tile-load = model load
+about-inference-memories-tile-download = model download
+about-inference-memories-tile-prefill = prefill tok/s
+about-inference-memories-tile-decode = decode tok/s
+about-inference-memories-tile-memory = peak memory
+about-inference-memories-col-in = in
+about-inference-memories-col-out = out
+about-inference-memories-col-time = time
+about-inference-memories-generation = Generation
+about-inference-memories-filter = Filter
+about-inference-memories-merge = Merge
+about-inference-memories-classification = Classification
+
+## Memories panel: what each step turns into what. Counts not known yet are
+## shown as a dash.
+
+# Variables:
+#   $sessions (Number) - Sessions the step reads.
+#   $candidates (String) - Candidate memories it produced.
+about-inference-memories-flow-generation = { $sessions } sessions → { $candidates } candidates
+# Variables:
+#   $candidates (String) - Candidate memories the step reads.
+#   $kept (String) - Candidates it kept.
+about-inference-memories-flow-filter = { $candidates } candidates → { $kept } kept
+# Variables:
+#   $before (String) - Memories in the store before the step.
+#   $memories (String) - Memories in the store after the step.
+#   $merged (String) - Memories the step formed by merging others.
+about-inference-memories-flow-merge = { $before } memories → { $memories } memories, { $merged } merged
+# Variables:
+#   $fresh (String) - New memories the step classifies.
+about-inference-memories-flow-classification =
+    { $fresh ->
+        [one] { $fresh } new memory
+       *[other] { $fresh } new memories
+    } → category, intent
+# Variables:
+#   $seconds (Number) - Duration in seconds.
+about-inference-memories-seconds = { NUMBER($seconds, maximumFractionDigits: 1) } s
+# Variables:
+#   $minutes (Number) - Whole minutes of the duration.
+#   $seconds (Number) - Seconds of the duration past the minutes.
+about-inference-memories-minutes = { $minutes } min { $seconds } s
+
+# Variables:
+#   $stored (Number) - Memories in the store after the run.
+#   $new (Number) - Memories the run generated.
+#   $merged (Number) - Memories the run formed by merging others.
+about-inference-memories-store-after =
+    .heading = Memory store · { $stored } memories · { $new } new · { $merged } merged
+about-inference-memories-new = new
+about-inference-memories-merged = merged
