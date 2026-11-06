@@ -105,6 +105,9 @@ about-inference-memories-device =
         [npu] NPU
        *[cpu] CPU
     }
+about-inference-memories-draft-label = Drafting
+about-inference-memories-draft =
+  .label = Multi-token prediction
 about-inference-memories-cleanup =
   .label = Remove the model after the run
 about-inference-memories-run =
@@ -133,6 +136,7 @@ about-inference-memories-tile-download = model download
 about-inference-memories-tile-prefill = prefill tok/s
 about-inference-memories-tile-decode = decode tok/s
 about-inference-memories-tile-memory = peak memory
+about-inference-memories-tile-drafts = drafts accepted
 about-inference-memories-col-in = in
 about-inference-memories-col-out = out
 about-inference-memories-col-time = time

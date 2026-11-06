@@ -312,6 +312,8 @@ function toEngineMetrics(result, runTimestamps) {
       ? outputTokens / (decodingTime / 1000)
       : undefined,
     timePerOutputToken: outputTokens ? decodingTime / outputTokens : undefined,
+    draftedTokens: usage.draftedTokens,
+    acceptedDraftTokens: usage.acceptedDraftTokens,
   };
 }
 

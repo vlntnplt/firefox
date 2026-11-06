@@ -374,6 +374,15 @@ add_task(
         JSON.stringify(generation.request.args).includes("sourdough starter"),
         "The fixture sessions reach the generation prompt"
       );
+      const { TextGenerationEngine } = ChromeUtils.importESModule(
+        "moz-src:///toolkit/components/ml/textgeneration/TextGenerationEngine.sys.mjs"
+      );
+      const created = TextGenerationEngine.create.lastCall.args[0];
+      Assert.equal(
+        created.draftModelFile,
+        "mtp-gemma-4-E2B-it-Q4_0.gguf",
+        "The run drafts with the model's multi-token prediction head"
+      );
       const engine = manager.engines.get(PURPOSES.MEMORY_GENERATION);
       let terminations = 0;
       engine.terminate = async () => terminations++;

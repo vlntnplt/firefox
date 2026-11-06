@@ -68,6 +68,7 @@ dd {
 }
 
 dd .status,
+dd moz-checkbox,
 .download {
   font-weight: normal;
 }

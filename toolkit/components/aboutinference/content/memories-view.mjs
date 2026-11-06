@@ -52,6 +52,10 @@ const numberFormat = new Intl.NumberFormat();
 const rateFormat = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1,
 });
+const percentFormat = new Intl.NumberFormat(undefined, {
+  style: "percent",
+  maximumFractionDigits: 0,
+});
 
 /**
  * The JSON a model call answered with, fenced or not, or null.
@@ -77,6 +81,7 @@ export class MemoriesView extends MozLitElement {
     input: { type: Object, state: true },
     run: { type: Object, state: true },
     cleanup: { type: Boolean, state: true },
+    draft: { type: Boolean, state: true },
   };
 
   constructor() {
@@ -84,6 +89,20 @@ export class MemoriesView extends MozLitElement {
     this.input = null;
     this.run = null;
     this.cleanup = true;
+    this.draft = true;
+  }
+
+  /** The engine configuration with the setup card's choices applied. */
+  #engineOptions() {
+    const options = {
+      ...lazy.MEMORIES_ON_DEVICE_ENGINE,
+      engineId: ENGINE_ID,
+      featureId: FEATURE_ID,
+    };
+    if (!this.draft) {
+      options.draftModelFile = null;
+    }
+    return options;
   }
 
   connectedCallback() {
@@ -249,11 +268,7 @@ export class MemoriesView extends MozLitElement {
       const generation = await lazy.buildConversation(
         lazy.MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM,
         {
-          onDevice: {
-            ...lazy.MEMORIES_ON_DEVICE_ENGINE,
-            engineId: ENGINE_ID,
-            featureId: FEATURE_ID,
-          },
+          onDevice: this.#engineOptions(),
           notificationsCallback: data => this.#onProgress(data),
         }
       );
@@ -497,6 +512,14 @@ export class MemoriesView extends MozLitElement {
           this.#bytes(Math.max(0, ...calls.map(call => call.memory)) || null),
           "about-inference-memories-tile-memory"
         )}
+        ${this.#tile(
+          sum("draftedTokens")
+            ? percentFormat.format(
+                sum("acceptedDraftTokens") / sum("draftedTokens")
+              )
+            : DASH,
+          "about-inference-memories-tile-drafts"
+        )}
       </div>
     `;
   }
@@ -614,6 +637,15 @@ export class MemoriesView extends MozLitElement {
                   class="pending"
                   data-l10n-id="about-inference-memories-device-pending"
                 ></span>`}
+          </dd>
+          <dt data-l10n-id="about-inference-memories-draft-label"></dt>
+          <dd>
+            <moz-checkbox
+              id="draft"
+              data-l10n-id="about-inference-memories-draft"
+              ?checked=${this.draft}
+              @change=${event => (this.draft = event.target.checked)}
+            ></moz-checkbox>
           </dd>
         </dl>
         ${error ? html`<p class="error">${String(error)}</p>` : nothing}
