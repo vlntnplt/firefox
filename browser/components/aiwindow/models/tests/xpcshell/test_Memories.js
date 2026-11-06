@@ -20,6 +20,8 @@ const {
   renderSessionsForPrompt,
   mapFilteredMemoriesToInitialList,
   generateInitialMemoriesList,
+  MEMORIES_INITIAL_GENERATION_SCHEMA,
+  MEMORIES_FILTER_SCHEMA,
   runSessionMemoryPipeline,
   applyQualityAndSensitivityFilter,
   computeMemoryStrength,
@@ -206,6 +208,40 @@ add_setup(async function () {
 /**
  * Test successful initial memories generation
  */
+add_task(async function test_memories_calls_constrain_their_output() {
+  const seen = [];
+  const fakeEngine = {
+    run(request) {
+      seen.push(request.inferenceParams?.response_format);
+      return { finalOutput: '{"kept_memories": []}' };
+    },
+  };
+  const conversation = new Conversation({
+    feature: MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM,
+    model: TEST_MODEL,
+    serviceType: SERVICE_TYPES.MEMORIES,
+    purpose: PURPOSES.MEMORY_GENERATION,
+    parameters: {},
+    flowId: null,
+    engine: fakeEngine,
+  });
+
+  await generateInitialMemoriesList(conversation, { sessions: [] });
+  await applyQualityAndSensitivityFilter(conversation, ["a memory"]);
+
+  Assert.equal(seen.length, 2, "Both calls ran");
+  Assert.equal(
+    seen[0]?.json_schema?.schema,
+    MEMORIES_INITIAL_GENERATION_SCHEMA,
+    "Initial generation constrains its output to its schema"
+  );
+  Assert.equal(
+    seen[1]?.json_schema?.schema,
+    MEMORIES_FILTER_SCHEMA,
+    "The quality filter constrains its output to its schema"
+  );
+});
+
 add_task(async function test_generateInitialMemoriesList_happy_path() {
   const sb = sinon.createSandbox();
   try {

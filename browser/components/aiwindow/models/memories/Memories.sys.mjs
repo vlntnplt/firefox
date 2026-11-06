@@ -572,6 +572,66 @@ function normalizeMemoryList(parsed) {
 }
 
 /**
+ * The output of the initial generation prompt: its example object, in the
+ * same key order. Nullable fields stay nullable; sanitizeMemory drops the
+ * nulls, as it does for the cloud model.
+ */
+export const MEMORIES_INITIAL_GENERATION_SCHEMA = Object.freeze({
+  type: "array",
+  items: {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "evidence",
+      "entities",
+      "reasoning",
+      "category",
+      "intent",
+      "memory_summary",
+      "score",
+    ],
+    properties: {
+      evidence: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["value", "weight", "type"],
+          properties: {
+            value: { type: "string" },
+            weight: { type: "integer" },
+            type: { enum: ["title", "search", "chat", "user"] },
+          },
+        },
+      },
+      entities: { type: "array", maxItems: 3, items: { type: "string" } },
+      reasoning: { type: "string" },
+      category: { anyOf: [{ enum: CATEGORIES_LIST }, { type: "null" }] },
+      intent: { anyOf: [{ enum: INTENTS_LIST }, { type: "null" }] },
+      memory_summary: {
+        anyOf: [
+          { type: "string", maxLength: MAX_MEMORY_SUMMARY_LENGTH },
+          { type: "null" },
+        ],
+      },
+      score: { type: "integer" },
+    },
+  },
+});
+
+/**
+ * The output of the quality and sensitivity filter prompt.
+ */
+export const MEMORIES_FILTER_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["kept_memories"],
+  properties: {
+    kept_memories: { type: "array", items: { type: "string" } },
+  },
+});
+
+/**
  * Prompts an LLM to generate an initial, unfiltered list of candidate memories from user data
  *
  * @param {Conversation} conversation  Conversation reused across the pipeline (cleared between calls)
@@ -601,6 +661,12 @@ export async function generateInitialMemoriesList(conversation, sources) {
   conversation.setSystemMessage(systemPrompt);
   conversation.addUserMessage(userPrompt);
   const response = await conversation.run({
+    inferenceParams: {
+      response_format: makeJSONSchemaBlob(
+        "MemoriesInitialGeneration",
+        MEMORIES_INITIAL_GENERATION_SCHEMA
+      ),
+    },
     token: await AuthProvider.getToken(),
   });
 
@@ -678,6 +744,12 @@ export async function applyQualityAndSensitivityFilter(
   conversation.setSystemMessage(systemPrompt);
   conversation.addUserMessage(userPrompt);
   const response = await conversation.run({
+    inferenceParams: {
+      response_format: makeJSONSchemaBlob(
+        "MemoriesQualityAndSensitivityFilter",
+        MEMORIES_FILTER_SCHEMA
+      ),
+    },
     token: await AuthProvider.getToken(),
   });
 
