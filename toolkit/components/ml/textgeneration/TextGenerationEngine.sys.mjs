@@ -26,6 +26,7 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  *   modelId: string,
  *   modelRevision: string,
  *   modelFile: string,
+ *   draftModelFile: ?string,
  *   modelHubRootUrl: string,
  *   modelHubUrlTemplate: string,
  * }} ResolvedPipelineOptions
@@ -489,14 +490,13 @@ export class TextGenerationEngine {
       urlTemplate: options.modelHubUrlTemplate,
     });
     const sessionId = lazy.generateUUID();
-    let modelBlob;
-    try {
-      [modelBlob] = await hub.getModelFileAsBlob({
+    const fetchFile = async file => {
+      const [blob] = await hub.getModelFileAsBlob({
         engineId: options.engineId,
         taskName: options.taskName,
         model: options.modelId,
         revision: options.modelRevision,
-        file: options.modelFile,
+        file,
         modelHubRootUrl: options.modelHubRootUrl,
         modelHubUrlTemplate: options.modelHubUrlTemplate,
         progressCallback: this.notificationsCallback,
@@ -504,6 +504,15 @@ export class TextGenerationEngine {
         featureId: options.featureId ?? options.engineId,
         sessionId,
       });
+      return blob;
+    };
+    let modelBlob;
+    let draftBlob;
+    try {
+      modelBlob = await fetchFile(options.modelFile);
+      if (options.draftModelFile) {
+        draftBlob = await fetchFile(options.draftModelFile);
+      }
     } finally {
       await hub.notifyModelDownloadComplete({
         engineId: options.engineId,
@@ -515,6 +524,9 @@ export class TextGenerationEngine {
     }
 
     const createOptions = toCreateOptions(options);
+    if (draftBlob) {
+      createOptions.draftModel = draftBlob;
+    }
     this.#generator = await TextGenerator.create(modelBlob, createOptions);
     this.#deviceKind = this.#generator.deviceKind;
     this.pipelineOptions.backend = "llama.cpp";

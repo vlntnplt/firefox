@@ -663,6 +663,14 @@ export class PipelineOptions {
   modelFile = null;
 
   /**
+   * A drafter next to the model file, in the same repository: the model's
+   * multi-token prediction head, whose drafts the model verifies in one batch.
+   *
+   * @type {?string}
+   */
+  draftModelFile = null;
+
+  /**
    * The backend to use.
    *
    * @type {?string}
@@ -923,6 +931,7 @@ export class PipelineOptions {
       "useMlock",
       "numThreadsDecoding",
       "modelFile",
+      "draftModelFile",
       "backend",
       "baseURL",
       "apiKey",
@@ -1010,7 +1019,7 @@ export class PipelineOptions {
         ModelHub.apply(this, options[key]);
       }
 
-      if (key === "modelFile") {
+      if (key === "modelFile" || key === "draftModelFile") {
         this.#validateModelFile(key, options[key]);
       }
 
@@ -1072,6 +1081,7 @@ export class PipelineOptions {
       useMlock: this.useMlock,
       numThreadsDecoding: this.numThreadsDecoding,
       modelFile: this.modelFile,
+      draftModelFile: this.draftModelFile,
       backend: this.backend,
       baseURL: this.baseURL,
       apiKey: this.apiKey,
