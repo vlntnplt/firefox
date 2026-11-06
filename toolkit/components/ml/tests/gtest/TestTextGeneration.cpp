@@ -9,6 +9,9 @@
 // --xre-path inside the bundle and runs them sandboxed.
 
 #include "gtest/gtest.h"
+
+#include <cstring>
+#include <tuple>
 #include "mozilla/Preferences.h"
 #include "mozilla/Result.h"
 #include "mozilla/SpinEventLoopUntil.h"
@@ -24,6 +27,7 @@
 #include "nsIProcessToolsService.h"
 #include "nsServiceManagerUtils.h"
 #include "nsThreadUtils.h"
+#include "prenv.h"
 #include "prio.h"
 #include "private/pprio.h"
 
@@ -148,12 +152,19 @@ struct Session {
 
 // One fd per generator: sending a FileDescriptor consumes its handle.
 Session CreateGenerator(const ipc::FileDescriptor& aModel,
-                        uint32_t aContextSize = 512) {
+                        uint32_t aContextSize = 512,
+                        Maybe<ipc::FileDescriptor>&& aDraft = Nothing(),
+                        uint32_t aThreads = 2) {
   Session session;
+  // MOZ_ML_MTP_KV=q8_0 quantizes the KV cache, under flash attention.
+  const char* kv = PR_GetEnv("MOZ_ML_MTP_KV");
+  const bool quantized = kv && strcmp(kv, "q8_0") == 0;
   session.mGenerator = TextGenerationParent::Create(
-      aModel, TextGenerationOptions(aContextSize, 2, 2, 2048, 512,
-                                    dom::TextGenerationKVCacheDtype::F16, false,
-                                    DevicePlacement()));
+      aModel,
+      TextGenerationOptions(aContextSize, aThreads, aThreads, 2048, 512,
+                            quantized ? dom::TextGenerationKVCacheDtype::Q8_0
+                                      : dom::TextGenerationKVCacheDtype::F16,
+                            quantized, DevicePlacement(), std::move(aDraft)));
   if (!session.mGenerator) {
     printf_stderr("CreateGenerator: TextGenerationParent::Create() failed\n");
   }
@@ -222,6 +233,131 @@ class TextGenerationTest : public mozilla::gtest::ipc::TestUtilityProcess {
   void SetUp() override { Preferences::SetUint(kGracePref, 0); }
   void TearDown() override { Preferences::ClearUser(kGracePref); }
 };
+
+// Verification samples the model, so a drafter changes the speed and not the
+// output: a greedy run matches one without it. Needs a model GGUF and its
+// multi-token prediction head in MOZ_ML_MTP_MODEL and MOZ_ML_MTP_DRAFT.
+TEST_F(TextGenerationTest, MtpDrafterKeepsGreedyOutput) {
+  const char* modelPath = PR_GetEnv("MOZ_ML_MTP_MODEL");
+  const char* draftPath = PR_GetEnv("MOZ_ML_MTP_DRAFT");
+  if (!modelPath || !draftPath) {
+    GTEST_SKIP() << "MOZ_ML_MTP_MODEL and MOZ_ML_MTP_DRAFT not set";
+  }
+
+  // MOZ_ML_MTP_PROMPT overrides the prompt, to measure another workload.
+  nsCString prompt(
+      "Write a short story about a lighthouse keeper who finds a message in "
+      "a bottle. Keep it under three hundred words.");
+  if (const char* custom = PR_GetEnv("MOZ_ML_MTP_PROMPT")) {
+    prompt.Assign(custom);
+  }
+  GenerateRequest request;
+  request.messages().AppendElement(
+      ChatMessage(dom::TextGenerationRole::User, prompt));
+  request.maxTokens() = 256;
+  request.bufferLength() = 4;
+  request.samplers() = GreedySamplers();
+  request.stopOnEndOfGenerationTokens() = true;
+  // MOZ_ML_MTP_SAMPLING swaps greedy for the memories engine's chain with
+  // a fixed seed; both runs then sample from the same distributions, so the
+  // outputs still usually match, but a near-tie may break the chain.
+  const bool sampling = !!PR_GetEnv("MOZ_ML_MTP_SAMPLING");
+  if (sampling) {
+    Sampler base = GreedySamplers()[0];
+    base.seed() = 42;
+    request.samplers().Clear();
+    for (auto [type, topK, topP, temp] :
+         {std::tuple{dom::TextGenerationSamplerType::Top_k, 64, 0.95f, 1.0f},
+          std::tuple{dom::TextGenerationSamplerType::Top_p, 64, 0.95f, 1.0f},
+          std::tuple{dom::TextGenerationSamplerType::Temperature, 64, 0.95f,
+                     1.0f},
+          std::tuple{dom::TextGenerationSamplerType::Dist, 64, 0.95f, 1.0f}}) {
+      Sampler sampler = base;
+      sampler.type() = type;
+      sampler.topK() = topK;
+      sampler.topP() = topP;
+      sampler.temp() = temp;
+      request.samplers().AppendElement(sampler);
+    }
+  }
+  // MOZ_ML_MTP_GRAMMAR names a GBNF file constraining the output.
+  if (const char* grammarPath = PR_GetEnv("MOZ_ML_MTP_GRAMMAR")) {
+    nsCString grammar;
+    if (PRFileDesc* fd = PR_Open(grammarPath, PR_RDONLY, 0)) {
+      char buf[4096];
+      int32_t n;
+      while ((n = PR_Read(fd, buf, sizeof(buf))) > 0) {
+        grammar.Append(buf, n);
+      }
+      PR_Close(fd);
+    }
+    ASSERT_FALSE(grammar.IsEmpty())
+    << "could not read " << grammarPath;
+    Sampler sampler = GreedySamplers()[0];
+    sampler.type() = dom::TextGenerationSamplerType::Grammar;
+    sampler.grammar() = grammar;
+    request.samplers().InsertElementAt(0, sampler);
+    request.maxTokens() = 512;
+  }
+
+  auto run = [&](Maybe<ipc::FileDescriptor>&& aDraft) {
+    Session session =
+        CreateGenerator(OpenModelFd(modelPath), 2048, std::move(aDraft), 8);
+    GenerateResult result;
+    if (!session.mGenerator) {
+      ADD_FAILURE() << "TextGenerationParent::Create() failed";
+      return result;
+    }
+    auto failure = WaitForReady(session);
+    if (failure.isSome()) {
+      ADD_FAILURE() << "load failed: " << failure->message.get();
+      Teardown(session);
+      return result;
+    }
+    GenerateResponse response = Generate(session, request);
+    if (response.type() == GenerateResponse::TGenerateResult) {
+      result = response.get_GenerateResult();
+    }
+    Teardown(session);
+    return result;
+  };
+
+  GenerateResult plain = run(Nothing());
+  GenerateResult drafted = run(Some(OpenModelFd(draftPath)));
+
+  auto report = [](const char* aName, const GenerateResult& aResult) {
+    const hwinference::Usage& usage = aResult.usage();
+    printf_stderr(
+        "%s: %u tokens, prefill %.0f ms, decode %.0f ms (%.1f tok/s), "
+        "drafted %u, accepted %u\n",
+        aName, usage.generatedTokens(), usage.timings().prefillMs(),
+        usage.timings().decodeMs(),
+        usage.generatedTokens() * 1000.0 / usage.timings().decodeMs(),
+        usage.draftedTokens(), usage.acceptedDraftTokens());
+  };
+  report("plain", plain);
+  report("drafted", drafted);
+  printf_stderr("output: %s\n",
+                nsCString(Substring(drafted.content(), 0, 400)).get());
+
+  EXPECT_EQ(plain.usage().draftedTokens(), 0u);
+  EXPECT_GT(drafted.usage().draftedTokens(), 0u);
+  EXPECT_GT(drafted.usage().acceptedDraftTokens(), 0u);
+  EXPECT_FALSE(plain.content().IsEmpty());
+  if (sampling) {
+    size_t common = 0;
+    while (common < plain.content().Length() &&
+           common < drafted.content().Length() &&
+           plain.content()[common] == drafted.content()[common]) {
+      common++;
+    }
+    printf_stderr("sampling: outputs %s, common prefix %zu of %zu chars\n",
+                  drafted.content() == plain.content() ? "match" : "differ",
+                  common, plain.content().Length());
+    return;
+  }
+  EXPECT_EQ(drafted.content(), plain.content());
+}
 
 TEST_F(TextGenerationTest, GenerateFromModel) {
   Session session = CreateGenerator();

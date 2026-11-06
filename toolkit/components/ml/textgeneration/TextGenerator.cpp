@@ -76,7 +76,8 @@ static DevicePlacement ToDevicePlacement(
 }
 
 static TextGenerationOptions ResolveTextGenerationOptions(
-    const dom::TextGeneratorCreateOptions& aOptions) {
+    const dom::TextGeneratorCreateOptions& aOptions,
+    Maybe<mozilla::ipc::FileDescriptor>&& aDraftModel) {
   AssertIsOnMainThread();
   const uint32_t numThreads = ResolveNumThreads(aOptions.mNumThreads);
   const uint32_t numThreadsDecoding = aOptions.mNumThreadsDecoding > 0
@@ -85,7 +86,8 @@ static TextGenerationOptions ResolveTextGenerationOptions(
   return TextGenerationOptions(
       aOptions.mContextSize, numThreads, numThreadsDecoding,
       aOptions.mBatchSize, aOptions.mUbatchSize, aOptions.mKvCacheDtype,
-      aOptions.mFlashAttn, ToDevicePlacement(aOptions.mPlacement));
+      aOptions.mFlashAttn, ToDevicePlacement(aOptions.mPlacement),
+      std::move(aDraftModel));
 }
 
 static Result<mozilla::ipc::FileDescriptor, const char*> BlobToModelFd(
@@ -138,6 +140,8 @@ static dom::TextGenerationResult ToJSResult(const GenerateResult& aResult) {
   jsResult.mUsage.mGeneratedTokens = usage.generatedTokens();
   jsResult.mUsage.mTimings.mPrefillMs = usage.timings().prefillMs();
   jsResult.mUsage.mTimings.mDecodeMs = usage.timings().decodeMs();
+  jsResult.mUsage.mDraftedTokens = usage.draftedTokens();
+  jsResult.mUsage.mAcceptedDraftTokens = usage.acceptedDraftTokens();
   jsResult.mResources.mBefore.mCpuTimeMs = resources.before().cpuTimeMs();
   jsResult.mResources.mBefore.mMemoryBytes = resources.before().memoryBytes();
   jsResult.mResources.mAfter.mCpuTimeMs = resources.after().cpuTimeMs();
@@ -242,7 +246,17 @@ already_AddRefed<Promise> TextGenerator::Create(
     return promise.forget();
   }
   mozilla::ipc::FileDescriptor modelFd = fd.unwrap();
-  TextGenerationOptions options = ResolveTextGenerationOptions(aOptions);
+  Maybe<mozilla::ipc::FileDescriptor> draftFd;
+  if (aOptions.mDraftModel.WasPassed()) {
+    auto draft = BlobToModelFd(aGlobal.Context(), aOptions.mDraftModel.Value());
+    if (draft.isErr()) {
+      promise->MaybeRejectWithDataError(nsDependentCString(draft.unwrapErr()));
+      return promise.forget();
+    }
+    draftFd.emplace(draft.unwrap());
+  }
+  TextGenerationOptions options =
+      ResolveTextGenerationOptions(aOptions, std::move(draftFd));
 
   TimeStamp acquireStart = TimeStamp::Now();
   RefPtr<TextGenerationParent> actor =

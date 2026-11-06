@@ -243,7 +243,7 @@ class TextGenerationChild::Generation {
     if (mMaxTokens == 0) {
       Reply(GenerateResponse(
           GenerateResult(nsCString(), TextGenerationFinishReason::Length,
-                         Usage(0, 0, 0, Timings(0.0, 0.0)),
+                         Usage(0, 0, 0, Timings(0.0, 0.0), 0, 0),
                          ResourceUsage(resourcesBefore, SampleResources()))));
       return;
     }
@@ -296,10 +296,13 @@ class TextGenerationChild::Generation {
     }
 
     Timings timings(prefillMs, decodeMs);
-    Reply(GenerateResponse(GenerateResult(
-        mContent, reason,
-        Usage(mPromptTokens, mPromptCodePoints, mGeneratedTokens, timings),
-        ResourceUsage(resourcesBefore, SampleResources()))));
+    const llama::LlamaBackend::DraftStats& draft =
+        mChild->mBackend->LastDraftStats();
+    Reply(GenerateResponse(
+        GenerateResult(mContent, reason,
+                       Usage(mPromptTokens, mPromptCodePoints, mGeneratedTokens,
+                             timings, draft.mDrafted, draft.mAccepted),
+                       ResourceUsage(resourcesBefore, SampleResources()))));
   }
 
   // Any thread.
@@ -439,6 +442,29 @@ void TextGenerationChild::Initialize() {
       })));
 }
 
+// A stdio stream over a duplicate of aFd, which the caller closes.
+static FILE* OpenModelFile(const ipc::FileDescriptor& aFd) {
+  // fdopen()/_open_osfhandle() take ownership of the handle: pass a duplicate.
+  UniqueFileHandle dupHandle =
+      DuplicateFileHandle(aFd.ClonePlatformHandle().get());
+  if (!dupHandle) {
+    return nullptr;
+  }
+#ifdef XP_WIN
+  int fd = _open_osfhandle(dupHandle.release(), _O_RDONLY);
+  if (fd == -1) {
+    return nullptr;
+  }
+  FILE* fp = fdopen(fd, "rb");
+  if (!fp) {
+    _close(fd);
+  }
+  return fp;
+#else
+  return fdopen(dupHandle.release(), "r");
+#endif
+}
+
 LoadResult TextGenerationChild::LoadOnThread() {
   MOZ_ASSERT(mGenerationThread->IsOnCurrentThread());
   MOZ_ASSERT(!mBackend);
@@ -454,32 +480,31 @@ LoadResult TextGenerationChild::LoadOnThread() {
     return fail("TextGenerator: invalid model file descriptor");
   }
 
-  // fdopen()/_open_osfhandle() take ownership of the handle: pass a duplicate.
-  UniqueFileHandle dupHandle =
-      DuplicateFileHandle(mModel.ClonePlatformHandle().get());
-  if (!dupHandle) {
-    return fail("TextGenerator: DuplicateFileHandle failed");
-  }
-
-#ifdef XP_WIN
-  int fd = _open_osfhandle(dupHandle.release(), _O_RDONLY);
-  if (fd == -1) {
-    return fail("TextGenerator: _open_osfhandle failed");
-  }
-  FILE* fp = fdopen(fd, "rb");
+  FILE* fp = OpenModelFile(mModel);
   if (!fp) {
-    _close(fd);
-  }
-#else
-  FILE* fp = fdopen(dupHandle.release(), "r");
-#endif
-  if (!fp) {
-    return fail("TextGenerator: fdopen failed");
+    return fail("TextGenerator: could not open the model file descriptor");
   }
   auto closeFp = MakeScopeExit([fp] { fclose(fp); });
 
+  FILE* draftFp = nullptr;
+  if (mOptions.draftModel().isSome()) {
+    if (!mOptions.draftModel()->IsValid()) {
+      return fail("TextGenerator: invalid drafter file descriptor");
+    }
+    draftFp = OpenModelFile(*mOptions.draftModel());
+    if (!draftFp) {
+      return fail("TextGenerator: could not open the drafter file descriptor");
+    }
+  }
+  auto closeDraftFp = MakeScopeExit([draftFp] {
+    if (draftFp) {
+      fclose(draftFp);
+    }
+  });
+
   RefPtr<llama::LlamaBackend> backend = new llama::LlamaBackend();
-  auto result = backend->Reinitialize(ToLlamaModelOptions(mOptions), fp);
+  auto result =
+      backend->Reinitialize(ToLlamaModelOptions(mOptions), fp, draftFp);
   if (result.isErr()) {
     nsCString message = result.unwrapErr().mMessage;
     if (!message.IsEmpty()) {

@@ -73,6 +73,9 @@ struct Usage {
   uint32_t promptCharacters;
   uint32_t generatedTokens;
   Timings timings;
+  // Tokens the drafter proposed, and those the model accepted.
+  uint32_t draftedTokens;
+  uint32_t acceptedDraftTokens;
 };
 
 struct ResourceSnapshot {
@@ -114,6 +117,8 @@ struct TextGenerationOptions {
   TextGenerationKVCacheDtype kvCacheDtype;
   bool flashAttn;
   DevicePlacement placement;
+  // A multi-token prediction head drafting tokens for the model to verify.
+  FileDescriptor? draftModel;
 };
 
 }  // namespace hwinference

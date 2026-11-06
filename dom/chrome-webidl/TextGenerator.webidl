@@ -53,6 +53,11 @@ dictionary TextGeneratorCreateOptions {
   /** Names the feature asking, in profiler markers only. */
   UTF8String featureId = "";
   HWInferencePlacement placement = {};
+  /**
+   * A multi-token prediction head shipped for the model as a GGUF, drafting
+   * tokens the model verifies in one batch. Speeds decoding up, same output.
+   */
+  Blob draftModel;
 };
 
 dictionary TextGenerationMessage {
@@ -104,6 +109,8 @@ dictionary TextGenerationUsage {
   required unsigned long promptCharacters;
   required unsigned long generatedTokens;
   required TextGenerationTimings timings;
+  required unsigned long draftedTokens;
+  required unsigned long acceptedDraftTokens;
 };
 
 [GenerateConversionToJS]
