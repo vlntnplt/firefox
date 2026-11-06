@@ -75,8 +75,18 @@ class LlamaBackend {
   LlamaBackend() = default;
 
   // Reinitializes the entire backend (model + context).
-  // Use this if you need to load a different model.
-  ResultStatus Reinitialize(const LlamaModelOptions& aOptions, FILE* aFp);
+  // Use this if you need to load a different model. aDraftFp is a
+  // multi-token prediction head shipped for the model as a GGUF: it reads the
+  // model's KV cache and drafts tokens the model verifies in one batch.
+  ResultStatus Reinitialize(const LlamaModelOptions& aOptions, FILE* aFp,
+                            FILE* aDraftFp = nullptr);
+
+  // Draft tokens proposed and accepted over the last Generate.
+  struct DraftStats {
+    uint32_t mDrafted = 0;
+    uint32_t mAccepted = 0;
+  };
+  const DraftStats& LastDraftStats() const { return mDraftStats; }
 
   // Converts structured chat messages into a flat prompt string.
   // Useful for models expecting a plain-text prompt.
@@ -157,6 +167,19 @@ class LlamaBackend {
   ResultStatus LoadOnFirstDevice(const LlamaModelOptions& aOptions, FILE* aFp,
                                  llama_model_params aParams);
 
+  // Loads a model on aDevice; null when the device refuses it.
+  LlamaModelUPtr LoadOnDevice(FILE* aFp, const Device& aDevice,
+                              llama_model_params aParams);
+
+  // Loads the drafter on the device holding the model.
+  ResultStatus LoadDraftModel(FILE* aFp, llama_model_params aParams);
+
+  // Drafts up to aMax tokens after aLast at position aPos, from the model's
+  // hidden state aH for aLast. Stops at the first token the drafter is unsure
+  // of.
+  nsTArray<llama_token> Draft(llama_token aLast, llama_pos aPos,
+                              const nsTArray<float>& aH, int32_t aMax);
+
   // Pointer to the dynamically loaded llama library
   LlamaLibWrapper* mLib = nullptr;
 
@@ -177,8 +200,16 @@ class LlamaBackend {
   // if the configured number of threads are identical.
   GgmlThreadpoolUPtr mThreadpoolBatch;
 
+  // The drafter and its context, which shares mCtx's KV cache. Absent without
+  // a drafter.
+  LlamaModelUPtr mDraftModel;
+  LlamaContextUPtr mDraftCtx;
+  DraftStats mDraftStats;
+
   LlamaModelOptions mModelOptions;
 
+  // Set by LoadOnFirstDevice; the drafter loads on the same device.
+  const Device* mLoadedDevice = nullptr;
   nsCString mDevice;
   dom::HWInferenceDeviceKind mDeviceKind = dom::HWInferenceDeviceKind::Cpu;
 

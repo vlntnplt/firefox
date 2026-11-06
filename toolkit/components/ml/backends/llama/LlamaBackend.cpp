@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
+#include <cstring>
 
 #include <functional>
 #include "mozilla/HashTable.h"
@@ -206,11 +207,22 @@ static nsTArray<const Device*> ResolvePlacement(
   return candidates;
 }
 
+LlamaBackend::LlamaModelUPtr LlamaBackend::LoadOnDevice(
+    FILE* aFp, const Device& aDevice, llama_model_params aParams) {
+  constexpr int32_t kNoGpuLayers = 0;
+  constexpr int32_t kAllGpuLayers = -1;
+  const bool cpu = aDevice.mKind == dom::HWInferenceDeviceKind::Cpu;
+  // An empty list keeps llama.cpp off every accelerator.
+  ggml_backend_dev_t devices[2] = {cpu ? nullptr : aDevice.mHandle, nullptr};
+  aParams.devices = devices;
+  aParams.n_gpu_layers = cpu ? kNoGpuLayers : kAllGpuLayers;
+  rewind(aFp);
+  return LlamaModelUPtr(mLib->llama_model_load_from_file_handle(aFp, aParams));
+}
+
 ResultStatus LlamaBackend::LoadOnFirstDevice(const LlamaModelOptions& aOptions,
                                              FILE* aFp,
                                              llama_model_params aParams) {
-  constexpr int32_t kNoGpuLayers = 0;
-  constexpr int32_t kAllGpuLayers = -1;
   if (!aOptions.mPlacement.mDevices.IsEmpty() &&
       !aOptions.mPlacement.mKinds.IsEmpty()) {
     auto msg = nsFmtCString("{}: a placement takes devices or kinds, not both",
@@ -227,19 +239,14 @@ ResultStatus LlamaBackend::LoadOnFirstDevice(const LlamaModelOptions& aOptions,
     return mozilla::Err(Error{std::move(msg)});
   }
   for (const Device* device : candidates) {
-    const bool cpu = device->mKind == dom::HWInferenceDeviceKind::Cpu;
-    // An empty list keeps llama.cpp off every accelerator.
-    ggml_backend_dev_t devices[2] = {cpu ? nullptr : device->mHandle, nullptr};
-    aParams.devices = devices;
-    aParams.n_gpu_layers = cpu ? kNoGpuLayers : kAllGpuLayers;
-    rewind(aFp);
     const TimeStamp loadStart = TimeStamp::Now();
-    mModel.reset(mLib->llama_model_load_from_file_handle(aFp, aParams));
+    mModel = LoadOnDevice(aFp, *device, aParams);
     PROFILER_MARKER(
         ML_TEXT_GENERATION_TRACK, ML_SETUP,
         MarkerTiming::IntervalUntilNowFrom(loadStart), MLDeviceLoadMarker,
         ProfilerString8View::WrapNullTerminatedString(device->mId), !!mModel);
     if (mModel) {
+      mLoadedDevice = device;
       mDevice = device->mId;
       mDeviceKind = device->mKind;
       return Ok();
@@ -259,9 +266,34 @@ LlamaBackend::~LlamaBackend() {
   // the library lifetime as a singleton
 }
 
+ResultStatus LlamaBackend::LoadDraftModel(FILE* aFp,
+                                          llama_model_params aParams) {
+  mDraftModel = LoadOnDevice(aFp, *mLoadedDevice, aParams);
+  if (!mDraftModel) {
+    auto msg = nsFmtCString("{}: could not load the drafter on {}",
+                            __PRETTY_FUNCTION__, mDevice);
+    LOGE("{}", msg);
+    return mozilla::Err(Error{std::move(msg)});
+  }
+  const int32_t nEmbd = mLib->llama_model_n_embd(mModel.get());
+  const int32_t nEmbdDraft = mLib->llama_model_n_embd_out(mDraftModel.get());
+  if (nEmbd != nEmbdDraft) {
+    auto msg =
+        nsFmtCString("{}: the drafter reads a hidden size of {}, {} has {}",
+                     __PRETTY_FUNCTION__, nEmbdDraft, mModelGeneralName, nEmbd);
+    LOGE("{}", msg);
+    mDraftModel.reset();
+    return mozilla::Err(Error{std::move(msg)});
+  }
+  return Ok();
+}
+
 ResultStatus LlamaBackend::Reinitialize(const LlamaModelOptions& aOptions,
-                                        FILE* aFp) {
+                                        FILE* aFp, FILE* aDraftFp) {
   LOGV("Entered {}", __PRETTY_FUNCTION__);
+  // The draft context reads the model's context: drop it first.
+  mDraftCtx.reset();
+  mDraftModel.reset();
 
   if (!mLib) {
     mLib = LlamaRuntimeLinker::Get();
@@ -310,6 +342,13 @@ ResultStatus LlamaBackend::Reinitialize(const LlamaModelOptions& aOptions,
   LOGV("{}: Successfully Initialized {}", __PRETTY_FUNCTION__,
        mModelGeneralName);
 
+  if (aDraftFp) {
+    auto loaded = LoadDraftModel(aDraftFp, modelParams);
+    if (loaded.isErr()) {
+      return loaded;
+    }
+  }
+
   return ReinitializeContext(aOptions.mContext, aOptions.mContext.mNCtx);
 }
 
@@ -343,6 +382,7 @@ ResultStatus LlamaBackend::ReinitializeContext(
   ctxParams.op_offload = onAccelerator;
   ctxParams.swa_full = aOptions.mSwaFull;
 
+  mDraftCtx.reset();
   // llama_init_from_model does not take ownership of the model or context
   // parameters. We retain ownership of all objects passed in and must keep them
   // alive for the entire lifetime of mCtx.
@@ -397,6 +437,26 @@ ResultStatus LlamaBackend::ReinitializeContext(
   // mCtx is used, since they are accessed internally by the context.
   mLib->llama_attach_threadpool(mCtx.get(), mThreadpool.get(),
                                 mThreadpoolBatch.get());
+
+  if (mDraftModel) {
+    llama_context_params draftParams = ctxParams;
+    draftParams.ctx_type = LLAMA_CONTEXT_TYPE_MTP;
+    draftParams.ctx_other = mCtx.get();
+    mDraftCtx.reset(
+        mLib->llama_init_from_model(mDraftModel.get(), draftParams));
+    if (!mDraftCtx) {
+      auto msg = nsFmtCString("{}: failed to create the draft llama_context {}",
+                              __PRETTY_FUNCTION__, mModelGeneralName);
+      LOGE("{}", msg);
+      return mozilla::Err(Error{std::move(msg)});
+    }
+    mLib->llama_attach_threadpool(mDraftCtx.get(), mThreadpool.get(),
+                                  mThreadpoolBatch.get());
+    // The drafter consumes the hidden state the model sampled from, and
+    // feeds its own back to itself; both only for output rows.
+    mLib->mozllama_set_embeddings_nextn(mCtx.get(), true, true);
+    mLib->mozllama_set_embeddings_nextn(mDraftCtx.get(), true, true);
+  }
 
   LOGV("{}: Successfully Initialized context for model {}", __PRETTY_FUNCTION__,
        mModelGeneralName);
@@ -611,6 +671,61 @@ llama_token LlamaBackend::SampleToken(const Samplers& aSamplers,
   return token;
 }
 
+// Draft length and the drafter confidence below which a draft stops: the
+// defaults of llama.cpp's draft-mtp speculation.
+static constexpr int32_t kDraftMax = 8;
+static constexpr float kDraftPMin = 0.75f;
+
+nsTArray<llama_token> LlamaBackend::Draft(llama_token aLast, llama_pos aPos,
+                                          const nsTArray<float>& aH,
+                                          int32_t aMax) {
+  nsTArray<llama_token> draft;
+  if (aMax <= 0 || aH.IsEmpty()) {
+    return draft;
+  }
+  const int32_t nVocab = mLib->llama_vocab_n_tokens(
+      mLib->llama_model_get_vocab(mDraftModel.get()));
+  // Every draft token sits at aPos: the drafter attends to the model's KV
+  // cache and carries its own tokens through the hidden state only.
+  nsTArray<float> h(aH.Clone());
+  llama_token token = aLast;
+  llama_pos pos = aPos;
+  int32_t nSeq = 1;
+  llama_seq_id seq = 0;
+  llama_seq_id* seqIds = &seq;
+  int8_t output = 1;
+  while (draft.Length() < static_cast<size_t>(aMax)) {
+    llama_batch batch{1, &token, h.Elements(), &pos, &nSeq, &seqIds, &output};
+    if (mLib->llama_decode(mDraftCtx.get(), batch) != 0) {
+      LOGW("{}: the drafter failed to decode", __PRETTY_FUNCTION__);
+      break;
+    }
+    const float* logits = mLib->llama_get_logits_ith(mDraftCtx.get(), 0);
+    int32_t best = 0;
+    for (int32_t i = 1; i < nVocab; i++) {
+      if (logits[i] > logits[best]) {
+        best = i;
+      }
+    }
+    double sum = 0.0;
+    for (int32_t i = 0; i < nVocab; i++) {
+      sum += std::exp(static_cast<double>(logits[i] - logits[best]));
+    }
+    if (1.0 / sum < kDraftPMin) {
+      break;
+    }
+    draft.AppendElement(best);
+    const float* next =
+        mLib->mozllama_get_embeddings_nextn_ith(mDraftCtx.get(), 0);
+    if (!next) {
+      break;
+    }
+    token = best;
+    memcpy(h.Elements(), next, h.Length() * sizeof(float));
+  }
+  return draft;
+}
+
 ResultStatus LlamaBackend::Generate(
     const LlamaChatOptions& aOptions,
     std::function<ResultStatus(const LlamaChatResponse&)> aTokenCallback,
@@ -734,17 +849,8 @@ ResultStatus LlamaBackend::Generate(
        __PRETTY_FUNCTION__, mModelGeneralName);
   llama_batch batch =
       mLib->llama_batch_get_one(promptTokens.Elements(), promptTokens.Length());
-  // To keep track of the id of the currently generated token
-  llama_token token;
 
   int32_t numGeneratedTokens = 0;
-
-  // To sample the next token, we need the logits corresponding to one of the
-  // previously generated tokens.
-  // Specifically, we use the logits of the most recently generated token
-  // (i.e., the last one).
-  const int32_t lastTokenLogitIndex = -1;
-  bool promptProcessingDone = false;
 
   // The stop tokens are user inputs and could be very big.
   // We store them in a hash set to bound the time complexity of the membership
@@ -768,35 +874,169 @@ ResultStatus LlamaBackend::Generate(
     result.mIsPhaseCompleted = completed;
     return aTokenCallback(result);
   };
-  while (true) {
-    LOGV("{}: New iteration started {}", __PRETTY_FUNCTION__,
+
+  if (aCancelCallback()) {
+    LOGD("{} Generation successfully cancelled. {}", __PRETTY_FUNCTION__,
          mModelGeneralName);
+    return mozilla::Ok();
+  }
+
+  if (nPromptTokens > nCtx) {
+    auto msg = nsFmtCString(
+        "{}: context size exceeded. Size is: {} Needed: {} {}",
+        __PRETTY_FUNCTION__, nCtx, nPromptTokens, mModelGeneralName);
+    LOGE("{}", msg);
+    return mozilla::Err(Error{std::move(msg)});
+  }
+
+  LOGV("{}: Decoding the prompt {}", __PRETTY_FUNCTION__, mModelGeneralName);
+  if (mLib->llama_decode(mCtx.get(), batch) != 0) {
+    auto msg = nsFmtCString("{}: failed to decode {}", __PRETTY_FUNCTION__,
+                            mModelGeneralName);
+    LOGE("{}", msg);
+    return mozilla::Err(Error{std::move(msg)});
+  }
+
+  // Tokens the model committed to, in order: the one sampled after the batch
+  // it just decoded, preceded by the drafts it verified.
+  nsTArray<llama_token> accepted;
+  accepted.AppendElement(SampleToken(samplers, -1, candidates));
+  // Tokens in the KV cache; accepted.LastElement() is not among them yet.
+  llama_pos nPast = nPromptTokens;
+  // The model's hidden state for accepted.LastElement(): the drafter's input.
+  nsTArray<float> pendingH;
+  auto keepHiddenState = [&](int32_t aRow) {
+    if (!mDraftCtx) {
+      return;
+    }
+    const float* h = mLib->mozllama_get_embeddings_nextn_ith(mCtx.get(), aRow);
+    const int32_t nEmbd = mLib->llama_model_n_embd(mModel.get());
+    pendingH.ClearAndRetainStorage();
+    if (h) {
+      pendingH.AppendElements(h, nEmbd);
+    }
+  };
+  keepHiddenState(nPromptTokens - 1);
+  mDraftStats = DraftStats();
+
+  // Sending the end of prompt once we get the first token to ensure
+  // all operations are indeed completed.
+  // Otherwise we would need a call to llama_synchronize(ctx)
+  LOGD("{}: Prompt processing successfully completed {}", __PRETTY_FUNCTION__,
+       mModelGeneralName);
+  {
+    // move the promptTokens as we don't need it anymore
+    auto onTokenResult = onToken(aOptions.mPrompt, std::move(promptTokens),
+                                 LlamaChatPhase::Prompt, true);
+    if (onTokenResult.isErr()) {
+      LOGE("{}", onTokenResult.inspectErr().mMessage);
+      return onTokenResult;
+    }
+  }
+
+  // The verification batch: the last accepted token and the drafts after it.
+  nsTArray<llama_token> verifyTokens;
+  nsTArray<llama_pos> verifyPos;
+  nsTArray<int32_t> verifyNSeq;
+  nsTArray<llama_seq_id*> verifySeq;
+  nsTArray<int8_t> verifyLogits;
+  llama_seq_id seqZero = 0;
+
+  bool done = false;
+  while (!done) {
+    for (llama_token token : accepted) {
+      // Check if the current token signals the end of generation:
+      // - Case 1: The token is an End-of-Generation (EOG) token and stopping
+      // on EOG is enabled.
+      // - Case 2: The token matches any user-defined stop token.
+      // If either condition is true, stop generation early.
+      if ((mLib->llama_vocab_is_eog(vocab, token) &&
+           aOptions.mStopOnEndOfGenerationTokens) ||
+          stopTokens.has(token)) {
+        LOGD("{}: Early stopping {}", __PRETTY_FUNCTION__, mModelGeneralName);
+        done = true;
+        break;
+      }
+
+      nsCString buffer;
+      buffer.SetLength(aOptions.mDeTokenizationOptions.mMaxCharsPerToken);
+      // write in the buffer from index 0
+      int32_t lstrip = 0;
+      auto n = mLib->llama_token_to_piece(
+          vocab, token, buffer.BeginWriting(), buffer.Length(), lstrip,
+          aOptions.mDeTokenizationOptions.mRenderSpecialTokens);
+      if (n < 0) {
+        auto msg =
+            nsFmtCString("{}: failed to convert token to string piece {}",
+                         __PRETTY_FUNCTION__, mModelGeneralName);
+        LOGE("{}", msg);
+        return mozilla::Err(Error{std::move(msg)});
+      }
+      buffer.SetLength(n);
+
+      auto onTokenResult = onToken(std::move(buffer), {token},
+                                   LlamaChatPhase::Generation, false);
+      if (onTokenResult.isErr()) {
+        LOGE("{}", onTokenResult.inspectErr().mMessage);
+        return onTokenResult;
+      }
+
+      numGeneratedTokens++;
+      if (numGeneratedTokens >= seqLen) {
+        LOGD(
+            "{} Maximum number of generation tokens reached. Stopping the "
+            "generation",
+            __PRETTY_FUNCTION__);
+        done = true;
+        break;
+      }
+    }
+    if (done) {
+      break;
+    }
+
     if (aCancelCallback()) {
       LOGD("{} Generation successfully cancelled. {}", __PRETTY_FUNCTION__,
            mModelGeneralName);
       return mozilla::Ok();
     }
 
-    // check if we have enough space in the context to evaluate this batch
-    int nCtxUsed =
-        mLib->llama_memory_seq_pos_max(mLib->llama_get_memory(mCtx.get()), 0);
-    if (nCtxUsed + batch.n_tokens > nCtx) {
-      if (promptProcessingDone) {
-        LOGD("{}: Context full after {} generated tokens {}",
-             __PRETTY_FUNCTION__, numGeneratedTokens, mModelGeneralName);
-        break;
-      }
-      auto msg =
-          nsFmtCString("{}: context size exceeded. Size is: {} Needed: {} {}",
-                       __PRETTY_FUNCTION__, nCtx, nCtxUsed + batch.n_tokens,
-                       mModelGeneralName);
-      LOGE("{}", msg);
-      return mozilla::Err(Error{std::move(msg)});
+    if (nPast + 1 > nCtx) {
+      LOGD("{}: Context full after {} generated tokens {}", __PRETTY_FUNCTION__,
+           numGeneratedTokens, mModelGeneralName);
+      break;
     }
 
-    LOGV("{}: Decoding to generate next token probabilities {}",
-         __PRETTY_FUNCTION__, mModelGeneralName);
+    const llama_token idLast = accepted.LastElement();
+    nsTArray<llama_token> draft;
+    if (mDraftCtx) {
+      const int32_t room = nCtx - nPast - 1;
+      draft = Draft(idLast, nPast, pendingH, std::min(kDraftMax, room));
+    }
 
+    verifyTokens.ClearAndRetainStorage();
+    verifyPos.ClearAndRetainStorage();
+    verifyNSeq.ClearAndRetainStorage();
+    verifySeq.ClearAndRetainStorage();
+    verifyLogits.ClearAndRetainStorage();
+    verifyTokens.AppendElement(idLast);
+    verifyTokens.AppendElements(draft);
+    for (size_t i = 0; i < verifyTokens.Length(); i++) {
+      verifyPos.AppendElement(nPast + static_cast<llama_pos>(i));
+      verifyNSeq.AppendElement(1);
+      verifySeq.AppendElement(&seqZero);
+      verifyLogits.AppendElement(1);
+    }
+    batch = llama_batch{static_cast<int32_t>(verifyTokens.Length()),
+                        verifyTokens.Elements(),
+                        nullptr,
+                        verifyPos.Elements(),
+                        verifyNSeq.Elements(),
+                        verifySeq.Elements(),
+                        verifyLogits.Elements()};
+
+    LOGV("{}: Decoding {} tokens to generate next token probabilities {}",
+         __PRETTY_FUNCTION__, batch.n_tokens, mModelGeneralName);
     if (mLib->llama_decode(mCtx.get(), batch) != 0) {
       auto msg = nsFmtCString("{}: failed to decode {}", __PRETTY_FUNCTION__,
                               mModelGeneralName);
@@ -804,83 +1044,28 @@ ResultStatus LlamaBackend::Generate(
       return mozilla::Err(Error{std::move(msg)});
     }
 
-    LOGV("{}: Sampling the generated probabilities to generate next token {}",
-         __PRETTY_FUNCTION__, mModelGeneralName);
-    token = SampleToken(samplers, lastTokenLogitIndex, candidates);
-
-    // Sending the end of prompt once we get the first token to ensure
-    // all operations are indeed completed.
-    // Otherwise we would need a call to llama_synchronize(ctx)
-    if (!promptProcessingDone) {
-      promptProcessingDone = true;
-
-      LOGD("{}: Prompt processing successfully completed {}",
-           __PRETTY_FUNCTION__, mModelGeneralName);
-
-      // move the promptTokens as we don't need it anymore
-      auto onTokenResult = onToken(aOptions.mPrompt, std::move(promptTokens),
-                                   LlamaChatPhase::Prompt, true);
-      if (onTokenResult.isErr()) {
-        LOGE("{}", onTokenResult.inspectErr().mMessage);
-        return onTokenResult;
+    // Row i holds the distribution after token i of the batch. A draft is
+    // accepted when the model samples it; the first miss ends the run, and
+    // its sample is the next token either way.
+    accepted.ClearAndRetainStorage();
+    for (size_t i = 0; i <= draft.Length(); i++) {
+      llama_token token =
+          SampleToken(samplers, static_cast<int32_t>(i), candidates);
+      accepted.AppendElement(token);
+      if (i == draft.Length() || token != draft[i]) {
+        break;
       }
     }
-
-    // Check if the current token signals the end of generation:
-    // - Case 1: The token is an End-of-Generation (EOG) token and stopping on
-    // EOG is enabled.
-    // - Case 2: The token matches any user-defined stop token.
-    // If either condition is true, stop generation early.
-    LOGV("{}: Checking if end of generation reached {}", __PRETTY_FUNCTION__,
-         mModelGeneralName);
-    if ((mLib->llama_vocab_is_eog(vocab, token) &&
-         aOptions.mStopOnEndOfGenerationTokens) ||
-        stopTokens.has(token)) {
-      LOGD("{}: Early stopping {}", __PRETTY_FUNCTION__, mModelGeneralName);
-      break;
+    const size_t nAccepted = accepted.Length() - 1;
+    mDraftStats.mDrafted += draft.Length();
+    mDraftStats.mAccepted += nAccepted;
+    if (nAccepted < draft.Length()) {
+      mLib->llama_memory_seq_rm(mLib->llama_get_memory(mCtx.get()), 0,
+                                nPast + static_cast<llama_pos>(nAccepted) + 1,
+                                -1);
     }
-
-    LOGV("{}: Converting the generated token to a string {}",
-         __PRETTY_FUNCTION__, mModelGeneralName);
-    nsCString buffer;
-    buffer.SetLength(aOptions.mDeTokenizationOptions.mMaxCharsPerToken);
-    // write in the buffer from index 0
-    int32_t lstrip = 0;
-    auto n = mLib->llama_token_to_piece(
-        vocab, token, buffer.BeginWriting(), buffer.Length(), lstrip,
-        aOptions.mDeTokenizationOptions.mRenderSpecialTokens);
-
-    if (n < 0) {
-      auto msg = nsFmtCString("{}: failed to convert token to string piece {}",
-                              __PRETTY_FUNCTION__, mModelGeneralName);
-      LOGE("{}", msg);
-      return mozilla::Err(Error{std::move(msg)});
-    }
-    buffer.SetLength(n);
-
-    LOGV("{}: Sending the generated token to the callback {}",
-         __PRETTY_FUNCTION__, mModelGeneralName);
-    auto onTokenResult =
-        onToken(std::move(buffer), {token}, LlamaChatPhase::Generation, false);
-    if (onTokenResult.isErr()) {
-      LOGE("{}", onTokenResult.inspectErr().mMessage);
-      return onTokenResult;
-    }
-
-    LOGV("{}: Checking if desired number of tokens reached {}",
-         __PRETTY_FUNCTION__, mModelGeneralName);
-    numGeneratedTokens++;
-    if (numGeneratedTokens >= seqLen) {
-      LOGD(
-          "{} Maximum number of generation tokens reached. Stopping the "
-          "generation",
-          __PRETTY_FUNCTION__);
-      break;
-    }
-
-    LOGV("{}: Preparing the next batch with the sampled token {}",
-         __PRETTY_FUNCTION__, mModelGeneralName);
-    batch = mLib->llama_batch_get_one(&token, 1);
+    keepHiddenState(static_cast<int32_t>(nAccepted));
+    nPast += static_cast<llama_pos>(nAccepted) + 1;
   }
 
   LOGV("{}: Sending end of generation to callback {}", __PRETTY_FUNCTION__,

@@ -104,6 +104,14 @@ namespace mozilla::llama {
     (llama_token * tokens, int32_t n_tokens))                               \
   X(int32_t, llama_memory_seq_pos_max,                                      \
     (llama_memory_t mem, llama_seq_id seq_id))                              \
+  X(bool, llama_memory_seq_rm,                                              \
+    (llama_memory_t mem, llama_seq_id seq_id, llama_pos p0, llama_pos p1))  \
+  X(int32_t, llama_model_n_embd, (const struct llama_model* model))         \
+  X(int32_t, llama_model_n_embd_out, (const struct llama_model* model))     \
+  X(void, mozllama_set_embeddings_nextn,                                    \
+    (struct llama_context * ctx, bool value, bool masked))                  \
+  X(float*, mozllama_get_embeddings_nextn_ith,                              \
+    (struct llama_context * ctx, int32_t i))                                \
   X(int32_t, llama_decode,                                                  \
     (struct llama_context * ctx, struct llama_batch batch))                 \
   X(llama_token, llama_sampler_sample,                                      \

@@ -11,3 +11,13 @@ SHARED_LIBRARY_NAME = "mozinference"
 
 # Export only the symbols we need for dynamic linking
 SYMBOLS_FILE = "mozinference.symbols"
+
+SOURCES += [
+    "LlamaExtShim.cpp",
+]
+
+LOCAL_INCLUDES += [
+    "/third_party/llama.cpp/ggml/include",
+    "/third_party/llama.cpp/include",
+    "/third_party/llama.cpp/src",
+]
