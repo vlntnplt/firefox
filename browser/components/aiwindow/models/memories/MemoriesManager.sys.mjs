@@ -83,6 +83,7 @@ export const MEMORIES_ON_DEVICE_ENGINE = Object.freeze({
   taskName: "text-generation",
   modelId: "ggml-org/gemma-4-E2B-it-GGUF",
   modelFile: "gemma-4-E2B-it-Q4_0.gguf",
+  draftModelFile: "mtp-gemma-4-E2B-it-Q4_0.gguf",
   modelRevision: "main",
   modelHubRootUrl: "https://huggingface.co",
   modelHubUrlTemplate: "{model}/resolve/{revision}",
