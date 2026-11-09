@@ -1429,6 +1429,26 @@ function showSubTab(name) {
   }
 }
 
+function showMemories() {
+  const { AppConstants } = ChromeUtils.importESModule(
+    "resource://gre/modules/AppConstants.sys.mjs"
+  );
+  const show =
+    location.hash === "#memories" && AppConstants.MOZ_BUILD_APP === "browser";
+  const panel = document.getElementById("memories");
+  document.l10n.setAttributes(
+    document.querySelector("title"),
+    show ? "about-inference-memories-title" : "about-inference-title"
+  );
+  document.body.classList.toggle("memories", show);
+  panel.hidden = !show;
+  if (show && !panel.firstChild) {
+    panel.appendChild(document.createElement("memories-view"));
+  } else if (!show) {
+    panel.replaceChildren();
+  }
+}
+
 function onSubTabKeydown(event) {
   const tabs = [...event.currentTarget.querySelectorAll("[role='tab']")];
   const rtl = getComputedStyle(document.documentElement).direction === "rtl";
@@ -1640,6 +1660,8 @@ async function runBenchmark() {
  * @async
  */
 window.onload = async function () {
+  showMemories();
+  window.addEventListener("hashchange", showMemories);
   let menu = document.getElementById("categories");
   menu.addEventListener("click", function click(e) {
     if (

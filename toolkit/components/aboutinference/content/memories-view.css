@@ -1,0 +1,185 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
+:host {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xlarge);
+  font-variant-numeric: tabular-nums;
+}
+
+h1,
+h2,
+h3,
+p,
+dl,
+dd {
+  margin: 0;
+}
+
+h1 {
+  font-size: var(--font-size-xxlarge);
+}
+
+h2 {
+  font-size: var(--font-size-large);
+}
+
+header,
+h2,
+h3,
+p,
+summary {
+  margin-block-end: var(--space-small);
+}
+
+.muted,
+dt,
+thead,
+details {
+  color: var(--text-color-deemphasized);
+}
+
+.model-file,
+.actions,
+.runtime-metrics,
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-medium);
+}
+
+.runtime {
+  padding: var(--space-large);
+  border: var(--border-width) solid var(--border-color-deemphasized);
+  border-radius: var(--border-radius-medium);
+  background-color: var(--background-color-box);
+}
+
+.model-file {
+  margin-block-end: var(--space-large);
+}
+
+.model-file code {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.runtime-metrics {
+  align-items: stretch;
+}
+
+.runtime-metrics > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 var(--size-image-xxlarge);
+}
+
+.runtime-metrics dd {
+  font-size: var(--font-size-large);
+  font-weight: var(--font-weight-semibold);
+  margin-block-start: auto;
+  padding-block-start: var(--space-small);
+}
+
+.runtime progress {
+  margin-block-start: var(--space-large);
+}
+
+.badge {
+  padding: var(--space-xsmall) var(--space-medium);
+  border-radius: var(--border-radius-circle);
+  border: var(--border-width) solid var(--border-color-deemphasized);
+  font-size: var(--font-size-small);
+  background-color: var(--background-color-cache-badge, var(--background-color-box));
+  @media not (forced-colors) {
+    --background-color-cache-badge: light-dark(var(--color-violet-0), var(--color-violet-90));
+  }
+}
+
+#status {
+  margin-inline-start: auto;
+}
+
+progress,
+table {
+  inline-size: 100%;
+}
+
+.recap {
+  border-block-start: var(--border-width) solid var(--border-color-deemphasized);
+  padding-block-start: var(--space-medium);
+}
+
+.summary > div {
+  flex: 1 1 var(--size-image-xxlarge);
+  padding-block: var(--space-medium);
+}
+
+.summary dd {
+  font-size: var(--font-size-xlarge);
+  font-weight: var(--font-weight-semibold);
+  margin-block-start: var(--space-xsmall);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  border-collapse: collapse;
+}
+
+th,
+td,
+.summary dt {
+  white-space: nowrap;
+}
+
+th,
+td {
+  padding: var(--space-medium) var(--space-small);
+  border-block-end: var(--border-width) solid var(--border-color-deemphasized);
+  text-align: end;
+}
+
+th:first-child,
+th:nth-child(2),
+td:nth-child(2) {
+  text-align: start;
+}
+
+tbody tr:last-child > * {
+  border: 0;
+}
+
+tr[data-status="running"] th {
+  color: var(--color-accent-primary);
+}
+
+.error,
+tr[data-status="failed"] td:nth-child(2) {
+  color: var(--text-color-error);
+}
+
+summary {
+  cursor: pointer;
+}
+
+.details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-small) var(--space-large);
+  margin-block: var(--space-large);
+}
+
+dd {
+  color: var(--text-color);
+}
+
+dd,
+.error {
+  overflow-wrap: anywhere;
+}

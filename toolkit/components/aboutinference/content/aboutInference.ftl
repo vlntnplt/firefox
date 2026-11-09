@@ -82,3 +82,58 @@ about-inference-text-generation-col-prefill = Prefill (ms)
 about-inference-text-generation-col-output-tokens = Output tokens
 about-inference-text-generation-col-decode = Decode (ms)
 about-inference-text-generation-col-tokens-per-second = Tokens/s
+
+## Memories on-device experiment
+
+about-inference-memories-title = Memories On-Device Experiment
+about-inference-memories-description = Run generate, merge and filter with sample data. Your browsing history and saved memories are not used.
+about-inference-memories-download = Download time
+about-inference-memories-load = Load time
+about-inference-memories-cached = Cached
+about-inference-memories-downloading = Downloading model
+about-inference-memories-run =
+    .label = Run
+about-inference-memories-cancel =
+    .label = Cancel
+about-inference-memories-idle = Ready to run
+about-inference-memories-running = Running
+about-inference-memories-done = Complete
+about-inference-memories-cancelled = Cancelled
+about-inference-memories-timed-out = Five-minute limit reached
+about-inference-memories-failed = Failed
+about-inference-memories-generate = Generate
+about-inference-memories-merge = Merge
+about-inference-memories-filter = Filter
+about-inference-memories-col-task = Task
+about-inference-memories-col-status = Status
+about-inference-memories-col-time = Inference time
+about-inference-memories-col-memory = Memory after call
+# Variables:
+#   $seconds (Number) - Duration in seconds.
+about-inference-memories-duration = { NUMBER($seconds, maximumFractionDigits: 2) } s
+about-inference-memories-memory-before = Memory before inference
+about-inference-memories-downloaded = Downloaded
+about-inference-memories-checking-cache = Checking cache
+about-inference-memories-needs-download = Download needed
+about-inference-memories-cache-unavailable = Cache status unavailable
+about-inference-memories-cleanup =
+    .label = Clean up
+    .title = Remove this model’s download and clear results
+about-inference-memories-cleaning = Removing the downloaded model…
+about-inference-memories-loading = Loading model…
+about-inference-memories-cancelling = Cancelling…
+about-inference-memories-finishing = Releasing the model…
+about-inference-memories-queued = Waiting
+about-inference-memories-skipped = Not run
+about-inference-memories-results = Completions on-device
+about-inference-memories-summary = Summary
+about-inference-memories-details = Run details
+about-inference-memories-feature = Feature ID
+about-inference-memories-finish-reason = Stop reason
+about-inference-memories-first-token = First token
+about-inference-memories-throughput = Generation speed
+about-inference-memories-prefill-speed = Prefill speed
+about-inference-memories-decode-speed = Decode speed
+# Variables:
+#   $rate (Number) - Tokens processed or generated per second.
+about-inference-memories-token-rate = { NUMBER($rate, maximumFractionDigits: 1) } tokens/s

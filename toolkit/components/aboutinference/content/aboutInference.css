@@ -27,6 +27,18 @@ body {
   flex: 1;
 }
 
+body.memories > :not(#memories) {
+  display: none;
+}
+
+#memories {
+  flex: 1;
+  min-inline-size: 0;
+  max-inline-size: 56rem;
+  margin-inline: auto;
+  padding: var(--space-xxlarge) var(--space-xlarge);
+}
+
 .tab {
   padding: 0.5em 0;
 }
