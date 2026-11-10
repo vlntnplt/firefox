@@ -502,6 +502,7 @@ async function selectFeatureConfig(feature, opts = {}) {
  *
  * @param {string} feature
  * @param {object} [opts]
+ * @param {object} [opts.onDeviceOptions] - llama.cpp PipelineOptions to run on device.
  * @returns {Promise<{engine: openAIEngine, parameters: inferenceParams}>}
  */
 export async function buildEngineForFeature(feature, opts = {}) {
@@ -551,6 +552,7 @@ export async function buildEngineForFeature(feature, opts = {}) {
     feature,
     baseURL,
     apiKey,
+    onDeviceOptions: opts.onDeviceOptions,
   });
 
   return { engine, parameters };

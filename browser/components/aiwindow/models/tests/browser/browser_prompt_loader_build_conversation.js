@@ -317,3 +317,33 @@ add_task(async function test_buildConversation_reports_missing_major_version() {
     await SpecialPowers.popPrefEnv();
   }
 });
+
+add_task(async function test_buildConversation_on_device_options() {
+  const feature = MODEL_FEATURES.MEMORIES_INITIAL_GENERATION_SYSTEM;
+  const onDeviceOptions = {
+    backend: "llama.cpp",
+    modelId: "Mozilla/test-model",
+    modelFile: "model.gguf",
+  };
+  const run = sinon.stub().resolves({ finalOutput: "" });
+  const createEngineStub = sinon
+    .stub(openAIEngine, "_createEngine")
+    .resolves({ run, engineStatus: "ready" });
+  try {
+    const conversation = await buildConversation(feature, {
+      onDeviceOptions,
+      flowId: "local-flow",
+    });
+    Assert.ok(conversation.isReady, "A conversation is ready to run");
+    await conversation.run({ inferenceParams: { max_tokens: 8 } });
+    const [options] = createEngineStub.firstCall.args;
+    Assert.equal(options.backend, "llama.cpp");
+    Assert.equal(options.modelId, onDeviceOptions.modelId);
+    Assert.equal(options.flowId, "local-flow");
+    Assert.equal(options.featureId, feature);
+    Assert.ok(!("apiKey" in options), "Cloud credentials stay out");
+    Assert.equal(run.firstCall.args[0].inferenceParams.max_tokens, 8);
+  } finally {
+    createEngineStub.restore();
+  }
+});
