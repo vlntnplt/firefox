@@ -146,6 +146,8 @@ export class openAIEngine {
    * @param {string} options.feature
    * @param {string} [options.baseURL] - Endpoint base URL
    * @param {string} [options.apiKey] - API key for the endpoint
+   * @param {object} [options.onDeviceOptions] - llama.cpp PipelineOptions to
+   *   run on device. The caller terminates `engineInstance` when finished.
    * @returns {Promise<openAIEngine>}
    */
   static async build({
@@ -156,6 +158,7 @@ export class openAIEngine {
     feature,
     baseURL = openAIEngine.endpoint,
     apiKey = "",
+    onDeviceOptions,
   }) {
     const engine = new openAIEngine();
     const engineId = `${DEFAULT_ENGINE_ID}-${feature}-${model}`;
@@ -167,16 +170,23 @@ export class openAIEngine {
     engine.#flowId = flowId;
     engine.#baseURL = baseURL;
     engine.#apiKey = apiKey;
-    engine.engineInstance = await openAIEngine.#createOpenAIEngine(
-      engineId,
-      serviceType,
-      purpose,
-      model,
-      flowId,
-      feature,
-      baseURL,
-      apiKey
-    );
+    engine.engineInstance = onDeviceOptions
+      ? await openAIEngine._createEngine({
+          engineId,
+          featureId: feature,
+          flowId,
+          ...onDeviceOptions,
+        })
+      : await openAIEngine.#createOpenAIEngine(
+          engineId,
+          serviceType,
+          purpose,
+          model,
+          flowId,
+          feature,
+          baseURL,
+          apiKey
+        );
     return engine;
   }
 
