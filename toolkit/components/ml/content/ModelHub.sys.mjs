@@ -1754,11 +1754,11 @@ export const TestIndexedDBCache = IndexedDBCache;
 
 export class ModelHub {
   /**
-   * The downloads under way, by session: when the first file started, how
-   * many files arrived, their size, how many failed, and whether the last one
-   * arrived or was given up by its caller.
+   * The downloads under way, by session: when the first file started and the
+   * last one settled, how many files arrived, their size, how many failed,
+   * and whether the last one arrived or was given up by its caller.
    *
-   * @type {Map<string, { start: number, files: number, bytes: number, failedFiles: number, ok: boolean, aborted: boolean, error: unknown }>}
+   * @type {Map<string, { start: number, end: number, files: number, bytes: number, failedFiles: number, ok: boolean, aborted: boolean, error: unknown }>}
    */
   #downloads = new Map();
 
@@ -2297,7 +2297,9 @@ export class ModelHub {
       outcome,
       error:
         outcome === "error" ? lazy.MLTelemetry.errorName(download.error) : null,
-      duration: Math.floor(ChromeUtils.now() - download.start),
+      // The caller reports completion once its engine is initialized, which
+      // can be long after the last file arrived.
+      duration: Math.floor(download.end - download.start),
       files: download.files,
       bytes: download.bytes,
       failed_files: download.failedFiles,
@@ -2503,6 +2505,7 @@ export class ModelHub {
     if (!download) {
       download = {
         start: startedAt,
+        end: startedAt,
         files: 0,
         bytes: 0,
         failedFiles: 0,
@@ -2514,6 +2517,7 @@ export class ModelHub {
     }
     download.ok = success;
     download.aborted = !success && aborted;
+    download.end = ChromeUtils.now();
     if (success) {
       download.files += 1;
       download.bytes += bytes;

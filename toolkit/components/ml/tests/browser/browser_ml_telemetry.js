@@ -439,12 +439,74 @@ add_task(async function test_model_download_telemetry_success() {
   Assert.greater(Number(download.bytes), 0, "Their size is recorded");
   Assert.equal(Number(download.failed_files), 0);
   Assert.greaterOrEqual(Number(download.duration), 0);
+  Assert.deepEqual(
+    [download.engine_id, download.model_id, download.model_revision],
+    ["main", "acme/bert", "v0.1"],
+    "The download names the engine it is for, and the model and revision"
+  );
 
   await EngineProcess.destroyMLEngine();
   await IndexedDBCache.init({ reset: true });
 
   wasmBufferStub.restore();
   promiseStub.restore();
+});
+
+/**
+ * Check that the duration of a model download ends with its last file, however
+ * long the backend then takes to load the model.
+ */
+add_task(async function test_model_download_duration_excludes_initialization() {
+  Services.env.set("MOZ_ALLOW_EXTERNAL_ML_HUB", "true");
+  const wasmBufferStub = sinon
+    .stub(MLEngineParent, "getWasmArrayBuffer")
+    .returns(new ArrayBuffer(16));
+  const workerStub = sinon
+    .stub(MLEngineParent, "getWorkerConfig")
+    .returns({ url: TELEMETRY_TEST_STUB_URL, options: { type: "module" } });
+  await IndexedDBCache.init({ reset: true });
+  await EngineProcess.destroyMLEngine();
+
+  const before =
+    Glean.firefoxAiRuntime.modelDownload.testGetValue()?.length || 0;
+  const start = ChromeUtils.now();
+  await createEngine({
+    engineId: "slow-init",
+    taskName: "real-llama-text-generation",
+    featureId: "link-preview",
+    backend: "llama.cpp",
+    modelId: "acme/bert",
+    modelHubUrlTemplate: "{model}/resolve/{revision}",
+    modelRevision: "v0.1",
+    modelHubRootUrl:
+      "chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data",
+    modelFile: "onnx/config.json",
+  });
+  const creation = ChromeUtils.now() - start;
+  Assert.greaterOrEqual(creation, 500, "The backend took its time to load");
+
+  const events = Glean.firefoxAiRuntime.modelDownload
+    .testGetValue()
+    .slice(before)
+    .map(event => event.extra);
+  Assert.equal(events.length, 1, "The download was recorded");
+  const [end] = events;
+  Assert.greater(Number(end.files), 0, "It downloaded files");
+  Assert.less(
+    Number(end.duration),
+    500,
+    "The download duration leaves the time the backend took to load out"
+  );
+  Assert.lessOrEqual(
+    Number(end.duration),
+    Math.ceil(creation),
+    "The download duration fits in the time creation took"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await IndexedDBCache.init({ reset: true });
+  wasmBufferStub.restore();
+  workerStub.restore();
 });
 
 /**

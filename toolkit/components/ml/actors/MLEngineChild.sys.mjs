@@ -897,8 +897,8 @@ class InferenceEngine {
           sessionId,
           featureId: pipelineOptions.featureId,
           engineId: pipelineOptions.engineId,
-          modelId: pipelineOptions.modelId,
-          modelRevision: pipelineOptions.modelRevision,
+          model: pipelineOptions.modelId,
+          revision: pipelineOptions.modelRevision,
         }),
     };
 

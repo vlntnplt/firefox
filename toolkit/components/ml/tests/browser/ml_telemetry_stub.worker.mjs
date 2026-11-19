@@ -56,6 +56,11 @@ _lazyForTestMocking.getBackend = async function (
   });
   await mlEngineWorker.getModelFile({ url: url2 }).catch(() => {});
 
+  if (engineId === "slow-init") {
+    // Stands in for a backend that takes a while to load what it downloaded.
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
   return {
     run: () => {},
   };

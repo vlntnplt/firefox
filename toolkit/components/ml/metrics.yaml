@@ -103,10 +103,12 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2015825
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
     data_sensitivity:
       - interaction
     notification_emails:
@@ -139,8 +141,8 @@ firefox.ai.runtime:
       duration:
         type: quantity
         description: >
-          Milliseconds from the start of the first file to the moment the
-          download is reported complete.
+          Milliseconds from the start of the first file to the moment the last
+          one arrived or failed.
       files:
         type: quantity
         description: How many files were downloaded.
