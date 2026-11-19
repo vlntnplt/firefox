@@ -31,6 +31,239 @@ const { HttpServer } = ChromeUtils.importESModule(
 );
 
 const MS_PER_SEC = 1000;
+
+/**
+ * The engine_run events recorded so far, as their extras.
+ *
+ * @returns {Record<string, string>[]}
+ */
+function engineRunEvents() {
+  return (Glean.firefoxAiRuntime.engineRun.testGetValue() ?? []).map(
+    event => event.extra
+  );
+}
+
+const ENGINE_RUN_OUTCOMES = ["success", "error", "aborted", "limited"];
+
+/**
+ * Checks what holds for any engine_run event, whatever the backend and the
+ * outcome: the extras are declared, the labels are set, and every measurement
+ * is physically possible.
+ *
+ * @param {Record<string, string>} run - The extras of the event.
+ * @param {number} elapsed - An upper bound, in milliseconds, of how long the
+ *   run can have lasted.
+ */
+function assertEngineRunIsSane(run, elapsed) {
+  const count = key => {
+    const value = Number(run[key]);
+    Assert.ok(
+      Number.isInteger(value) && value >= 0,
+      `${key} is a whole, non-negative number (${run[key]})`
+    );
+    return value;
+  };
+
+  for (const key of ["engine_id", "host_process"]) {
+    Assert.ok(run[key], `${key} is set`);
+  }
+  Assert.ok(
+    ENGINE_RUN_OUTCOMES.includes(run.outcome),
+    `outcome is one of the declared values (${run.outcome})`
+  );
+  Assert.equal(
+    run.error !== undefined,
+    run.outcome === "error",
+    "A run names an error exactly when it failed"
+  );
+  if (run.error !== undefined) {
+    Assert.ok(
+      /^[A-Za-z][A-Za-z0-9_]*$/.test(run.error),
+      `error is a name, not a message (${run.error})`
+    );
+  }
+  if (run.http_status !== undefined) {
+    Assert.ok(
+      ["error", "limited"].includes(run.outcome),
+      "Only a run a service refused has an HTTP status"
+    );
+    Assert.greaterOrEqual(count("http_status"), 400, "It is an error status");
+    Assert.less(count("http_status"), 600, "It is an HTTP status");
+  }
+
+  if (run.finish_reason !== undefined) {
+    Assert.ok(
+      /^[a-z][a-z_-]*$/.test(run.finish_reason),
+      `finish_reason is a short name (${run.finish_reason})`
+    );
+  }
+
+  const wall = count("wall_milliseconds");
+  Assert.lessOrEqual(
+    wall,
+    Math.ceil(elapsed) + 1,
+    "The wall time fits in the time that passed"
+  );
+
+  if (run.cpu_milliseconds !== undefined) {
+    Assert.lessOrEqual(
+      count("cpu_milliseconds"),
+      (wall + 1) * navigator.hardwareConcurrency,
+      "The CPU time fits in the wall time on this many cores"
+    );
+  }
+  if (run.memory_bytes !== undefined) {
+    Assert.greater(count("memory_bytes"), 0, "The process uses memory");
+    Assert.less(
+      count("memory_bytes"),
+      count("system_memory_mb") * 1024 * 1024,
+      "The process uses less memory than the machine has"
+    );
+  }
+  for (const key of ["time_to_first_chunk", "average_chunk_time"]) {
+    if (run[key] !== undefined) {
+      Assert.lessOrEqual(count(key), wall, `${key} fits in the wall time`);
+    }
+  }
+  for (const key of ["input_tokens", "cached_input_tokens", "output_tokens"]) {
+    if (run[key] !== undefined) {
+      Assert.greater(count(key), 0, `${key} is recorded only when positive`);
+    }
+  }
+  if (run.cached_input_tokens !== undefined) {
+    Assert.lessOrEqual(
+      count("cached_input_tokens"),
+      count("input_tokens"),
+      "Cached input tokens are part of the input tokens"
+    );
+  }
+}
+
+/**
+ * Runs `task`, which makes one engine run, and returns the engine_run event it
+ * recorded after checking it is sane.
+ *
+ * @template T
+ * @param {() => Promise<T>} task
+ * @returns {Promise<{
+ *   run: Record<string, string>,
+ *   result: T | null,
+ *   error: unknown,
+ *   elapsed: number,
+ * }>} `elapsed` is how long the task took, in milliseconds.
+ */
+async function recordEngineRunOf(task) {
+  const before = engineRunEvents().length;
+  const start = ChromeUtils.now();
+  let result = null;
+  let error = null;
+  try {
+    result = await task();
+  } catch (e) {
+    error = e;
+  }
+  const elapsed = ChromeUtils.now() - start;
+
+  await TestUtils.waitForCondition(
+    () => engineRunEvents().length > before,
+    "Waiting for the run to be recorded"
+  );
+  const recorded = engineRunEvents().slice(before);
+  Assert.equal(recorded.length, 1, "The run recorded one engine_run event");
+  assertEngineRunIsSane(recorded[0], ChromeUtils.now() - start);
+  return { run: recorded[0], result, error, elapsed };
+}
+
+/**
+ * A chat completions server that plays back a script, for tests that need to
+ * know exactly what the engine was sent and when.
+ *
+ * @param {object} [script]
+ * @param {string[]} [script.chunks] - The content deltas of the answer.
+ * @param {number} [script.chunkDelayMs] - The pause before each delta of a
+ *   streamed answer.
+ * @param {object | null} [script.usage] - The usage reported with the answer.
+ * @param {number} [script.status] - The HTTP status to answer with. Anything
+ *   but 200 sends an error body and no answer.
+ * @param {number | null} [script.cutOffAfter] - Closes a streamed answer after
+ *   this many deltas, without a finish reason.
+ * @returns {{ server: object, port: number }}
+ */
+function startScriptedOpenAI({
+  chunks = ["Hello", " world"],
+  chunkDelayMs = 0,
+  usage = null,
+  status = 200,
+  cutOffAfter = null,
+} = {}) {
+  const server = new HttpServer();
+  server.registerPathHandler("/v1/chat/completions", (request, response) => {
+    if (status !== 200) {
+      response.setStatusLine(request.httpVersion, status, "");
+      response.setHeader("Content-Type", "application/json", false);
+      response.write(
+        JSON.stringify({ error: { message: "scripted", type: "scripted" } })
+      );
+      return;
+    }
+
+    const body = JSON.parse(readRequestBody(request) || "{}");
+    const completion = (extra = {}) => ({
+      id: "chatcmpl-scripted",
+      object: body.stream ? "chat.completion.chunk" : "chat.completion",
+      created: 0,
+      model: body.model,
+      ...extra,
+    });
+
+    if (!body.stream) {
+      response.setHeader("Content-Type", "application/json", false);
+      response.write(
+        JSON.stringify(
+          completion({
+            choices: [
+              {
+                index: 0,
+                finish_reason: "stop",
+                message: { role: "assistant", content: chunks.join("") },
+              },
+            ],
+            ...(usage ? { usage } : {}),
+          })
+        )
+      );
+      return;
+    }
+
+    response.setHeader("Content-Type", "text/event-stream", false);
+    response.processAsync();
+    const send = data => response.write(`data: ${JSON.stringify(data)}\n\n`);
+    const delta = (content, finish_reason = null) =>
+      completion({ choices: [{ index: 0, delta: content, finish_reason }] });
+
+    (async () => {
+      for (const [index, content] of chunks.entries()) {
+        if (index === cutOffAfter) {
+          response.finish();
+          return;
+        }
+        // eslint-disable-next-line mozilla/no-arbitrary-setTimeout
+        await new Promise(resolve => setTimeout(resolve, chunkDelayMs));
+        send(delta({ role: "assistant", content }));
+      }
+      send(delta({}, "stop"));
+      if (usage) {
+        send(completion({ choices: [], usage }));
+      }
+      response.write("data: [DONE]\n\n");
+      response.finish();
+    })().catch(() => {
+      // The client went away mid-answer; there is nobody left to write to.
+    });
+  });
+  server.start(-1);
+  return { server, port: server.identity.primaryPort };
+}
 const IndexedDBCache = TestIndexedDBCache;
 
 /**

@@ -1124,24 +1124,43 @@ add_task(
         /inference process was shutdown/,
         `The ${attempt} crash in a row rejects the run`
       );
+      Assert.deepEqual(
+        [engineRunEvents().at(-1)].map(event => [event.outcome, event.error]),
+        [["error", "InferenceProcessCrash"]],
+        `The run of the ${attempt} crash in a row is recorded as a crash`
+      );
     }
 
-    await Assert.rejects(
-      engineInstance.run({ data: "After three crashes in a row" }),
-      /crashed 3 times in a row/,
+    const refused = await recordEngineRunOf(() =>
+      engineInstance.run({ data: "After three crashes in a row" })
+    );
+    Assert.ok(
+      /crashed 3 times in a row/.test(refused.error?.message),
       "run() stops reopening after three crashes in a row"
+    );
+    Assert.equal(
+      refused.run.error,
+      "InferenceProcessCrash",
+      "The run an engine refuses to reopen for is recorded as a crash"
     );
     Assert.equal(
       engineInstance.engineStatus,
       "crashed",
       "The engine reports it no longer reopens"
     );
-    await Assert.rejects(
+    const refusedStream = await recordEngineRunOf(() =>
       engineInstance
         .runWithGenerator({ data: "After three crashes in a row" })
-        .next(),
-      /The port is null/,
+        .next()
+    );
+    Assert.ok(
+      /The port is null/.test(refusedStream.error?.message),
       "runWithGenerator() does not reopen a crashed engine either"
+    );
+    Assert.equal(
+      refusedStream.run.error,
+      "InferenceProcessCrash",
+      "and its run is recorded as a crash too"
     );
     Assert.ok(
       !ChromeUtils.getAllDOMProcesses().some(

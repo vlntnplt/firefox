@@ -155,6 +155,18 @@ async function llama_crash() {
       sawCrash = true;
       info(`failed with error ${err.message}`);
 
+      const crashed = engineRunEvents().at(-1);
+      Assert.equal(
+        crashed.outcome,
+        "error",
+        "A run its process died under failed"
+      );
+      Assert.equal(
+        crashed.error,
+        "InferenceProcessCrash",
+        "The failure is recorded as a process crash"
+      );
+
       let [subject, data] = await contentShutdown;
 
       info(`ipc:content-shutdown: data=${data} subject=${subject}`);
