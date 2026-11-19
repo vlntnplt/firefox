@@ -41,11 +41,11 @@ async function checkCanceledRunWithLateResponse(request) {
     await warmup;
 
     responseSpy = sinon.spy(engine, "handlePortMessage");
-    const successCount =
-      Glean.firefoxAiRuntime.runInferenceSuccessFlow.testGetValue()?.length ??
-      0;
-    const failureCount =
-      Glean.firefoxAiRuntime.runInferenceFailure.testGetValue()?.length ?? 0;
+    const runs = () => Glean.firefoxAiRuntime.engineRun.testGetValue() ?? [];
+    const successes = () =>
+      runs().filter(event => event.extra.outcome === "success").length;
+    const successCount = successes();
+    const runCount = runs().length;
     const controller = new AbortController();
     const reason = new DOMException("Canceled by the caller", "AbortError");
     const pending = engine.run(request, { signal: controller.signal });
@@ -63,15 +63,15 @@ async function checkCanceledRunWithLateResponse(request) {
     );
     const lateResponse = await waitForRunResponse(responseSpy);
     Assert.equal(
-      Glean.firefoxAiRuntime.runInferenceSuccessFlow.testGetValue()?.length ??
-        0,
+      successes(),
       successCount,
       "The canceled request does not record a success event"
     );
+    Assert.equal(runs().length, runCount + 1, "The canceled run is recorded");
     Assert.equal(
-      Glean.firefoxAiRuntime.runInferenceFailure.testGetValue()?.length ?? 0,
-      failureCount,
-      "The canceled request does not record a backend failure event"
+      runs().at(-1).extra.outcome,
+      "error",
+      "The canceled request is recorded as a run that did not succeed"
     );
 
     const next = await engine.run({ data: "Next request" });
@@ -81,8 +81,7 @@ async function checkCanceledRunWithLateResponse(request) {
       "A new request receives its own response after cancellation"
     );
     Assert.equal(
-      Glean.firefoxAiRuntime.runInferenceSuccessFlow.testGetValue()?.length ??
-        0,
+      successes(),
       successCount + 1,
       "Only the new request records a success event"
     );

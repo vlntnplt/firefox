@@ -926,8 +926,8 @@ genai.linkpreview:
       flow_id:
         type: string
         description: >
-          Joins to sibling firefox.ai.runtime.engine_run and
-          run_inference_success_flow events for the same inference.
+          Joins to the sibling firefox.ai.runtime.engine_run event for the
+          same inference.
       output_hash:
         type: string
         description: >

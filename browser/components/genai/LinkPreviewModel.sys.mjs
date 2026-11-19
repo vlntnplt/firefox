@@ -128,7 +128,7 @@ export async function runSmokeTest({ engine, buildID }) {
     Services.prefs.setStringPref(SMOKE_LAST_BUILD_ID_PREF, buildID);
   } catch (_) {
     // Inference failures are already captured by
-    // firefox.ai.runtime.run_inference_failure via the engine plumbing.
+    // firefox.ai.runtime.engine_run via the engine plumbing.
   }
 }
 XPCOMUtils.defineLazyPreferenceGetter(

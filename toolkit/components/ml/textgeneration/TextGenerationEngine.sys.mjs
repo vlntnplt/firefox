@@ -317,10 +317,8 @@ class StreamStats {
     this.characterCount += text.length;
   }
 
-  /** @param {EngineRunResult} result */
-  metrics(result) {
+  metrics() {
     return {
-      tokenCount: result.metrics.outputTokens,
       characterCount: this.characterCount,
       timeToFirstChunk: this.firstChunkAt
         ? this.firstChunkAt - this.beforeRun
@@ -519,22 +517,26 @@ export class TextGenerationEngine {
 
   /**
    * @param {StreamStats} stats
-   * @param {EngineRunResult} result
    * @param {string} [featureId]
+   * @param {object} [ending]
+   * @param {EngineRunResult | null} [ending.result] - What the run returned.
+   * @param {unknown} [ending.error] - What the run threw.
    */
-  #recordRun(stats, result, featureId) {
-    this.telemetry.recordRunInferenceSuccessFlow(this.engineId, result.metrics);
+  #recordRun(stats, featureId, { result = null, error = null } = {}) {
     this.telemetry.recordEngineRun({
       feature_id: featureId,
       beforeRun: stats.beforeRun,
-      resourcesBefore: result.resourcesBefore,
-      resourcesAfter: result.resourcesAfter,
+      resourcesBefore: result?.resourcesBefore,
+      resourcesAfter: result?.resourcesAfter,
       engineId: this.engineId,
       modelId: this.pipelineOptions.modelId,
       backend: this.pipelineOptions.backend,
       backendSourceRevision: lazy.LLAMA_CPP_VERSION,
       deviceKind: this.#deviceKind,
-      ...(stats.streaming ? stats.metrics(result) : {}),
+      inputTokens: result?.metrics.inputTokens,
+      outputTokens: result?.metrics.outputTokens,
+      ...(stats.streaming && result ? stats.metrics() : {}),
+      error,
     });
   }
 
@@ -551,9 +553,9 @@ export class TextGenerationEngine {
     let result;
     try {
       result = await this.#execute(request);
-      this.#recordRun(stats, result, request.featureId);
+      this.#recordRun(stats, request.featureId, { result });
     } catch (error) {
-      this.telemetry.recordRunInferenceFailure(error);
+      this.#recordRun(stats, request.featureId, { error });
       throw error;
     } finally {
       signal?.removeEventListener("abort", cancel);
@@ -588,12 +590,12 @@ export class TextGenerationEngine {
       // Link Preview keys its final flush on an empty terminal chunk.
       yield { text: "", tokens: [], isPrompt: false };
 
-      this.#recordRun(stats, result, request.featureId);
+      this.#recordRun(stats, request.featureId, { result });
       settled = true;
       return result;
     } catch (error) {
       settled = true;
-      this.telemetry.recordRunInferenceFailure(error);
+      this.#recordRun(stats, request.featureId, { error });
       throw error;
     } finally {
       // Breaking out of a `for await` loop returns this generator mid-decode.
@@ -601,7 +603,7 @@ export class TextGenerationEngine {
         this.cancel();
         const result = await completion?.catch(() => null);
         if (result) {
-          this.#recordRun(stats, result, request.featureId);
+          this.#recordRun(stats, request.featureId, { result });
         }
       }
     }

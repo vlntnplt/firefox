@@ -491,8 +491,7 @@ add_task(
   }
 );
 
-// An abandoned run is still recorded as run_inference_success_flow, so
-// engine_run has to report it too.
+// An abandoned run is recorded once the engine settles it.
 add_task(
   async function test_ml_smoke_test_llama_abandoned_records_engine_run() {
     await runOnBothInferenceProcesses(async () => {
@@ -518,13 +517,6 @@ add_task(
           Assert.ok(chunk, "Received a chunk before abandoning the generator");
           break;
         }
-
-        await waitForCondition(
-          () =>
-            Glean.firefoxAiRuntime.runInferenceSuccessFlow.testGetValue()
-              ?.length,
-          "Waiting for the abandoned run to complete in the child."
-        );
 
         await waitForCondition(
           () => Glean.firefoxAiRuntime.engineRun.testGetValue()?.length,

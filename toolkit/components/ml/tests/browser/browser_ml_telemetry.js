@@ -27,8 +27,15 @@ registerCleanupFunction(() => {
 function getGleanCount(metricsName, engineId = "default-engine") {
   var metrics = Glean.firefoxAiRuntime[metricsName];
 
+  if (["runInferenceSuccess", "runInferenceFailure"].includes(metricsName)) {
+    const outcome = metricsName === "runInferenceSuccess" ? "success" : "error";
+    return (Glean.firefoxAiRuntime.engineRun.testGetValue() ?? []).filter(
+      event => event.extra.outcome === outcome
+    ).length;
+  }
+
   // events
-  if (["runInferenceFailure", "engineCreationFailure"].includes(metricsName)) {
+  if (metricsName === "engineCreationFailure") {
     return metrics.testGetValue()?.length || 0;
   }
 
@@ -68,43 +75,6 @@ add_task(async function test_default_telemetry() {
   );
 
   {
-    info("Test the run_inference_success_flow event");
-    const inferenceFlowEvents =
-      Glean.firefoxAiRuntime.runInferenceSuccessFlow.testGetValue();
-    Assert.ok(
-      inferenceFlowEvents && !!inferenceFlowEvents.length,
-      "At least one run_inference_success_flow event was recorded"
-    );
-    const lastInferenceEvent = inferenceFlowEvents.at(-1);
-    const { extra: inferenceExtra } = lastInferenceEvent;
-
-    // Helper to check that a number field is present and >= 0
-    const checkNumber = (key, isOptional = false) => {
-      const value = inferenceExtra[key];
-      if (isOptional && (value === null || value === undefined)) {
-        return; // Optional field not present is OK
-      }
-      Assert.notEqual(value, null, `${key} should be present`);
-      const number = Number(value); // Quantities are stored as strings
-      Assert.ok(!Number.isNaN(number), `${key} should be a number`);
-      Assert.greaterOrEqual(number, 0, `${key} should be >= 0`);
-    };
-
-    // Check flow_id is present
-    Assert.ok(inferenceExtra.flow_id, "flow_id should be present");
-
-    // Check all required timing/token metrics
-    checkNumber("tokenizing_time", true);
-    checkNumber("inference_time", true);
-    checkNumber("decoding_time", true);
-    checkNumber("input_tokens", true);
-    checkNumber("output_tokens", true);
-    checkNumber("time_to_first_token", true);
-    checkNumber("tokens_per_second", true);
-    checkNumber("time_per_output_token", true);
-  }
-
-  {
     info("Test the engine_run event");
     const value = Glean.firefoxAiRuntime.engineRun.testGetValue();
     Assert.ok(
@@ -128,6 +98,8 @@ add_task(async function test_default_telemetry() {
     checkNumber("system_memory_mb");
 
     Assert.equal(extra.feature_id, "test-feature");
+    Assert.equal(extra.outcome, "success");
+    Assert.equal(extra.error, undefined, "A successful run names no error");
     Assert.equal(extra.engine_id, "default-engine");
     Assert.equal(extra.model_id, "Mozilla/test");
     Assert.equal(extra.backend, "test-backend");
@@ -208,6 +180,10 @@ add_task(async function test_ml_engine_run_failure() {
     getGleanCount("runInferenceFailure"),
     runInferenceFailureCount + 1
   );
+  const { extra } = Glean.firefoxAiRuntime.engineRun.testGetValue().at(-1);
+  Assert.equal(extra.outcome, "error");
+  Assert.equal(extra.error, "Error", "The error is recorded by name");
+  Assert.equal(extra.engine_id, "default-engine");
 
   Assert.equal(
     getGleanCount("engineCreationFailure"),
@@ -678,7 +654,7 @@ add_task(async function test_run_with_generator_telemetry() {
     checkNumber("system_memory_mb");
     checkNumber("character_count");
     checkNumber("time_to_first_chunk");
-    Assert.ok(!extra.token_count, "Token count is not implemented yet.");
+    Assert.ok(!extra.output_tokens, "Token count is not implemented yet.");
 
     Assert.notEqual(
       extra.average_chunk_time,

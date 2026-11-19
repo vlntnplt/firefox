@@ -294,8 +294,12 @@ add_task(async function test_engine_overlap_rejects() {
       samplers: TINYSTORIES_GREEDY_SAMPLERS,
       nPredict: 16,
     };
-    const failuresBefore = events("runInferenceFailure").length;
-    const successesBefore = events("runInferenceSuccessFlow").length;
+    const failedRuns = () =>
+      events("engineRun").filter(event => event.extra.outcome === "error");
+    const failuresBefore = failedRuns().length;
+    const successfulRuns = () =>
+      events("engineRun").filter(event => event.extra.outcome === "success");
+    const successesBefore = successfulRuns().length;
 
     const first = engine.run(request);
     await Assert.rejects(
@@ -305,15 +309,15 @@ add_task(async function test_engine_overlap_rejects() {
     );
     await first;
 
-    const failures = events("runInferenceFailure");
+    const failures = failedRuns();
     Assert.equal(failures.length, failuresBefore + 1, "One run failure");
     Assert.equal(
       failures.at(-1).extra.error,
-      "A generation is already in progress",
-      "The run failure says the caller overlapped its runs"
+      "Error",
+      "The overlapping run is recorded as failed, by error name"
     );
     Assert.equal(
-      events("runInferenceSuccessFlow").length,
+      successfulRuns().length,
       successesBefore + 1,
       "The first run succeeded"
     );

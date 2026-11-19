@@ -556,11 +556,6 @@ add_task(async function test_native_run_and_cache() {
       [...features, ...features]
     );
     Assert.ok(runs.every(run => run.engine_id === MEMORIES_ENGINE_ID));
-    Assert.deepEqual(
-      events("runInferenceSuccessFlow").map(run => run.flow_id),
-      runs.map(run => run.flow_id),
-      "Inference timings and engine runs share the flow ID"
-    );
     const starts = events("sessionStart");
     Assert.equal(starts.length, 2);
     Assert.notEqual(starts[0].flow_id, starts[1].flow_id);

@@ -43,6 +43,10 @@ function lastError(name) {
   return all[all.length - 1]?.extra.error;
 }
 
+function unsuccessfulRuns() {
+  return events("engineRun").filter(event => event.extra.outcome !== "success");
+}
+
 // crash-me.gguf takes the process down mid-generation. The harness counts
 // the minidump as a failure unless the test claims it, as browser_ml_native
 // does for the same model.
@@ -119,38 +123,11 @@ add_task(async function test_run_records_the_inference_flow() {
     await engine.terminate();
 
     Assert.greater(metrics.outputTokens, 0, "The run generated");
-    const flow = only("runInferenceSuccessFlow");
-    Assert.equal(flow.host_process, "hwinference");
-    Assert.equal(Number(flow.input_tokens), metrics.inputTokens);
-    Assert.equal(Number(flow.output_tokens), metrics.outputTokens);
-    Assert.equal(
-      Number(flow.inference_time),
-      Math.round(metrics.inferenceTime)
-    );
-    Assert.equal(Number(flow.decoding_time), Math.round(metrics.decodingTime));
-    Assert.equal(
-      Number(flow.time_to_first_token),
-      Math.round(metrics.timeToFirstToken)
-    );
-    Assert.equal(
-      Number(flow.tokens_per_second),
-      Math.round(metrics.tokensPerSecond * 100) / 100
-    );
-    Assert.equal(
-      Number(flow.time_per_output_token),
-      Math.round(metrics.timePerOutputToken * 100) / 100
-    );
-    Assert.equal(
-      flow.tokenizing_time,
-      undefined,
-      "There is no tokenizing phase on this path"
-    );
-    Assert.equal(
-      labeledCount("runInferenceSuccess", "hwi-tel-run"),
-      1,
-      "The labeled run timing got its sample"
-    );
-    Assert.equal(events("runInferenceFailure").length, 0);
+    const recorded = only("engineRun");
+    Assert.equal(recorded.host_process, "hwinference");
+    Assert.equal(Number(recorded.input_tokens), metrics.inputTokens);
+    Assert.equal(Number(recorded.output_tokens), metrics.outputTokens);
+    Assert.equal(unsuccessfulRuns().length, 0);
   } finally {
     await cleanup();
   }
@@ -188,8 +165,12 @@ add_task(async function test_run_records_the_engine_run() {
     }
     Assert.greater(Number(run.system_memory_mb), 0);
 
+    Assert.greater(
+      Number(run.output_tokens),
+      0,
+      "output_tokens is reported whether or not the run streams"
+    );
     for (const key of [
-      "token_count",
       "character_count",
       "time_to_first_chunk",
       "average_chunk_time",
@@ -248,11 +229,10 @@ add_task(async function test_stream_records_the_chunk_metrics() {
     Assert.greater(chunks, 1, "The stream came in several chunks");
 
     const [run] = events("engineRun");
-    const [flow] = events("runInferenceSuccessFlow");
-    Assert.equal(
-      Number(run.extra.token_count),
-      Number(flow.extra.output_tokens),
-      "token_count is the generated token count"
+    Assert.greater(
+      Number(run.extra.output_tokens),
+      0,
+      "output_tokens is the generated token count"
     );
     Assert.equal(
       Number(run.extra.character_count),
@@ -278,7 +258,7 @@ add_task(async function test_stream_records_the_chunk_metrics() {
     await engine.terminate();
 
     const single = events("engineRun")[1].extra;
-    Assert.equal(Number(single.token_count), 4);
+    Assert.equal(Number(single.output_tokens), 4);
     Assert.equal(
       single.average_chunk_time,
       null,
@@ -322,7 +302,7 @@ add_task(async function test_download_failure() {
       "end_download_failed",
       "The download ends with a failure step"
     );
-    Assert.equal(events("runInferenceFailure").length, 0);
+    Assert.equal(unsuccessfulRuns().length, 0);
   } finally {
     await cleanup();
   }
@@ -387,17 +367,11 @@ add_task(async function test_process_crash_mid_generation() {
     await removeCrashDump(shutdown);
     noteIntentionalUtilityCrash(pid);
 
-    Assert.equal(events("runInferenceFailure").length, 1);
-    Assert.equal(
-      lastError("runInferenceFailure"),
-      "TextGenerator.generate: the inference process went away",
-      "The run failure says the process died"
-    );
-    Assert.equal(
-      events("runInferenceFailure").at(-1).extra.host_process,
-      "hwinference"
-    );
-    Assert.equal(events("runInferenceSuccessFlow").length, 0);
+    Assert.equal(unsuccessfulRuns().length, 1);
+    const failed = unsuccessfulRuns()[0].extra;
+    Assert.equal(failed.outcome, "error", "A dead process is a failed run");
+    Assert.equal(failed.error, "AbortError", "The error is recorded by name");
+    Assert.equal(failed.host_process, "hwinference");
     await engine.terminate();
   } finally {
     await cleanup();
@@ -428,11 +402,11 @@ add_task(async function test_terminate_mid_generation() {
       error => error.name === "AbortError"
     );
 
-    Assert.equal(events("runInferenceFailure").length, 1);
+    Assert.equal(unsuccessfulRuns().length, 1);
     Assert.equal(
-      lastError("runInferenceFailure"),
-      "TextGenerator.generate: the generator was terminated",
-      "The run failure says the caller tore the generator down"
+      unsuccessfulRuns()[0].extra.outcome,
+      "error",
+      "A run whose engine the caller tore down did not succeed"
     );
   } finally {
     await cleanup();

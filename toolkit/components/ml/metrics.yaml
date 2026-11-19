@@ -177,107 +177,6 @@ firefox.ai.runtime:
         description: error class
         type: string
 
-  run_inference_failure:
-    type: event
-    description: >
-      An inference run has failed
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D238583
-      - https://phabricator.services.mozilla.com/D270909
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - firefox-ai-and-ml@mozilla.com
-    expires: never
-    extra_keys:
-      flow_id: *flow_id
-      host_process: *host_process
-      modelId:
-        type: string
-        description: model id
-      featureId:
-        description: feature id
-        type: string
-      engineId:
-        description: Engine id
-        type: string
-      error:
-        description: error class or message
-        type: string
-
-  run_inference_success_flow:
-    type: event
-    description: >
-      Records a successful inference run within a tracked flow
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D270909
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - firefox-ai-and-ml@mozilla.com
-    expires: never
-    extra_keys:
-      flow_id: *flow_id
-      host_process: *host_process
-      tokenizing_time:
-        type: quantity
-        description: >
-          Time taken for tokenization (preprocessing) in milliseconds
-      inference_time:
-        type: quantity
-        description: >
-          Time taken for inference in milliseconds
-      decoding_time:
-        type: quantity
-        description: >
-          Time taken for decoding in milliseconds
-      input_tokens:
-        type: quantity
-        description: >
-          Number of tokens in the input prompt
-      output_tokens:
-        type: quantity
-        description: >
-          Number of tokens generated
-      time_to_first_token:
-        type: quantity
-        description: >
-          Time to first token in milliseconds (null if not applicable)
-      tokens_per_second:
-        type: quantity
-        description: >
-          Inference throughput in tokens per second (rounded integer)
-      time_per_output_token:
-        type: quantity
-        description: >
-          Average latency per output token in milliseconds (rounded integer)
-
-  run_inference_success:
-    type: labeled_timing_distribution
-    time_unit: millisecond
-    description: >
-      An inference engine was created
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D238583
-      - https://phabricator.services.mozilla.com/D243790
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - firefox-ai-and-ml@mozilla.com
-    expires: never
-    labels: *engine_labels
-
   model_download:
     type: event
     description: >
@@ -357,7 +256,8 @@ firefox.ai.runtime:
   engine_run:
     type: event
     description: >
-      The performance and memory characteristics of a single run of the inference engine.
+      One run of the inference engine, however it ended: its outcome, and its
+      performance and memory characteristics.
     extra_keys:
       flow_id: *flow_id
       host_process: *host_process
@@ -381,6 +281,15 @@ firefox.ai.runtime:
           A unique id to describe the feature. e.g. pdfjs-alt-text, suggest-NER,
           link-preview.
         type: string
+      outcome:
+        description: >
+          How the run ended: success or error.
+        type: string
+      error:
+        description: >
+          The name of the error a failed run threw, e.g. TypeError. Never the
+          error's message. Null unless outcome is error.
+        type: string
       engine_id:
         type: string
         description: >
@@ -400,8 +309,11 @@ firefox.ai.runtime:
           Version identifier of the backend library. Populated per-backend when
           the running library exposes a version; null otherwise.
       device_kind: *device_kind
-      token_count:
-        description: The number of tokens generated for text generation tasks.
+      input_tokens:
+        description: The number of tokens in the input, when the backend reports it.
+        type: quantity
+      output_tokens:
+        description: The number of tokens generated, for text generation tasks.
         type: quantity
       character_count:
         description: The number of characters generated for text generation tasks.
@@ -430,12 +342,14 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2047026
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1992779
       - https://phabricator.services.mozilla.com/D270909
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2016214
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
     data_sensitivity:
       - interaction
     notification_emails:

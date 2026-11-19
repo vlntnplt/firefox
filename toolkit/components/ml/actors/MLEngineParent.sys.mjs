@@ -1508,14 +1508,9 @@ export class MLEngine {
             if (errorDetails && typeof error === "object") {
               Object.assign(error, errorDetails);
             }
-            this.telemetry.recordRunInferenceFailure(error);
             request.reject(error);
           } else if (response) {
             MLEngine.#consecutiveCrashes.delete(this.engineId);
-            this.telemetry.recordRunInferenceSuccessFlow(
-              this.engineId,
-              response.metrics
-            );
             // Attach resource metrics from the child process
             response.resourcesBefore = resourcesBefore;
             response.resourcesAfter = resourcesAfter;
@@ -1718,6 +1713,23 @@ export class MLEngine {
   }
 
   /**
+   * Records the engine_run event of a run that ended, however it ended.
+   *
+   * @param {object} run - What MLTelemetry.recordEngineRun takes, less the
+   *   fields that describe the engine.
+   */
+  #recordRun(run) {
+    this.telemetry.recordEngineRun({
+      engineId: this.engineId,
+      modelId: this.pipelineOptions.modelId,
+      backend: this.pipelineOptions.backend,
+      backendSourceRevision:
+        this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
+      ...run,
+    });
+  }
+
+  /**
    * Run the inference request
    *
    * @param {EngineRequests[FeatureID]} request
@@ -1732,7 +1744,9 @@ export class MLEngine {
     }
     // If the port is null maybe the inference process has shut down
     if (this.#port === null) {
-      throw new Error("Port does not exist");
+      const error = new Error("Port does not exist");
+      this.#recordRun({ beforeRun: ChromeUtils.now(), error });
+      throw error;
     }
 
     /** @type {PromiseWithResolvers<EngineResponses[FeatureID]>} */
@@ -1775,19 +1789,22 @@ export class MLEngine {
     let result;
     try {
       result = await resolvers.promise;
+    } catch (error) {
+      this.#recordRun({
+        beforeRun,
+        error,
+      });
+      throw error;
     } finally {
       signal?.removeEventListener("abort", onAbort);
     }
 
-    this.telemetry.recordEngineRun({
+    this.#recordRun({
       beforeRun,
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
-      engineId: this.engineId,
-      modelId: this.pipelineOptions.modelId,
-      backend: this.pipelineOptions.backend,
-      backendSourceRevision:
-        this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
+      inputTokens: result.metrics?.inputTokens,
+      outputTokens: result.metrics?.outputTokens,
     });
 
     return result;
@@ -1808,7 +1825,9 @@ export class MLEngine {
 
     // If the port is null maybe the inference process has shut down
     if (this.#port === null) {
-      throw new Error("The port is null");
+      const error = new Error("The port is null");
+      this.#recordRun({ beforeRun: startTime, error });
+      throw error;
     }
 
     // Create a promise to track when the engine has fully completed all runs
@@ -1879,9 +1898,11 @@ export class MLEngine {
     /**
      * Report the run once, from whichever path reaches its end first.
      *
-     * @param {any} result - The engine's response for the run.
+     * @param {any} result - The engine's response for the run, if it gave one.
+     * @param {object} [ending]
+     * @param {unknown} [ending.error] - What the run threw.
      */
-    const recordRun = result => {
+    const recordRun = (result, { error = null } = {}) => {
       if (recorded) {
         return;
       }
@@ -1904,18 +1925,13 @@ export class MLEngine {
           ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
       );
 
-      this.telemetry.recordEngineRun({
+      this.#recordRun({
         beforeRun: startTime,
-        resourcesBefore: result.resourcesBefore,
-        resourcesAfter: result.resourcesAfter,
-        engineId: this.engineId,
-        modelId: this.pipelineOptions.modelId,
-        backend: this.pipelineOptions.backend,
-        backendSourceRevision:
-          this.pipelineOptions.backend === "llama.cpp"
-            ? LLAMA_CPP_VERSION
-            : null,
-        tokenCount,
+        error,
+        resourcesBefore: result?.resourcesBefore,
+        resourcesAfter: result?.resourcesAfter,
+        inputTokens: result?.metrics?.inputTokens,
+        outputTokens: result?.metrics?.outputTokens || tokenCount,
         characterCount,
         timeToFirstChunk:
           firstChunkTime === null ? null : firstChunkTime - startTime,
@@ -1929,6 +1945,7 @@ export class MLEngine {
     // A consumer that abandons this generator resumes it at the `finally`
     // without ever reaching the assignment after the loop.
     let loopEnded = false;
+    let loopError = null;
 
     try {
       // Loop to yield chunks as they arrive
@@ -2012,18 +2029,34 @@ export class MLEngine {
         }
       }
       loopEnded = true;
+    } catch (error) {
+      loopError = error;
+      throw error;
     } finally {
       if (!loopEnded) {
         this.#port?.postMessage({ type: "EnginePort:Cancel", requestId });
 
-        // The engine settles the run either way and records its own success
-        // metrics for it, so report it from there.
-        completionPromise.then(recordRun, () => {});
+        if (loopError) {
+          recordRun(null, { error: loopError });
+        } else {
+          // The engine settles the run either way and records its own success
+          // metrics for it, so report it from there.
+          completionPromise.then(
+            result => recordRun(result),
+            () => {}
+          );
+        }
       }
     }
 
     // Wait for the engine to fully complete before exiting
-    const result = await completionPromise;
+    let result;
+    try {
+      result = await completionPromise;
+    } catch (error) {
+      recordRun(null, { error });
+      throw error;
+    }
 
     recordRun(result);
 
