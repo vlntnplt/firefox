@@ -13,10 +13,6 @@ ChromeUtils.defineLazyGetter(lazy, "console", () => {
   });
 });
 
-ChromeUtils.defineLazyGetter(lazy, "mlUtils", () => {
-  return Cc["@mozilla.org/ml-utils;1"].getService(Ci.nsIMLUtils);
-});
-
 /**
  * MLTelemetry provides a mechanism tracking a "flow" of operations
  * related to a machine learning feature. A flow is a sequence of related
@@ -164,8 +160,8 @@ export class MLTelemetry {
    * @param {{cpuTime: number | null, memory: number | null}} [options.resourcesBefore]
    * @param {{cpuTime: number | null, memory: number | null}} [options.resourcesAfter]
    * @param {number | null} [options.inputTokens]
+   * @param {number | null} [options.cachedInputTokens]
    * @param {number | null} [options.outputTokens]
-   * @param {number | null} [options.characterCount]
    * @param {number | null} [options.timeToFirstChunk]
    * @param {number | null} [options.averageChunkTime]
    * @param {string | null} [options.finishReason] - Why the generation
@@ -185,8 +181,8 @@ export class MLTelemetry {
     resourcesBefore,
     resourcesAfter,
     inputTokens,
+    cachedInputTokens,
     outputTokens,
-    characterCount,
     timeToFirstChunk = null,
     averageChunkTime = null,
     finishReason = null,
@@ -214,13 +210,10 @@ export class MLTelemetry {
     }
 
     let cpuMilliseconds = null;
-    let cpuUtilization = null;
     const wallMilliseconds = ChromeUtils.now() - beforeRun;
-    const cores = lazy.mlUtils.getOptimalCPUConcurrency();
     const memoryBytes = resourcesAfter?.memory ?? null;
     if (resourcesAfter?.cpuTime != null && resourcesBefore?.cpuTime != null) {
       cpuMilliseconds = resourcesAfter.cpuTime - resourcesBefore.cpuTime;
-      cpuUtilization = (cpuMilliseconds / wallMilliseconds / cores) * 100;
     }
 
     /**
@@ -239,8 +232,6 @@ export class MLTelemetry {
       flow_id,
       cpu_milliseconds: round(cpuMilliseconds),
       wall_milliseconds: round(wallMilliseconds),
-      cores: round(cores),
-      cpu_utilization: round(cpuUtilization),
       memory_bytes: round(memoryBytes),
       feature_id,
       outcome,
@@ -255,8 +246,8 @@ export class MLTelemetry {
       // "undefined". When the counts are 0, this can mean nothing was generated for
       // the counts. We should count these as null.
       input_tokens: inputTokens || null,
+      cached_input_tokens: cachedInputTokens || null,
       output_tokens: outputTokens || null,
-      character_count: characterCount || null,
       time_to_first_chunk: round(timeToFirstChunk),
       average_chunk_time: round(averageChunkTime),
       finish_reason:

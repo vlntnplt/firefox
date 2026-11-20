@@ -188,19 +188,19 @@ firefox.ai.runtime:
       flow_id: *flow_id
       host_process: *host_process
       cpu_milliseconds:
-        description: The combined milliseconds of every cpu core that was running.
+        description: >
+          The CPU time, in milliseconds, the engine's process used during the
+          run, all threads and cores combined. It is measured on the whole
+          process, so runs that overlap in it share it. Null for a run that
+          returned no response: the engine reports it with the response.
         type: quantity
       wall_milliseconds:
         description: The amount of wall time the run request took.
         type: quantity
-      cores:
-        description: The number of cores on the machine.
-        type: quantity
-      cpu_utilization:
-        description: The percentage of the user's CPU used.
-        type: quantity
       memory_bytes:
-        description: The number of RSS bytes for the inference process.
+        description: >
+          An estimate of the private physical memory of the engine's process
+          after the run, in bytes. Null for a run that returned no response.
         type: quantity
       feature_id:
         description: >
@@ -248,11 +248,13 @@ firefox.ai.runtime:
       input_tokens:
         description: The number of tokens in the input, when the backend reports it.
         type: quantity
+      cached_input_tokens:
+        description: >
+          How many of the input tokens a completions endpoint read from its
+          prompt cache, when it reports it.
+        type: quantity
       output_tokens:
         description: The number of tokens generated, for text generation tasks.
-        type: quantity
-      character_count:
-        description: The number of characters generated for text generation tasks.
         type: quantity
       time_to_first_chunk:
         description: >
@@ -289,6 +291,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1992779
       - https://phabricator.services.mozilla.com/D270909
@@ -297,6 +300,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
     data_sensitivity:
       - interaction
     notification_emails:

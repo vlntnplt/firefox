@@ -151,13 +151,11 @@ add_task(async function test_run_records_the_engine_run() {
       "The run names the llama.cpp revision, as the MLEngine path does"
     );
 
-    for (const key of ["wall_milliseconds", "cores", "memory_bytes"]) {
+    for (const key of ["wall_milliseconds", "memory_bytes"]) {
       Assert.greater(Number(run[key]), 0, `${key} is measured`);
     }
-    for (const key of ["cpu_milliseconds", "cpu_utilization"]) {
-      Assert.notEqual(run[key], null, `${key} is measured`);
-      Assert.greaterOrEqual(Number(run[key]), 0, `${key} is a count`);
-    }
+    Assert.notEqual(run.cpu_milliseconds, null, "cpu_milliseconds is measured");
+    Assert.greaterOrEqual(Number(run.cpu_milliseconds), 0);
     Assert.greater(Number(run.system_memory_mb), 0);
 
     Assert.greater(
@@ -165,11 +163,7 @@ add_task(async function test_run_records_the_engine_run() {
       0,
       "output_tokens is reported whether or not the run streams"
     );
-    for (const key of [
-      "character_count",
-      "time_to_first_chunk",
-      "average_chunk_time",
-    ]) {
+    for (const key of ["time_to_first_chunk", "average_chunk_time"]) {
       Assert.equal(run[key], null, `${key} is only reported for a stream`);
     }
   } finally {
@@ -212,13 +206,11 @@ add_task(async function test_stream_records_the_chunk_metrics() {
       featureId: "link-preview",
     });
 
-    let text = "";
     let chunks = 0;
     for await (const chunk of engine.runWithGenerator({
       ...RUN_REQUEST,
       minOutputBufferSize: 1,
     })) {
-      text += chunk.text;
       chunks += chunk.text ? 1 : 0;
     }
     Assert.greater(chunks, 1, "The stream came in several chunks");
@@ -228,11 +220,6 @@ add_task(async function test_stream_records_the_chunk_metrics() {
       Number(run.extra.output_tokens),
       0,
       "output_tokens is the generated token count"
-    );
-    Assert.equal(
-      Number(run.extra.character_count),
-      text.length,
-      "character_count is the streamed text length"
     );
     Assert.equal(
       run.extra.device_kind,

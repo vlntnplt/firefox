@@ -407,6 +407,7 @@ export class OpenAIPipeline {
       finalOutput: output,
       metrics: [],
       finishReason: completion.choices[0].finish_reason ?? null,
+      ...(completion.usage ? { usage: completion.usage } : {}),
       ...(toolCalls ? { toolCalls } : {}),
       ...(providerSpecificFields ? { providerSpecificFields } : {}),
     };

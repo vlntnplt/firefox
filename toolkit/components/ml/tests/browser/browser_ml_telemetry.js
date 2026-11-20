@@ -93,8 +93,6 @@ add_task(async function test_default_telemetry() {
     };
     checkNumber("cpu_milliseconds");
     checkNumber("wall_milliseconds");
-    checkNumber("cores");
-    checkNumber("cpu_utilization");
     checkNumber("memory_bytes");
     checkNumber("system_memory_mb");
 
@@ -677,11 +675,8 @@ add_task(async function test_run_with_generator_telemetry() {
     };
     checkNumber("cpu_milliseconds");
     checkNumber("wall_milliseconds");
-    checkNumber("cores");
-    checkNumber("cpu_utilization");
     checkNumber("memory_bytes");
     checkNumber("system_memory_mb");
-    checkNumber("character_count");
     checkNumber("time_to_first_chunk");
     Assert.ok(!extra.output_tokens, "Token count is not implemented yet.");
 

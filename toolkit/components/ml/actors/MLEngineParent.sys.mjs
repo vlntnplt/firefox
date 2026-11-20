@@ -46,6 +46,21 @@ const lazy = XPCOMUtils.declareLazy({
   MINIMUM_PHYSICAL_MEMORY: { pref: "browser.ml.minimumPhysicalMemory" },
 });
 
+/**
+ * The token counts of a finished run: what the backend measured, or what a
+ * completions endpoint reported as usage.
+ *
+ * @param {any} [metrics] - The metrics a backend returns with its response.
+ * @param {any} [usage] - The usage of a chat completion.
+ */
+function runTokenCounts(metrics, usage) {
+  return {
+    inputTokens: metrics?.inputTokens ?? usage?.prompt_tokens,
+    cachedInputTokens: usage?.prompt_tokens_details?.cached_tokens,
+    outputTokens: metrics?.outputTokens ?? usage?.completion_tokens,
+  };
+}
+
 const ONE_GiB = 1024 * 1024 * 1024;
 const RS_RUNTIME_COLLECTION = "ml-onnx-runtime";
 
@@ -1883,8 +1898,7 @@ export class MLEngine {
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
       finishReason: result.finishReason,
-      inputTokens: result.metrics?.inputTokens,
-      outputTokens: result.metrics?.outputTokens,
+      ...runTokenCounts(result.metrics, result.usage),
     });
 
     return result;
@@ -1964,6 +1978,8 @@ export class MLEngine {
     // Collect both the token and text counts, as the tokens aren't always available.
     let tokenCount = 0;
     let characterCount = 0;
+    // What a completions endpoint reports, in the last chunk of a stream.
+    let usage = null;
 
     // Only generated (non-prompt) chunks are counted for cadence telemetry.
     let firstChunkTime = null;
@@ -2014,9 +2030,7 @@ export class MLEngine {
         resourcesBefore: result?.resourcesBefore,
         resourcesAfter: result?.resourcesAfter,
         finishReason: result?.finishReason,
-        inputTokens: result?.metrics?.inputTokens,
-        outputTokens: result?.metrics?.outputTokens || tokenCount,
-        characterCount,
+        ...runTokenCounts(result?.metrics, usage),
         timeToFirstChunk:
           firstChunkTime === null ? null : firstChunkTime - startTime,
         averageChunkTime:
@@ -2044,8 +2058,12 @@ export class MLEngine {
           );
           tokenCount += chunk.metadata.tokens?.length ?? 0;
           characterCount += chunk.metadata.text?.length ?? 0;
+          usage = chunk.metadata.usage ?? usage;
 
-          if (!chunk.metadata.isPrompt) {
+          // The cadence is that of what was generated: neither the prompt
+          // echoed back nor the empty chunk that ends a stream counts.
+          const { isPrompt, text, tokens, toolCalls } = chunk.metadata;
+          if (!isPrompt && (text || tokens?.length || toolCalls)) {
             const now = ChromeUtils.now();
             if (firstChunkTime === null) {
               firstChunkTime = now;

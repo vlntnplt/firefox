@@ -301,26 +301,22 @@ class StreamStats {
   firstChunkAt = 0;
   lastChunkAt = 0;
   chunkCount = 0;
-  characterCount = 0;
   streaming = false;
 
   constructor() {
     this.beforeRun = ChromeUtils.now();
   }
 
-  /** @param {string} text */
-  onChunk(text) {
+  onChunk() {
     this.lastChunkAt = ChromeUtils.now();
     if (!this.firstChunkAt) {
       this.firstChunkAt = this.lastChunkAt;
     }
     this.chunkCount += 1;
-    this.characterCount += text.length;
   }
 
   metrics() {
     return {
-      characterCount: this.characterCount,
       timeToFirstChunk: this.firstChunkAt
         ? this.firstChunkAt - this.beforeRun
         : null,
@@ -605,7 +601,7 @@ export class TextGenerationEngine {
     let settled = false;
     try {
       completion = this.#execute(request, text => {
-        stats.onChunk(text);
+        stats.onChunk();
         queue.push(text);
       });
       // Keeps the rejection handled; the await below rethrows it.
