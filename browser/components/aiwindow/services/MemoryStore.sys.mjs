@@ -760,13 +760,16 @@ export const MemoryStore = {
           .join(". ")
           .toLowerCase();
       });
-      const result = await this.embeddingsGenerator.embedMany(memoryTexts);
+      const result = await this.embeddingsGenerator.embedMany(memoryTexts, {
+        purpose: "memories:index-store",
+      });
       this.memoryEmbeddingsCache = result.output || result;
       this.memoryCacheKey = currentCacheKey;
     }
 
     const queryResult = await this.embeddingsGenerator.embed(
-      message.toLowerCase()
+      message.toLowerCase(),
+      { purpose: "memories:embed-query" }
     );
     let queryEmbedding = queryResult.output || queryResult;
 
