@@ -24,7 +24,6 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(lazy, {
   createEngine: "chrome://global/content/ml/EngineProcess.sys.mjs",
   DownloadUtils: "resource://gre/modules/DownloadUtils.sys.mjs",
-  MLTelemetry: "chrome://global/content/ml/MLTelemetry.sys.mjs",
   ModelHub: "chrome://global/content/ml/ModelHub.sys.mjs",
   ProgressStatusText: "chrome://global/content/ml/Utils.sys.mjs",
   ProgressType: "chrome://global/content/ml/Utils.sys.mjs",
@@ -194,10 +193,6 @@ export class MemoriesView extends MozLitElement {
     this.error = null;
     const run = { model: { loaded: 0, size: 0 }, calls: [] };
     this.run = run;
-    const telemetry = new lazy.MLTelemetry({
-      featureId: MEMORIES_MODEL.featureId,
-    });
-    telemetry.sessionStart({ interaction: "button_click" });
     let timeout;
     try {
       await this.#cacheReady;
@@ -205,7 +200,7 @@ export class MemoriesView extends MozLitElement {
       signal.throwIfAborted();
       const start = ChromeUtils.now();
       this.#engine = await lazy.createEngine(
-        { ...MEMORIES_MODEL, flowId: telemetry.flowId },
+        MEMORIES_MODEL,
         data => this.#onProgress(run.model, data),
         signal
       );
@@ -253,7 +248,6 @@ export class MemoriesView extends MozLitElement {
       });
       this.#engine = null;
       this.#controller = null;
-      telemetry.endSession(this.status);
       await this.#readCache();
       this.running = false;
     }

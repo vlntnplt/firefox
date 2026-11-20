@@ -25,11 +25,6 @@ ChromeUtils.defineLazyGetter(lazy, "mlUtils", () => {
  *
  * This class uses a correlation ID pattern where flowId is passed to each
  * method, allowing flexible tracking across different parts of the system.
- *
- * @example
- * new MLTelemetry({ featureId: "ml-suggest-intent" }).sessionStart({ interaction: "button_click" });
- * @example
- * new MLTelemetry({ featureId: "ml-suggest-intent", flowId: "1234-5678" }).sessionStart({ interaction: "keyboard_shortcut"});
  */
 export class MLTelemetry {
   static #systemMemoryMB = Math.round(
@@ -42,8 +37,6 @@ export class MLTelemetry {
   #featureId;
   /** @type {string|undefined} */
   #hostProcess;
-  /** @type {number|undefined} */
-  #startTime;
 
   /**
    * Creates a new MLTelemetry instance.
@@ -98,33 +91,6 @@ export class MLTelemetry {
   }
 
   /**
-   * Starts a telemetry session for the given flow.
-   *
-   * @param {object} [options] - Session start options.
-   * @param {string} [options.interaction] - The interaction type (e.g., "button_click", "keyboard_shortcut").
-   * @throws {Error} If session already exists for this flowId.
-   */
-  sessionStart({ interaction } = {}) {
-    if (this.#startTime) {
-      throw new Error(`Session already started for flowId: ${this.#flowId}`);
-    }
-
-    this.#startTime = ChromeUtils.now();
-
-    Glean.firefoxAiRuntime.sessionStart.record({
-      flow_id: this.flowId,
-      feature_id: this.featureId,
-      interaction,
-    });
-
-    this.logEventToConsole(this.sessionStart, {
-      flow_id: this.flowId,
-      feature_id: this.featureId,
-      interaction,
-    });
-  }
-
-  /**
    * Logs a debug message to the browser console, prefixed with the flow ID.
    *
    * @param {object} caller - The calling function or class.
@@ -134,41 +100,6 @@ export class MLTelemetry {
     const flowId = data?.flowId || this.#flowId;
     const id = flowId.substring(0, 5);
     lazy.console.debug("flowId[%s]: %s", id, caller.name, data);
-  }
-
-  /**
-   * Ends the telemetry session and records the final status and duration.
-   *
-   * @param {string} status - The final status of the session.
-   * @throws {Error} If no active session found or status parameter is missing.
-   * @returns {number} Duration in milliseconds.
-   */
-  endSession(status) {
-    // Validate status
-    if (!status) {
-      throw new Error("status parameter is required");
-    }
-    // Validate that session was started
-    if (!this.#startTime) {
-      throw new Error(
-        `sessionStart() was not called for flowId: ${this.#flowId}`
-      );
-    }
-
-    const duration_ms = ChromeUtils.now() - this.#startTime;
-    Glean.firefoxAiRuntime.sessionEnd.record({
-      flow_id: this.#flowId,
-      duration: Math.round(duration_ms),
-      status,
-    });
-
-    this.logEventToConsole(this.endSession, {
-      flowId: this.#flowId,
-      feature_id: this.#featureId,
-      status,
-      duration_ms,
-    });
-    return duration_ms;
   }
 
   /**

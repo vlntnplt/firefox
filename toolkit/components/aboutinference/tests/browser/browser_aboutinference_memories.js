@@ -179,10 +179,6 @@ add_task(async function test_fixed_workload() {
       })),
       "Every task uses fixed input, regardless of earlier output"
     );
-    Assert.deepEqual(
-      events("sessionEnd").map(event => event.status),
-      ["done", "done"]
-    );
   });
 });
 
@@ -203,10 +199,6 @@ add_task(async function test_failures_allow_retry() {
       Assert.equal(engine.terminate.callCount, phase === "create" ? 0 : 1);
       await click(browser, "run");
       Assert.equal((await finishRun(browser)).status, "done", "Retry succeeds");
-      Assert.deepEqual(
-        events("sessionEnd").map(event => event.status),
-        ["failed", "done"]
-      );
     });
   }
 });
@@ -233,10 +225,14 @@ add_task(async function test_cancellation() {
           content.location.hash = "";
           await ContentTaskUtils.waitForCondition(() => !view.isConnected);
           Assert.ok(!content.document.body.classList.contains("memories"));
+          await ContentTaskUtils.waitForCondition(() => !view.running);
+          Assert.equal(view.status, "cancelled");
         });
       }
-      await TestUtils.waitForCondition(() => events("sessionEnd").length === 1);
-      Assert.equal(events("sessionEnd")[0].status, "cancelled");
+      await TestUtils.waitForCondition(
+        () => engine.terminate.calledOnce,
+        "The cancelled run releases its engine"
+      );
       Assert.ok(engine.cancel.calledOnce);
       Assert.ok(engine.terminate.calledOnce);
       Assert.ok(
@@ -307,10 +303,6 @@ add_task(async function test_shared_inference_timeout() {
       Assert.equal(await countTimers(), 0);
       await tick(5 * 60 * 1000);
       Assert.ok(engine.cancel.calledOnce, "Completed runs cannot time out");
-      Assert.deepEqual(
-        events("sessionEnd").map(event => event.status),
-        ["timed-out", "done"]
-      );
     } finally {
       await SpecialPowers.spawn(browser, [], () => {
         content.clock.restore();
@@ -556,16 +548,13 @@ add_task(async function test_native_run_and_cache() {
       [...features, ...features]
     );
     Assert.ok(runs.every(run => run.engine_id === MEMORIES_ENGINE_ID));
-    const starts = events("sessionStart");
-    Assert.equal(starts.length, 2);
-    Assert.notEqual(starts[0].flow_id, starts[1].flow_id);
-    Assert.ok(
-      starts.every(event => event.feature_id === MEMORIES_MODEL.featureId)
+    const flows = runs.map(run => run.flow_id);
+    Assert.equal(
+      new Set(flows.slice(0, features.length)).size,
+      1,
+      "The runs of one click share a flow"
     );
-    Assert.deepEqual(
-      events("sessionEnd").map(event => event.flow_id),
-      starts.map(event => event.flow_id)
-    );
+    Assert.equal(new Set(flows).size, 2, "Each click is a flow of its own");
   } finally {
     MEMORIES_MODEL.kvCacheDtype = kvCacheDtype;
     createHub.restore();

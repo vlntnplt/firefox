@@ -11,63 +11,6 @@ $tags:
   - "Core :: Machine Learning"
 
 firefox.ai.runtime:
-  session_start:
-    type: event
-    description: >
-      Marks the beginning of an ML inference session or workflow.
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D270909
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - firefox-ai-and-ml@mozilla.com
-    expires: never
-    extra_keys:
-      flow_id: &flow_id
-        type: string
-        description: >
-          Unique identifier for this ML workflow session. Used to correlate all
-          events within this session across components.
-      feature_id:
-        type: string
-        description: >
-          The feature initiating this session
-      interaction:
-        type: string
-        description: >
-          The interaction type that initiated this session
-
-  session_end:
-    type: event
-    description: >
-      Marks the end of an ML inference session or workflow.
-      This event is recorded when the session completes successfully or is terminated.
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D270909
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - firefox-ai-and-ml@mozilla.com
-    expires: never
-    extra_keys:
-      flow_id: *flow_id
-      feature_id:
-        type: string
-        description: >
-          The feature associated with this session.
-      duration:
-        type: quantity
-        description: >
-          Total session duration in milliseconds.
-      status:
-        type: string
-        description: >
-          Session completion status
-
   engine_creation:
     type: event
     description: >
@@ -91,7 +34,11 @@ firefox.ai.runtime:
       - firefox-ai-and-ml@mozilla.com
     expires: never
     extra_keys:
-      flow_id: *flow_id
+      flow_id: &flow_id
+        type: string
+        description: >
+          Unique identifier of a flow, the sequence of events one user-level
+          operation records. Used to correlate them across components.
       host_process: &host_process
         description: >
           The process serving the engine: "inference" for the content
