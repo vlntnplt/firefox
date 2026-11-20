@@ -98,8 +98,8 @@ function getEmbeddingsGenerator() {
   return _embeddingsGenerator;
 }
 
-async function embedTexts(texts) {
-  const result = await getEmbeddingsGenerator().embedMany(texts);
+async function embedTexts(texts, options) {
+  const result = await getEmbeddingsGenerator().embedMany(texts, options);
   return result.output || result;
 }
 
@@ -768,7 +768,9 @@ export async function getOpenTabs({ topic = "" } = {}, conversation) {
         SmartTabGroupingManager.preprocessText(t.title || "")
       );
       const [topicEmbedding, ...titleEmbeddings] =
-        await _embeddingFunctions.embedTexts([topic, ...titles]);
+        await _embeddingFunctions.embedTexts([topic, ...titles], {
+          purpose: "tool-open-tabs:index-and-query",
+        });
 
       const topicTokens = new Set(tokenizer.tokenize(topic));
 

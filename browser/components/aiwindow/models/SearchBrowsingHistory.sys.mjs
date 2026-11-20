@@ -402,7 +402,9 @@ async function searchBrowsingHistorySemantic({
   await semanticManager.embedder.ensureEngine();
 
   // Embed search term
-  let tensor = await semanticManager.embedder.embed(searchTerm);
+  let tensor = await semanticManager.embedder.embed(searchTerm, {
+    purpose: "tool-browsing-history:query",
+  });
   const vec = extractVectorFromTensor(tensor);
   const vector = lazy.PlacesUtils.tensorToSQLBindable(vec);
 

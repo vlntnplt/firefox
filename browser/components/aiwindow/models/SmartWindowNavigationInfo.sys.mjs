@@ -75,13 +75,15 @@ class NavigationInfoImpl {
 
     if (!this.#navEmbeddings) {
       const result = await this.#embeddingsGenerator.embedMany(
-        this.#navEntries.map(e => e.embeddingText)
+        this.#navEntries.map(e => e.embeddingText),
+        { purpose: "tool-navigation:index" }
       );
       this.#navEmbeddings = result.output ?? result;
     }
 
     const queryResult = await this.#embeddingsGenerator.embed(
-      query.toLowerCase()
+      query.toLowerCase(),
+      { purpose: "tool-navigation:query" }
     );
     let queryEmbedding = queryResult.output ?? queryResult;
     if (Array.isArray(queryEmbedding) && queryEmbedding.length === 1) {
