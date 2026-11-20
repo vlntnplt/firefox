@@ -426,7 +426,9 @@ export class SmartTabGroupingManager extends AIFeature {
     try {
       await this.getEmbeddingsGenerator().ensureEngine();
       // warm up the engine
-      await this.getEmbeddingsGenerator().embedMany(["test"]);
+      await this.getEmbeddingsGenerator().embedMany(["test"], {
+        purpose: `${STG_FEATURE_ID}:warm-up`,
+      });
     } catch (e) {}
   }
 
@@ -1110,7 +1112,9 @@ export class SmartTabGroupingManager extends AIFeature {
       return [];
     }
     // embedMany mean-pools + normalizes and returns one vector per string.
-    return this.getEmbeddingsGenerator().embedMany(textToEmbedList);
+    return this.getEmbeddingsGenerator().embedMany(textToEmbedList, {
+      purpose: STG_FEATURE_ID,
+    });
   }
 
   /**
