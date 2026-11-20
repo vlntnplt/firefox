@@ -855,7 +855,8 @@ class PlacesSemanticHistoryManager {
       // you prepare an array of requests.
       try {
         batchTensors = await this.embedder.embedMany(
-          rowsToAdd.map(r => r.content)
+          rowsToAdd.map(r => r.content),
+          { purpose: "semantic-history:index-history" }
         );
         batchTensors = this.#convertTensor(batchTensors, rowsToAdd.length);
       } catch (ex) {
@@ -1104,7 +1105,9 @@ class PlacesSemanticHistoryManager {
 
     let tensor;
     try {
-      tensor = await this.embedder.embed(searchText);
+      tensor = await this.embedder.embed(searchText, {
+        purpose: "semantic-history:embed-query",
+      });
       tensor = this.#convertTensor(tensor, 1);
     } catch (ex) {
       lazy.logger.error(`Error processing tensor: ${ex}`);
@@ -1141,8 +1144,8 @@ class PlacesSemanticHistoryManager {
   }
 
   // for easier testing purpose.
-  async engineRun(request) {
-    return await this.#engine.run(request);
+  async engineRun(request, options) {
+    return await this.#engine.run(request, options);
   }
 
   /**
