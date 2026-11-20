@@ -467,12 +467,14 @@ export class EmbeddingsGenerator {
    *
    * @param {string} text
    *   The input text to be embedded.
-   * @param {{ purpose?: string }} [options]
-   *   Who the run is for.
+   * @param {{ purpose: string }} options
+   *   Who the run is for. Several features share the embedder, so each run
+   *   has to say.
    * @returns {Promise<any>}
    *   A promise that resolves with the embedding result from the engine.
    */
   async embed(text, options) {
+    this.#requirePurpose(options);
     await this.ensureEngine();
     if (typeof text !== "string" || text.trim() === "") {
       throw new Error("Invalid input: text must be a non-empty string");
@@ -495,14 +497,16 @@ export class EmbeddingsGenerator {
    *
    * @param {string[]} texts
    *   The array of texts to be embedded.
-   * @param {{ purpose?: string }} [options]
-   *   Who the run is for.
+   * @param {{ purpose: string }} options
+   *   Who the run is for. Several features share the embedder, so each run
+   *   has to say.
    * @returns {Promise<number[][]>}
    *   A promise that resolves to an array of embedding vectors,
    *   where each vector is an array of floats with length equal to
    *  `#embeddingSize`.
    */
   async embedMany(texts, options) {
+    this.#requirePurpose(options);
     await this.ensureEngine();
 
     if (!Array.isArray(texts)) {
@@ -562,6 +566,13 @@ export class EmbeddingsGenerator {
       throw e;
     }
     return this.#engine;
+  }
+
+  /** @param {{ purpose?: string }} [options] */
+  #requirePurpose(options) {
+    if (!options?.purpose) {
+      throw new Error("A run of the shared embedder needs a purpose");
+    }
   }
 
   // for easier testing purpose

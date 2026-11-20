@@ -89,7 +89,8 @@ const res = await engine.run(request, { purpose: "link-preview" });
 A run without a purpose is recorded under the `purpose` option its engine was created with,
 which is what an engine on the `openai` backend sends to MLPA. An engine created with none is
 recorded under its `featureId`, so a feature whose `featureId` is already its name has nothing
-to add. Pass the purpose on the run when several features share the engine.
+to add. Pass the purpose on the run when several features share the engine: the shared embedder,
+`EmbeddingsGenerator`, throws on a run without one.
 
 A purpose is the name of the product feature (`link-preview`). When a feature runs a model in
 several ways, the purpose says which after a colon (`memories:index-store`,

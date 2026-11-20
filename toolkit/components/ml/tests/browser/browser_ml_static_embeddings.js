@@ -226,7 +226,9 @@ add_task(async function test_static_generator_embeds_after_idle_shutdown() {
   };
 
   try {
-    const before = await staticGenerator.embed("the quick brown fox");
+    const before = await staticGenerator.embed("the quick brown fox", {
+      purpose: "test",
+    });
     is(
       before.output[0].length,
       dimensions,
@@ -245,7 +247,9 @@ add_task(async function test_static_generator_embeds_after_idle_shutdown() {
       "The static engine is suspended after the idle shutdown"
     );
 
-    const after = await staticGenerator.embed("the quick brown fox");
+    const after = await staticGenerator.embed("the quick brown fox", {
+      purpose: "test",
+    });
     Assert.deepEqual(
       after.output,
       before.output,

@@ -348,6 +348,26 @@ add_task(async function test_runs_sharing_an_engine_keep_their_own_purpose() {
   await cleanup();
 });
 
+add_task(async function test_shared_embedder_run_needs_a_purpose() {
+  const { embeddingsGeneratorFactory } = ChromeUtils.importESModule(
+    "chrome://global/content/ml/EmbeddingsGenerator.sys.mjs"
+  );
+  const embedder = embeddingsGeneratorFactory.forGeneral();
+  const before = engineRunEvents().length;
+
+  await Assert.rejects(
+    embedder.embed("whose run is this"),
+    /needs a purpose/,
+    "The shared embedder refuses a run that names no purpose"
+  );
+  await Assert.rejects(
+    embedder.embedMany(["whose", "runs"]),
+    /needs a purpose/,
+    "A batch needs one too"
+  );
+  Assert.equal(engineRunEvents().length, before, "No run, no event");
+});
+
 add_task(async function test_cloud_run_defaults_to_its_engine_purpose() {
   const { cleanup } = await setup();
   const { server, port } = startScriptedOpenAI({

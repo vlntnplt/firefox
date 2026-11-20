@@ -142,7 +142,9 @@ add_task(async function test_embedMany_valid_inputs() {
   embeddingsGenerator.setEngine(new MockMLEngineForEmbedMany(true));
 
   const texts = ["mdn documentation", "jira board"];
-  const result = await embeddingsGenerator.embedMany(texts);
+  const result = await embeddingsGenerator.embedMany(texts, {
+    purpose: "test",
+  });
 
   Assert.ok(Array.isArray(result), "Result should be an array");
   Assert.equal(result.length, 2, "Should return 2 embeddings");
@@ -163,7 +165,7 @@ add_task(async function test_embedMany_empty_array_input() {
 
   let threw = false;
   try {
-    await embeddingsGenerator.embedMany([]);
+    await embeddingsGenerator.embedMany([], { purpose: "test" });
   } catch (e) {
     threw = true;
     Assert.ok(
@@ -185,7 +187,7 @@ add_task(async function test_embedMany_invalid_input_null() {
 
   let caught = false;
   try {
-    await embeddingsGenerator.embedMany([null, "hello"]);
+    await embeddingsGenerator.embedMany([null, "hello"], { purpose: "test" });
   } catch (e) {
     caught = true;
     Assert.ok(e.message.includes("Invalid input"), "Should throw for null");
@@ -204,7 +206,7 @@ add_task(async function test_embedMany_invalid_input_nonstring() {
 
   let caught = false;
   try {
-    await embeddingsGenerator.embedMany(["hello", 123]);
+    await embeddingsGenerator.embedMany(["hello", 123], { purpose: "test" });
   } catch (e) {
     caught = true;
     Assert.ok(
@@ -237,7 +239,9 @@ add_task(async function test_embed_valid_input() {
   });
   embeddingsGenerator.setEngine(new MockMLEngineForEmbed());
 
-  const result = await embeddingsGenerator.embed("test string");
+  const result = await embeddingsGenerator.embed("test string", {
+    purpose: "test",
+  });
 
   Assert.ok(Array.isArray(result), "Embedding result should be an array");
   Assert.equal(result[0].length, EMBEDDING_SIZE, "Check embedding dimension");
@@ -254,7 +258,7 @@ add_task(async function test_embed_invalid_input_empty_string() {
 
   let threw = false;
   try {
-    await embeddingsGenerator.embed("");
+    await embeddingsGenerator.embed("", { purpose: "test" });
   } catch (e) {
     threw = true;
     Assert.ok(
@@ -771,7 +775,8 @@ add_task(async function test_contextual_engine_shuts_down_when_idle() {
   };
 
   Assert.deepEqual(
-    (await embeddingsGenerator.embed("before going idle")).output,
+    (await embeddingsGenerator.embed("before going idle", { purpose: "test" }))
+      .output,
     ["before going idle"],
     "The contextual engine embeds text"
   );
@@ -780,7 +785,8 @@ add_task(async function test_contextual_engine_shuts_down_when_idle() {
     "The contextual engine shuts down after browser.ml.modelCacheTimeout of idle"
   );
   Assert.deepEqual(
-    (await embeddingsGenerator.embed("after going idle")).output,
+    (await embeddingsGenerator.embed("after going idle", { purpose: "test" }))
+      .output,
     ["after going idle"],
     "The generator still embeds text after its engine shut down for being idle"
   );
