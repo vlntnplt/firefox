@@ -12,6 +12,10 @@ const { computeHash, MultiProgressAggregator } = ChromeUtils.importESModule(
   "chrome://global/content/ml/Utils.sys.mjs"
 );
 
+const { sinon } = ChromeUtils.importESModule(
+  "resource://testing-common/Sinon.sys.mjs"
+);
+
 const MODEL_FILE = {
   model: "acme/bert",
   revision: "main",
@@ -95,6 +99,19 @@ async function withModelHub({
       await hub.cleanup();
     },
   };
+}
+
+/**
+ * The model_download events a session recorded. Sessions are told apart by
+ * their engine.
+ *
+ * @param {{ engineId: string }} config
+ * @returns {Array<Record<string, string>>}
+ */
+function downloadEventsOf(config) {
+  return (Glean.firefoxAiRuntime.modelDownload.testGetValue() ?? [])
+    .map(event => event.extra)
+    .filter(extra => extra.engine_id === config.engineId);
 }
 
 /**
@@ -880,7 +897,6 @@ add_task(async function test_shared_download_records_each_sessions_telemetry() {
     taskName: `${name}-task`,
     featureId: `${name}-feature`,
     sessionId: `${name}-session`,
-    telemetryData: { modelId: `${name}-model` },
   }));
   let late;
 
@@ -901,53 +917,46 @@ add_task(async function test_shared_download_records_each_sessions_telemetry() {
     await Promise.all([first, modelHub.getModelDataAsFile(configs[1])]);
     await late;
 
-    info(
-      "Complete each session and check its download events and attribution."
-    );
+    info("Complete each session and check its download event and attribution.");
     for (const config of configs) {
       await modelHub.notifyModelDownloadComplete(config);
     }
-    const events = Glean.firefoxAiRuntime.modelDownload.testGetValue() ?? [];
     for (const config of configs) {
-      const sessionEvents = events.filter(
-        event => event.extra.modelDownloadId === config.sessionId
+      const sessionEvents = downloadEventsOf(config);
+      Assert.equal(
+        sessionEvents.length,
+        1,
+        `One download is recorded for ${config.sessionId}.`
       );
-      Assert.deepEqual(
-        sessionEvents.map(event => event.extra.step),
-        [
-          "start_download",
-          "start_file_download",
-          "end_file_download_success",
-          "end_download_success",
-        ],
-        `The complete lifecycle is recorded for ${config.sessionId}.`
+      const [download] = sessionEvents;
+      Assert.equal(
+        download.feature_id,
+        config.featureId,
+        `${config.sessionId} records its feature.`
       );
-      for (const { extra } of sessionEvents) {
-        Assert.equal(
-          extra.engineId,
-          config.engineId,
-          `${config.sessionId} records its engine for ${extra.step}.`
-        );
-        Assert.equal(
-          extra.featureId,
-          config.featureId,
-          `${config.sessionId} records its feature for ${extra.step}.`
-        );
-
-        if (extra.step === "end_download_success") {
-          Assert.equal(
-            extra.modelId,
-            config.model,
-            "Session completion records the model supplied by the caller."
-          );
-        } else {
-          Assert.equal(
-            extra.modelId,
-            config.telemetryData.modelId,
-            "Download events retain the caller's telemetry model ID."
-          );
-        }
-      }
+      Assert.equal(
+        download.model_id,
+        config.model,
+        `${config.sessionId} records the model supplied by the caller.`
+      );
+      Assert.equal(
+        download.model_revision,
+        config.revision,
+        `${config.sessionId} records the revision supplied by the caller.`
+      );
+      Assert.equal(
+        download.outcome,
+        "success",
+        `${config.sessionId} records a successful download.`
+      );
+      Assert.ok(!("error" in download), "A successful download has no error.");
+      Assert.equal(download.files, "1", "The shared file is counted once.");
+      Assert.equal(
+        download.bytes,
+        String(1024 * 1024),
+        "The size of the shared file is recorded."
+      );
+      Assert.equal(download.failed_files, "0", "No file failed.");
     }
     Assert.equal(
       hub.requestCount({ ...MODEL_FILE, method: "GET" }),
@@ -966,7 +975,7 @@ add_task(async function test_shared_download_records_each_sessions_telemetry() {
     });
     Assert.equal(
       Glean.firefoxAiRuntime.modelDownload.testGetValue().length,
-      events.length,
+      configs.length,
       "A cache hit does not record download telemetry."
     );
   } finally {
@@ -1013,28 +1022,23 @@ add_task(async function test_shared_failure_preserves_telemetry_error_type() {
     for (const config of configs) {
       await modelHub.notifyModelDownloadComplete(config);
     }
-    const events = Glean.firefoxAiRuntime.modelDownload.testGetValue() ?? [];
     for (const config of configs) {
-      const sessionEvents = events.filter(
-        event => event.extra.modelDownloadId === config.sessionId
-      );
-      Assert.deepEqual(
-        sessionEvents.map(event => event.extra.step),
-        [
-          "start_download",
-          "start_file_download",
-          "end_file_download_failed",
-          "end_download_failed",
-        ],
-        "Both sessions record the failed download."
-      );
+      const sessionEvents = downloadEventsOf(config);
       Assert.equal(
-        sessionEvents.find(
-          event => event.extra.step === "end_file_download_failed"
-        )?.extra.error,
+        sessionEvents.length,
+        1,
+        `One download is recorded for ${config.sessionId}.`
+      );
+      const [download] = sessionEvents;
+      Assert.equal(download.outcome, "error", "The download is a failure.");
+      Assert.equal(
+        download.error,
         "TypeError",
         "Telemetry retains the stream error type rather than the wrapper's Error type."
       );
+      Assert.equal(download.files, "0", "No file arrived.");
+      Assert.equal(download.bytes, "0", "No bytes are counted as downloaded.");
+      Assert.equal(download.failed_files, "1", "The interrupted file failed.");
     }
   } finally {
     Services.fog.testResetFOG();
@@ -1084,28 +1088,203 @@ add_task(
       for (const config of configs) {
         await modelHub.notifyModelDownloadComplete(config);
       }
-      const events = Glean.firefoxAiRuntime.modelDownload.testGetValue() ?? [];
-      for (const [index, config] of configs.entries()) {
-        const outcome = index === 0 ? "failed" : "success";
-        Assert.deepEqual(
-          events
-            .filter(event => event.extra.modelDownloadId === config.sessionId)
-            .map(event => event.extra.step),
-          [
-            "start_download",
-            "start_file_download",
-            `end_file_download_${outcome}`,
-            `end_download_${outcome}`,
-          ],
-          "Each session records its caller's outcome."
-        );
-      }
+      const [canceled, surviving] = configs.map(config =>
+        downloadEventsOf(config)
+      );
+      Assert.deepEqual(
+        canceled.map(download => [
+          download.outcome,
+          download.files,
+          download.failed_files,
+        ]),
+        [["error", "0", "1"]],
+        "The caller that canceled records a download that did not arrive."
+      );
+      Assert.equal(
+        canceled[0].error,
+        "AbortError",
+        "The abort is recorded by its name."
+      );
+      Assert.deepEqual(
+        surviving.map(download => [
+          download.outcome,
+          download.files,
+          download.failed_files,
+        ]),
+        [["success", "1", "0"]],
+        "The remaining caller records a successful download."
+      );
     } finally {
       Services.fog.testResetFOG();
       await cleanup();
     }
   }
 );
+
+/**
+ * A download reported complete while one of its files is still being fetched
+ * is recorded once that file settles, and counts it.
+ */
+add_task(async function test_download_ends_with_its_last_file_in_flight() {
+  const size = 1024 * 1024;
+  const { hub, modelHub, cleanup } = await withModelHub({
+    content: "x".repeat(size),
+    pauseAfterBytes: 64 * 1024,
+  });
+  const config = {
+    ...MODEL_ARGS,
+    engineId: "parallel-engine",
+    featureId: "parallel-feature",
+    sessionId: "parallel-session",
+  };
+  const transferStarted = Promise.withResolvers();
+
+  Services.fog.testResetFOG();
+  try {
+    info("Fetch a file that stalls, and one the hub does not have.");
+    const slow = modelHub.getModelDataAsFile({
+      ...config,
+      progressCallback: progress => {
+        if (progress.totalLoaded) {
+          transferStarted.resolve();
+        }
+      },
+    });
+    await transferStarted.promise;
+    await Assert.rejects(
+      modelHub.getModelDataAsFile({ ...config, file: "missing.json" }),
+      /Failed to fetch the model file/,
+      "The missing file fails while the other one is still being fetched."
+    );
+
+    info(
+      "Report the download complete, as an engine that failed to load does."
+    );
+    await modelHub.notifyModelDownloadComplete(config);
+    Assert.deepEqual(
+      downloadCountsOf(config),
+      [],
+      "Nothing is recorded while a file of the download is in flight."
+    );
+
+    hub.resumeAfterPause(MODEL_FILE);
+    await slow;
+    Assert.deepEqual(
+      downloadCountsOf(config),
+      [["success", "1", String(size), "1"]],
+      "One event counts both files, and ends on the last one."
+    );
+  } finally {
+    Services.fog.testResetFOG();
+    await cleanup();
+  }
+});
+
+/**
+ * What a session's model_download event says arrived and failed.
+ *
+ * @param {{ engineId: string }} config
+ * @returns {string[][]} For each event: outcome, files, bytes, failed_files.
+ */
+function downloadCountsOf(config) {
+  return downloadEventsOf(config).map(download => [
+    download.outcome,
+    download.files,
+    download.bytes,
+    download.failed_files,
+  ]);
+}
+
+/**
+ * A file that was transferred but could not be stored did not arrive: its
+ * caller got an error, and the download is recorded as failed.
+ */
+add_task(async function test_download_that_cannot_be_stored_is_a_failure() {
+  const { modelHub, cleanup } = await withModelHub();
+  const config = {
+    ...MODEL_ARGS,
+    engineId: "full-disk-engine",
+    featureId: "full-disk-feature",
+    sessionId: "full-disk-session",
+  };
+  const put = sinon
+    .stub(TestIndexedDBCache.prototype, "put")
+    .rejects(new DOMException("The disk is full", "QuotaExceededError"));
+
+  Services.fog.testResetFOG();
+  try {
+    await Assert.rejects(
+      modelHub.getModelDataAsFile(config),
+      error => error.name === "QuotaExceededError",
+      "The caller gets the storage error."
+    );
+    await modelHub.notifyModelDownloadComplete(config);
+    Assert.deepEqual(
+      downloadCountsOf(config),
+      [["error", "0", "0", "1"]],
+      "The file is counted once, as failed, and none of its bytes as downloaded."
+    );
+    Assert.equal(
+      downloadEventsOf(config)[0].error,
+      "QuotaExceededError",
+      "The error is recorded by its name, as engine_run records one."
+    );
+  } finally {
+    put.restore();
+    Services.fog.testResetFOG();
+    await cleanup();
+  }
+});
+
+/**
+ * A caller sharing a transfer whose own cache entry cannot be written gets an
+ * error, and records a failed download while the other caller records a
+ * successful one.
+ */
+add_task(async function test_shared_download_records_a_callers_storage_error() {
+  const { modelHub, cleanup } = await withModelHub({
+    content: "x".repeat(1024 * 1024),
+  });
+  const configs = ["stored", "unstored"].map(name => ({
+    ...MODEL_ARGS,
+    engineId: `${name}-engine`,
+    taskName: `${name}-task`,
+    featureId: `${name}-feature`,
+    sessionId: `${name}-session`,
+  }));
+  const updateTask = sinon.stub(TestIndexedDBCache.prototype, "updateTask");
+  updateTask.callThrough();
+  updateTask
+    .withArgs(sinon.match({ engineId: "unstored-engine" }))
+    .rejects(new DOMException("The disk is full", "QuotaExceededError"));
+
+  Services.fog.testResetFOG();
+  try {
+    const results = await Promise.allSettled(
+      configs.map(config => modelHub.getModelDataAsFile(config))
+    );
+    Assert.deepEqual(
+      results.map(result => result.status),
+      ["fulfilled", "rejected"],
+      "Only the caller whose cache entry failed rejects."
+    );
+    for (const config of configs) {
+      await modelHub.notifyModelDownloadComplete(config);
+    }
+    Assert.deepEqual(
+      configs.map(downloadCountsOf),
+      [
+        [["success", "1", String(1024 * 1024), "0"]],
+        [["error", "0", "0", "1"]],
+      ],
+      "Each session records what its caller got."
+    );
+  } finally {
+    updateTask.restore();
+    Services.fog.testResetFOG();
+    await cleanup();
+  }
+});
 
 add_task(async function test_put_counts_stored_download_once() {
   const size = 4 * 1024 * 1024;

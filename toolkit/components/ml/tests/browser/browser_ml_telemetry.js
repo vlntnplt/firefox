@@ -268,33 +268,22 @@ add_task(async function test_model_download_telemetry_success() {
 
   let observed = Glean.firefoxAiRuntime.modelDownload.testGetValue();
 
-  Assert.equal(observed?.length || 0, initialModelDownloadsCount + 6);
-
-  observed = observed.slice(-6);
-
-  Assert.equal(new Set(observed.map(obj => obj.extra.modelDownloadId)).size, 1);
-
-  Assert.deepEqual(
-    observed.map(obj => obj.extra.step),
-    [
-      "start_download",
-      "start_file_download",
-      "end_file_download_success",
-      "start_file_download",
-      "end_file_download_success",
-      "end_download_success",
-    ]
+  Assert.equal(
+    observed?.length || 0,
+    initialModelDownloadsCount + 1,
+    "The download recorded one event"
   );
-
-  let endDownload = observed.at(-1);
-  let fileDurationSum = observed
-    .filter(obj => obj.extra.step === "end_file_download_success")
-    .reduce((sum, obj) => sum + Number(obj.extra.duration), 0);
-  Assert.greaterOrEqual(
-    Number(endDownload.extra.duration),
-    fileDurationSum,
-    "end_download_success reports the total model download time, which spans at least the individual file downloads"
+  const download = observed.at(-1).extra;
+  Assert.equal(download.outcome, "success");
+  Assert.equal(
+    download.error,
+    undefined,
+    "A download that succeeded names no error"
   );
+  Assert.equal(Number(download.files), 2, "Both files were downloaded");
+  Assert.greater(Number(download.bytes), 0, "Their size is recorded");
+  Assert.equal(Number(download.failed_files), 0);
+  Assert.greaterOrEqual(Number(download.duration), 0);
 
   await EngineProcess.destroyMLEngine();
   await IndexedDBCache.init({ reset: true });
@@ -339,23 +328,16 @@ add_task(async function test_model_download_telemetry_fail() {
 
   let observed = Glean.firefoxAiRuntime.modelDownload.testGetValue();
 
-  Assert.equal(observed?.length || 0, initialModelDownloadsCount + 6);
-
-  observed = observed.slice(-6);
-
-  Assert.equal(new Set(observed.map(obj => obj.extra.modelDownloadId)).size, 1);
-
-  Assert.deepEqual(
-    observed.map(obj => obj.extra.step),
-    [
-      "start_download",
-      "start_file_download",
-      "end_file_download_failed",
-      "start_file_download",
-      "end_file_download_failed",
-      "end_download_failed",
-    ]
+  Assert.equal(
+    observed?.length || 0,
+    initialModelDownloadsCount + 1,
+    "The download recorded one event"
   );
+  const download = observed.at(-1).extra;
+  Assert.equal(download.outcome, "error");
+  Assert.ok(download.error, "A failed download names its error");
+  Assert.equal(Number(download.files), 0);
+  Assert.equal(Number(download.failed_files), 2, "Both files failed");
 
   await EngineProcess.destroyMLEngine();
   await IndexedDBCache.init({ reset: true });
@@ -398,23 +380,19 @@ add_task(async function test_model_download_telemetry_mixed() {
 
   let observed = Glean.firefoxAiRuntime.modelDownload.testGetValue();
 
-  Assert.equal(observed?.length || 0, initialModelDownloadsCount + 6);
-
-  observed = observed.slice(-6);
-
-  Assert.equal(new Set(observed.map(obj => obj.extra.modelDownloadId)).size, 1);
-
-  Assert.deepEqual(
-    observed.map(obj => obj.extra.step),
-    [
-      "start_download",
-      "start_file_download",
-      "end_file_download_failed",
-      "start_file_download",
-      "end_file_download_success",
-      "end_download_success",
-    ]
+  Assert.equal(
+    observed?.length || 0,
+    initialModelDownloadsCount + 1,
+    "The download recorded one event"
   );
+  const download = observed.at(-1).extra;
+  Assert.equal(
+    download.outcome,
+    "success",
+    "A download whose last file arrived is recorded as a success"
+  );
+  Assert.equal(Number(download.files), 1);
+  Assert.equal(Number(download.failed_files), 1, "The failed file is counted");
   await EngineProcess.destroyMLEngine();
   await IndexedDBCache.init({ reset: true });
 
@@ -468,9 +446,9 @@ add_task(async function test_model_hub_service_download_attribution() {
 
   Assert.greater(observed.length, 0, "The download was measured");
   Assert.deepEqual(
-    Array.from(new Set(observed.map(obj => obj.extra.featureId))),
+    observed.map(obj => obj.extra.feature_id),
     ["speech-recognition"],
-    "Every step of the download is attributed to the task that asked for it"
+    "The download is attributed to the task that asked for it"
   );
 
   await IndexedDBCache.init({ reset: true });

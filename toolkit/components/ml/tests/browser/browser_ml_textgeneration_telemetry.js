@@ -96,16 +96,10 @@ add_task(async function test_creation_records_success_and_download() {
     );
     Assert.equal(events("engineCreationFailure").length, 0);
 
-    Assert.deepEqual(
-      events("modelDownload").map(e => e.extra.step),
-      [
-        "start_download",
-        "start_file_download",
-        "end_file_download_success",
-        "end_download_success",
-      ],
-      "The model download reports each step"
-    );
+    const download = only("modelDownload");
+    Assert.equal(download.outcome, "success", "The model download succeeded");
+    Assert.equal(Number(download.files), 1);
+    Assert.equal(Number(download.failed_files), 0);
   } finally {
     await cleanup();
   }
@@ -292,16 +286,9 @@ add_task(async function test_download_failure() {
       events("engineCreationFailure").at(-1).extra.host_process,
       "hwinference"
     );
-    const steps = events("modelDownload").map(e => e.extra.step);
-    Assert.ok(
-      steps.includes("end_file_download_failed"),
-      "The download steps say which file failed"
-    );
-    Assert.equal(
-      steps.at(-1),
-      "end_download_failed",
-      "The download ends with a failure step"
-    );
+    const download = events("modelDownload").at(-1).extra;
+    Assert.equal(download.outcome, "error", "The download is recorded failed");
+    Assert.equal(Number(download.failed_files), 1, "One file failed");
     Assert.equal(unsuccessfulRuns().length, 0);
   } finally {
     await cleanup();

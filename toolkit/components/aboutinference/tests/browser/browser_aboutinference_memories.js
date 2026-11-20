@@ -439,8 +439,8 @@ add_task(async function test_cleanup_after_reopening() {
       );
     }
     const deletion = events("modelDeletion").at(-1);
-    Assert.equal(deletion.deletedBy, MEMORIES_ENGINE_ID);
-    Assert.equal(deletion.modelId, model);
+    Assert.equal(deletion.deleted_by, MEMORIES_ENGINE_ID);
+    Assert.equal(deletion.model_id, model);
     await click(browser, "run");
     Assert.equal((await finishRun(browser)).status, "done");
   });
@@ -536,14 +536,14 @@ add_task(async function test_native_run_and_cache() {
         }
       }
     );
-    const downloads = events("modelDownload");
-    Assert.equal(
-      downloads.filter(event => event.step === "end_file_download_success")
-        .length,
-      1
-    );
-    Assert.ok(
-      downloads.every(event => event.featureId === MEMORIES_MODEL.featureId)
+    Assert.deepEqual(
+      events("modelDownload").map(download => [
+        download.outcome,
+        download.files,
+        download.feature_id,
+      ]),
+      [["success", "1", MEMORIES_MODEL.featureId]],
+      "The model is downloaded once, for the first run"
     );
     const features = [
       "memories-initial-generation-system",

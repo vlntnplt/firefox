@@ -791,7 +791,6 @@ class EngineDispatcher {
  * @param {function(object):Promise<[Blob, object]>} config.getModelFileFn - A function that actually retrieves the model and headers.
  * @param {string | null | undefined} config.featureId - The feature id
  * @param {string} config.sessionId - Shared across the same session.
- * @param {object} config.telemetryData - Additional telemetry data.
  * @returns {Promise<BasePromiseWorker.Meta>} A promise that resolves to a Meta object containing the URL, response headers,
  * and the model file as a blob.
  */
@@ -804,7 +803,6 @@ async function getModelFile({
   modelHubUrlTemplate,
   featureId,
   sessionId,
-  telemetryData,
 }) {
   const [blob, headers] = await getModelFileFn({
     engineId: engineId || lazy.DEFAULT_ENGINE_ID,
@@ -814,7 +812,6 @@ async function getModelFile({
     urlTemplate: modelHubUrlTemplate || lazy.MODEL_HUB_URL_TEMPLATE,
     featureId,
     sessionId,
-    telemetryData,
   });
   return new lazy.BasePromiseWorker.Meta([url, headers, blob], {});
 }
@@ -869,14 +866,6 @@ class InferenceEngine {
           modelHubUrlTemplate: pipelineOptions.modelHubUrlTemplate,
           featureId: pipelineOptions.featureId,
           sessionId,
-          // We have model, revision that are parsed for the url.
-          // However, we want to save in telemetry the ones that are configured
-          // for the pipeline. This allows consistent reporting regarding of how
-          // the backend constructs the url.
-          telemetryData: {
-            modelId: pipelineOptions.modelId,
-            modelRevision: pipelineOptions.modelRevision,
-          },
         }),
       onInferenceProgress: notificationsCallback ?? (() => {}),
       notifyModelDownloadComplete: async (sessionId = "") =>

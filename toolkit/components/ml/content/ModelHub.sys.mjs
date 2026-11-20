@@ -54,7 +54,6 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  *   modelHubRootUrl?: string,
  *   modelHubUrlTemplate?: string,
  *   progressCallback?: ?function(ProgressAndStatusCallbackParams):void,
- *   telemetryData?: object,
  *   abortSignal?: ?AbortSignal,
  * }} GetModelDataAsFileConfig
  */
@@ -77,6 +76,7 @@ const lazy = XPCOMUtils.declareLazy({
   ObjectUtils: "resource://gre/modules/ObjectUtils.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   Progress: "chrome://global/content/ml/Utils.sys.mjs",
+  MLTelemetry: "chrome://global/content/ml/MLTelemetry.sys.mjs",
   MLUtils: "chrome://global/content/ml/Utils.sys.mjs",
   OPFS: "chrome://global/content/ml/OPFS.sys.mjs",
   URLChecker: "chrome://global/content/ml/Utils.sys.mjs",
@@ -1448,9 +1448,9 @@ class IndexedDBCache {
       });
 
       Glean.firefoxAiRuntime.modelDeletion.record({
-        modelId: model,
-        modelRevision: revision,
-        deletedBy,
+        model_id: model,
+        model_revision: revision,
+        deleted_by: deletedBy,
       });
     }
   }
@@ -1504,9 +1504,9 @@ class IndexedDBCache {
    */
   async deleteModels({ taskName, model, revision, filterFn, deletedBy }) {
     Glean.firefoxAiRuntime.modelDeletion.record({
-      modelId: model ?? undefined,
-      modelRevision: revision ?? undefined,
-      deletedBy: deletedBy ?? undefined,
+      model_id: model ?? undefined,
+      model_revision: revision ?? undefined,
+      deleted_by: deletedBy ?? undefined,
     });
 
     const tasks = /** @type {Array<TaskRecord>} */ (
@@ -1745,19 +1745,28 @@ export const TestIndexedDBCache = IndexedDBCache;
 
 export class ModelHub {
   /**
-   * Tracks whether the last download of a session was successful.
+   * The downloads under way, by session: when the first file started, how
+   * many files arrived, their size, how many failed, and whether the last one
+   * arrived.
    *
-   * @type {Map<string, boolean>}
+   * @type {Map<string, { start: number, files: number, bytes: number, failedFiles: number, ok: boolean, error: unknown }>}
    */
-  #lastDownloadOk = new Map();
+  #downloads = new Map();
 
   /**
-   * Tracks the start time (ms) of each model download session, used to report
-   * the total download time for the whole model on completion.
+   * How many files of each session are still being fetched.
    *
    * @type {Map<string, number>}
    */
-  #downloadStartTime = new Map();
+  #filesInFlight = new Map();
+
+  /**
+   * The sessions reported complete while files of theirs were still being
+   * fetched, with what to record of each once its last file settles.
+   *
+   * @type {Map<string, object>}
+   */
+  #downloadsEnding = new Map();
 
   /**
    * Protect against simultaneous downloads.
@@ -2227,29 +2236,45 @@ export class ModelHub {
     featureId,
     sessionId,
   }) {
-    // Allows multiple calls to notifyModelDownloadComplete to work as expected
-    // Also, we don't want to signal model download end if there was no start
-    if (!this.#lastDownloadOk.has(sessionId)) {
+    const ending = { engineId, model, revision, featureId, sessionId };
+    if (this.#filesInFlight.has(sessionId)) {
+      // Record once the files still being fetched have settled.
+      this.#downloadsEnding.set(sessionId, ending);
       return;
     }
-    const isSuccess = this.#lastDownloadOk.get(sessionId);
-    const step = isSuccess ? "end_download_success" : "end_download_failed";
-    this.#lastDownloadOk.delete(sessionId);
-    const startTime = this.#downloadStartTime.get(sessionId);
-    this.#downloadStartTime.delete(sessionId);
-    const duration =
-      startTime === undefined ? 0 : Math.floor(ChromeUtils.now() - startTime);
+    this.#recordDownload(ending);
+  }
+
+  /**
+   * Records the model_download event of a session whose files have all
+   * settled.
+   *
+   * @param {object} ending - What notifyModelDownloadComplete was given.
+   * @param {string} ending.engineId
+   * @param {string} ending.model
+   * @param {string} ending.revision
+   * @param {string} ending.featureId
+   * @param {string} ending.sessionId
+   */
+  #recordDownload({ engineId, model, revision, featureId, sessionId }) {
+    // Allows multiple calls to notifyModelDownloadComplete to work as expected
+    // Also, we don't want to signal model download end if there was no start
+    const download = this.#downloads.get(sessionId);
+    if (!download) {
+      return;
+    }
+    this.#downloads.delete(sessionId);
     Glean.firefoxAiRuntime.modelDownload.record({
-      modelDownloadId: sessionId,
-      featureId,
-      engineId,
-      modelId: model,
-      step,
-      duration,
-      modelRevision: revision,
-      error: isSuccess
-        ? ""
-        : "Unable to retrieve all files needed for the model to work",
+      engine_id: engineId,
+      feature_id: featureId,
+      model_id: model,
+      model_revision: revision,
+      outcome: download.ok ? "success" : "error",
+      error: download.ok ? null : lazy.MLTelemetry.errorName(download.error),
+      duration: Math.floor(ChromeUtils.now() - download.start),
+      files: download.files,
+      bytes: download.bytes,
+      failed_files: download.failedFiles,
     });
   }
 
@@ -2424,69 +2449,36 @@ export class ModelHub {
   }
 
   /**
+   * Counts one file of a download session, as arrived or as failed.
+   *
    * @param {object} config
    * @param {string} config.sessionId
-   * @param {string} config.featureId
-   * @param {string} config.engineId
-   * @param {string} config.model
-   * @param {string} config.revision
-   * @param {object} [config.telemetryData]
    * @param {boolean} config.success
-   * @param {Error} [config.error]
-   * @param {number} config.duration
+   * @param {unknown} [config.error]
+   * @param {number} [config.bytes] - The size of the file that arrived.
    * @param {number} config.startedAt - When the shared download actually began.
    */
-  #recordDownloadAttempt({
-    sessionId,
-    featureId,
-    engineId,
-    model,
-    revision,
-    telemetryData = {},
-    success,
-    error,
-    duration,
-    startedAt,
-  }) {
-    if (!this.#lastDownloadOk.has(sessionId)) {
-      this.#downloadStartTime.set(sessionId, startedAt);
-      Glean.firefoxAiRuntime.modelDownload.record({
-        modelDownloadId: sessionId,
-        featureId,
-        engineId,
-        modelId: model,
-        step: "start_download",
-        duration: 0,
-        modelRevision: revision,
-        error: "",
-        ...telemetryData,
-      });
+  #recordDownloadAttempt({ sessionId, success, error, bytes = 0, startedAt }) {
+    let download = this.#downloads.get(sessionId);
+    if (!download) {
+      download = {
+        start: startedAt,
+        files: 0,
+        bytes: 0,
+        failedFiles: 0,
+        ok: false,
+        error: null,
+      };
+      this.#downloads.set(sessionId, download);
     }
-    this.#lastDownloadOk.set(sessionId, success);
-
-    Glean.firefoxAiRuntime.modelDownload.record({
-      modelDownloadId: sessionId,
-      featureId,
-      engineId,
-      modelId: model,
-      step: "start_file_download",
-      duration: 0,
-      modelRevision: revision,
-      error: "",
-      ...telemetryData,
-    });
-
-    Glean.firefoxAiRuntime.modelDownload.record({
-      modelDownloadId: sessionId,
-      featureId,
-      engineId,
-      modelId: model,
-      step: success ? "end_file_download_success" : "end_file_download_failed",
-      duration,
-      modelRevision: revision,
-      error: success ? "" : ((error?.cause ?? error)?.constructor?.name ?? ""),
-      ...telemetryData,
-    });
+    download.ok = success;
+    if (success) {
+      download.files += 1;
+      download.bytes += bytes;
+    } else {
+      download.failedFiles += 1;
+      download.error = /** @type {any} */ (error)?.cause ?? error;
+    }
   }
 
   /**
@@ -2533,9 +2525,7 @@ export class ModelHub {
       model,
       revision,
       file,
-      featureId,
       sessionId,
-      telemetryData,
     }
   ) {
     const waiter = {};
@@ -2559,24 +2549,32 @@ export class ModelHub {
 
     /**
      * @param {boolean} success
-     * @param {Error} [error]
+     * @param {object} [outcome]
+     * @param {unknown} [outcome.error]
+     * @param {number} [outcome.bytes]
      */
-    const recordTelemetry = (success, error) => {
-      if (!inFlight.downloadStarted) {
-        return;
+    const recordTelemetry = (success, { error, bytes } = {}) => {
+      const filesLeft = (this.#filesInFlight.get(sessionId) ?? 1) - 1;
+      if (filesLeft) {
+        this.#filesInFlight.set(sessionId, filesLeft);
+      } else {
+        this.#filesInFlight.delete(sessionId);
       }
-      this.#recordDownloadAttempt({
-        sessionId,
-        featureId,
-        engineId,
-        model,
-        revision,
-        telemetryData,
-        success,
-        error,
-        duration: inFlight.duration,
-        startedAt: inFlight.downloadStartedAt,
-      });
+      // A file read from the cache was not downloaded.
+      if (inFlight.downloadStarted) {
+        this.#recordDownloadAttempt({
+          sessionId,
+          success,
+          error,
+          bytes,
+          startedAt: inFlight.downloadStartedAt,
+        });
+      }
+      const ending = this.#downloadsEnding.get(sessionId);
+      if (ending && !filesLeft) {
+        this.#downloadsEnding.delete(sessionId);
+        this.#recordDownload(ending);
+      }
     };
 
     /**
@@ -2598,16 +2596,24 @@ export class ModelHub {
       return false;
     };
 
+    this.#filesInFlight.set(
+      sessionId,
+      (this.#filesInFlight.get(sessionId) ?? 0) + 1
+    );
+
     if (!abortSignal) {
       return inFlight.promise
+        .then(async value => {
+          await recordEngineReference();
+          return value;
+        })
         .then(
-          async value => {
-            await recordEngineReference();
-            recordTelemetry(true);
+          value => {
+            recordTelemetry(true, { bytes: value[1].fileSize });
             return value;
           },
           error => {
-            recordTelemetry(false, error);
+            recordTelemetry(false, { error });
             throw error;
           }
         )
@@ -2623,7 +2629,7 @@ export class ModelHub {
           const abortError =
             abortSignal.reason ??
             new DOMException("The operation was aborted.", "AbortError");
-          recordTelemetry(false, abortError);
+          recordTelemetry(false, { error: abortError });
           reject(abortError);
         }
       };
@@ -2642,10 +2648,16 @@ export class ModelHub {
           }
           abortSignal.removeEventListener("abort", onAbort);
           leave();
-          recordEngineReference().then(() => {
-            recordTelemetry(true);
-            resolve(value);
-          }, reject);
+          recordEngineReference().then(
+            () => {
+              recordTelemetry(true, { bytes: value[1].fileSize });
+              resolve(value);
+            },
+            error => {
+              recordTelemetry(false, { error });
+              reject(error);
+            }
+          );
         },
         error => {
           if (settled) {
@@ -2653,7 +2665,7 @@ export class ModelHub {
           }
           abortSignal.removeEventListener("abort", onAbort);
           leave();
-          recordTelemetry(false, error);
+          recordTelemetry(false, { error });
           reject(error);
         }
       );

@@ -163,8 +163,9 @@ export class MLModelHubService {
       `Created download session ${sessionId} for ${aModel}@${aRevision}, starting async download`
     );
 
-    this._startDownload(downloadInfo).catch(error => {
+    this._startDownload(downloadInfo).catch(async error => {
       lazy.console.error(`Download failed for session ${sessionId}:`, error);
+      await this._recordDownload(downloadInfo);
       this._completeDownload(sessionId, false, error.message);
     });
 
@@ -295,7 +296,29 @@ export class MLModelHubService {
       `Download session ${sessionId} completed successfully - downloaded
        ${files.length} files, total size: ${totalLoaded} bytes`
     );
+    await this._recordDownload(downloadInfo);
     this._completeDownload(sessionId, true);
+  }
+
+  /**
+   * Records the model_download event of a download session that ended.
+   *
+   * @param {object} downloadInfo - The session, as downloadModel creates it.
+   * @param {string} downloadInfo.sessionId
+   * @param {string} downloadInfo.engineId
+   * @param {string} downloadInfo.taskName
+   * @param {string} downloadInfo.model
+   * @param {string} downloadInfo.revision
+   */
+  async _recordDownload({ sessionId, engineId, taskName, model, revision }) {
+    const modelHub = await this._getModelHub();
+    await modelHub.notifyModelDownloadComplete({
+      engineId,
+      model,
+      revision,
+      featureId: taskName,
+      sessionId,
+    });
   }
 
   _completeDownload(sessionId, success, errorMessage = null) {
@@ -349,18 +372,29 @@ export class MLModelHubService {
         "browser.ml.modelHubUrlTemplate"
       );
 
-      const result = await modelHub.getModelFileAsBlob({
-        engineId: aEngineId,
-        taskName: aTaskName,
-        model: aModel,
-        revision: aRevision,
-        file: aFile,
-        modelHubRootUrl: MODEL_HUB_ROOT_URL,
-        modelHubUrlTemplate: MODEL_HUB_URL_TEMPLATE,
-        progressCallback: null,
-        featureId: aTaskName,
-        sessionId: `${aTaskName}-${Date.now()}`,
-      });
+      const sessionId = `${aTaskName}-${Date.now()}`;
+      const result = await modelHub
+        .getModelFileAsBlob({
+          engineId: aEngineId,
+          taskName: aTaskName,
+          model: aModel,
+          revision: aRevision,
+          file: aFile,
+          modelHubRootUrl: MODEL_HUB_ROOT_URL,
+          modelHubUrlTemplate: MODEL_HUB_URL_TEMPLATE,
+          progressCallback: null,
+          featureId: aTaskName,
+          sessionId,
+        })
+        .finally(() =>
+          modelHub.notifyModelDownloadComplete({
+            engineId: aEngineId,
+            model: aModel,
+            revision: aRevision,
+            featureId: aTaskName,
+            sessionId,
+          })
+        );
 
       if (!result || !Array.isArray(result) || result.length < 1) {
         lazy.console.error(

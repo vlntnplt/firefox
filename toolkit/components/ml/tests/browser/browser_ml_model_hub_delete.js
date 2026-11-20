@@ -137,12 +137,27 @@ add_task(async function test_delete_model_removes_downloaded_files() {
     "The weights are on disk."
   );
 
+  Services.fog.testResetFOG();
   await hub.modelHub.deleteModels({
     model: hub.qualified,
     revision: REVISION,
     taskName: null,
+    deletedBy: "test-delete",
   });
 
+  Assert.deepEqual(
+    Glean.firefoxAiRuntime.modelDeletion
+      .testGetValue()
+      .map(event => event.extra),
+    [
+      {
+        model_id: hub.qualified,
+        model_revision: REVISION,
+        deleted_by: "test-delete",
+      },
+    ],
+    "The deletion is recorded, with the model and who deleted it."
+  );
   Assert.deepEqual(
     await hub.modelHub.listModels(),
     [],
