@@ -17,10 +17,6 @@ ChromeUtils.defineLazyGetter(lazy, "mlUtils", () => {
   return Cc["@mozilla.org/ml-utils;1"].getService(Ci.nsIMLUtils);
 });
 
-ChromeUtils.defineESModuleGetters(lazy, {
-  isAddonEngineId: "chrome://global/content/ml/Utils.sys.mjs",
-});
-
 /**
  * MLTelemetry provides a mechanism tracking a "flow" of operations
  * related to a machine learning feature. A flow is a sequence of related
@@ -102,20 +98,6 @@ export class MLTelemetry {
   }
 
   /**
-   * Returns the label used in telemetry for a given engine ID.
-   * Converts addon engine IDs to "webextension" label.
-   *
-   * @param {string} engineId - The engine ID to convert.
-   * @returns {string} The Glean label for the engine.
-   */
-  static getGleanLabel(engineId) {
-    if (lazy.isAddonEngineId(engineId)) {
-      return "webextension";
-    }
-    return engineId;
-  }
-
-  /**
    * Starts a telemetry session for the given flow.
    *
    * @param {object} [options] - Session start options.
@@ -190,89 +172,39 @@ export class MLTelemetry {
   }
 
   /**
-   * Records a successful engine creation event.
+   * Records the engine_creation event of an attempt to create an engine.
    *
-   * @param {object} options - Engine creation success options.
+   * @param {object} options
    * @param {string} [options.flowId] - The flow ID. Uses instance flowId if not provided.
-   * @param {string} options.engineId - The engine identifier (e.g., "pdfjs", "ml-suggest-intent").
-   * @param {number} options.duration - Engine creation time in milliseconds.
+   * @param {string | null} options.engineId
+   * @param {string | null} [options.modelId]
+   * @param {string | null} [options.backend]
+   * @param {number | null} [options.duration] - How long the attempt took, in milliseconds.
    * @param {string | null} [options.deviceKind] - Kind of the device that loaded the model.
+   * @param {unknown} [options.error] - What the attempt threw, when it failed.
    */
-  recordEngineCreationSuccessFlow({
-    flowId,
+  recordEngineCreation({
+    flowId = this.#flowId,
     engineId,
-    duration,
+    modelId = null,
+    backend = null,
+    duration = null,
     deviceKind = null,
+    error = null,
   }) {
-    const currentFlowId = flowId || this.#flowId;
-    const actualEngineId = engineId;
-    const actualLabel = MLTelemetry.getGleanLabel(engineId);
-
-    Glean.firefoxAiRuntime.engineCreationSuccessFlow.record({
-      flow_id: currentFlowId,
-      engineId: actualEngineId,
-      duration: Math.round(duration),
+    const extra = {
+      flow_id: flowId,
       host_process: this.#hostProcess,
+      engine_id: engineId,
+      model_id: modelId,
+      backend,
       device_kind: deviceKind,
-    });
-
-    // Also record the old labeled timing distribution metric
-    Glean.firefoxAiRuntime.engineCreationSuccess[
-      actualLabel
-    ].accumulateSingleSample(Math.round(duration));
-
-    this.logEventToConsole(this.recordEngineCreationSuccessFlow, {
-      flowId: currentFlowId,
-      engineId: actualEngineId,
-      label: actualLabel,
-      duration,
-    });
-  }
-
-  /**
-   * Records a failed engine creation event.
-   *
-   * @param {object} options - Engine creation failure options.
-   * @param {string} [options.flowId] - The flow ID. Uses instance flowId if not provided.
-   * @param {string | null} options.modelId - The model identifier.
-   * @param {string | null} options.featureId - The feature identifier.
-   * @param {string | null} options.taskName - The task name.
-   * @param {string | null} options.engineId - The engine identifier.
-   * @param {unknown} options.error - The error class/message or object.
-   */
-  recordEngineCreationFailure({
-    flowId,
-    modelId,
-    featureId,
-    taskName,
-    engineId,
-    error,
-  }) {
-    const currentFlowId = flowId || this.#flowId;
-    // Ensure error is always a string
-    const errorString =
-      typeof error === "object" && error !== null
-        ? String(error.name || error.message || error)
-        : String(error);
-
-    Glean.firefoxAiRuntime.engineCreationFailure.record({
-      flow_id: currentFlowId,
-      modelId,
-      featureId,
-      taskName,
-      engineId,
-      error: errorString,
-      host_process: this.#hostProcess,
-    });
-
-    this.logEventToConsole(this.recordEngineCreationFailure, {
-      flowId: currentFlowId,
-      modelId,
-      featureId,
-      taskName,
-      engineId,
-      error: errorString,
-    });
+      duration: duration === null ? null : Math.round(duration),
+      outcome: error === null ? "success" : "error",
+      error: error === null ? null : MLTelemetry.errorName(error),
+    };
+    Glean.firefoxAiRuntime.engineCreation.record(extra);
+    this.logEventToConsole(this.recordEngineCreation, extra);
   }
 
   /**

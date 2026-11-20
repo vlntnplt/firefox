@@ -68,18 +68,23 @@ firefox.ai.runtime:
         description: >
           Session completion status
 
-  engine_creation_success_flow:
+  engine_creation:
     type: event
     description: >
-      Records a successful engine creation within a tracked flow
+      One attempt to create an inference engine, whether it succeeded or
+      failed.
     bugs:
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
     data_reviews:
+      - https://phabricator.services.mozilla.com/D238583
       - https://phabricator.services.mozilla.com/D270909
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
     data_sensitivity:
       - interaction
     notification_emails:
@@ -93,89 +98,36 @@ firefox.ai.runtime:
           inference process, "hwinference" for the HWInference utility
           process.
         type: string
-      engineId:
+      engine_id:
+        type: string
+        description: The id of the engine.
+      model_id:
+        type: string
+        description: The model the engine was asked to load.
+      backend:
         type: string
         description: >
-          The Engine Id of the created inference engine
-      duration:
-        type: quantity
-        description: >
-          Engine creation time in milliseconds
+          The backend the engine runs on, e.g. onnx, onnx-native, llama.cpp,
+          openai.
       device_kind: &device_kind
         type: string
         description: >
           Kind of the device that loaded the model: cpu, gpu or npu. Only
           llama.cpp in the HWInference process reports it; null for every other
           engine.
-
-  engine_creation_success:
-    type: labeled_timing_distribution
-    time_unit: millisecond
-    description: >
-      An inference engine was created
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D238583
-      - https://phabricator.services.mozilla.com/D243790
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - firefox-ai-and-ml@mozilla.com
-    expires: never
-    labels: &engine_labels
-      - autofill-ml
-      - pdfjs
-      - ml-suggest-intent
-      - ml-suggest-ner
-      - about-inference
-      - webextension
-      - link-preview
-      - default-engine
-      - smart-tab-embedding-engine
-      - smart-tab-topic-engine
-      - smart-intent
-      - smart-openai
-      - title-generation-engine
-      - smart-openai-memories-generation
-      - smart-openai-memories-usage
-      - about-inference-memories
-
-  engine_creation_failure:
-    type: event
-    description: >
-      An inference engine has failed to create
-    bugs:
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=1997016
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
-    data_reviews:
-      - https://phabricator.services.mozilla.com/D238583
-      - https://phabricator.services.mozilla.com/D270909
-      - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
-    data_sensitivity:
-      - interaction
-    notification_emails:
-      - firefox-ai-and-ml@mozilla.com
-    expires: never
-    extra_keys:
-      flow_id: *flow_id
-      host_process: *host_process
-      modelId:
+      duration:
+        type: quantity
+        description: >
+          How long the attempt took, in milliseconds, including any model
+          download.
+      outcome:
         type: string
-        description: model id
-      featureId:
-        description: feature id
-        type: string
-      taskName:
-        description: taskName id
-        type: string
-      engineId:
-        description: engine id
-        type: string
+        description: How the attempt ended, success or error.
       error:
-        description: error class
         type: string
+        description: >
+          The name of the error a failed attempt threw, e.g. TypeError. Never
+          the error's message. Null unless outcome is error.
 
   model_download:
     type: event

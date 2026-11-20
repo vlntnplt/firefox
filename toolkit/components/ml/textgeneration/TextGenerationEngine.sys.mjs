@@ -389,17 +389,19 @@ export class TextGenerationEngine {
     const { engineId } = engine;
     try {
       await engine.#initialize(abortSignal);
-      engine.telemetry.recordEngineCreationSuccessFlow({
+      engine.telemetry.recordEngineCreation({
         engineId,
+        modelId: pipelineOptions.modelId,
+        backend: pipelineOptions.backend,
         duration: ChromeUtils.now() - start,
         deviceKind: engine.#deviceKind,
       });
     } catch (error) {
-      engine.telemetry.recordEngineCreationFailure({
-        modelId: pipelineOptions.modelId,
-        featureId: pipelineOptions.featureId,
-        taskName: pipelineOptions.taskName,
+      engine.telemetry.recordEngineCreation({
         engineId,
+        modelId: pipelineOptions.modelId,
+        backend: pipelineOptions.backend,
+        duration: ChromeUtils.now() - start,
         error,
       });
       throw error;

@@ -297,7 +297,7 @@ describe("SmartWindowRequestResponseTelemetry", () => {
         }
 
         const runtimeCreations = (
-          Glean.firefoxAiRuntime.engineCreationSuccessFlow.testGetValue() ?? []
+          Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? []
         ).filter(e => e.extra.flow_id === chatId);
         Assert.greaterOrEqual(
           runtimeCreations.length,

@@ -250,39 +250,45 @@ export class MLEngineParent extends JSProcessActorParent {
    * @returns {Promise<MLEngine<FeatureId>>}
    */
   async getEngine({ pipelineOptions, notificationsCallback, abortSignal }) {
-    if (
-      lazy.CHECK_FOR_MEMORY &&
-      lazy.mlUtils.totalPhysicalMemory < lazy.MINIMUM_PHYSICAL_MEMORY * ONE_GiB
-    ) {
-      throw new NotEnoughMemoryError({
-        availableMemory: lazy.mlUtils.totalPhysicalMemory,
-        requiredMemory: lazy.MINIMUM_PHYSICAL_MEMORY * ONE_GiB,
-      });
-    }
-
     const { featureId, engineId } = pipelineOptions;
-    if (!engineId) {
-      throw new Error("Expected to receive an engineId in the PipelineOptions");
-    }
-
-    // Allow notifications callback changes even when reusing engine.
-    this.notificationsCallback = notificationsCallback;
-
-    if (MLEngineParent.engineLocks.has(engineId)) {
-      // Wait for the existing lock to resolve
-      await MLEngineParent.engineLocks.get(engineId);
-    }
-    /** @type {PromiseWithResolvers<void>} */
-    const { promise: lockPromise, resolve: resolveLock } =
-      Promise.withResolvers();
-    MLEngineParent.engineLocks.set(engineId, lockPromise);
 
     /** @type {?AbortController} */
     // Parent-owned controller used to cancel engine-related operations
     // (e.g. model downloads) when the engine is terminated.
     let abortController = null;
+    /** @type {?PromiseWithResolvers<void>} */
+    let lock = null;
+    let start = ChromeUtils.now();
 
     try {
+      if (
+        lazy.CHECK_FOR_MEMORY &&
+        lazy.mlUtils.totalPhysicalMemory <
+          lazy.MINIMUM_PHYSICAL_MEMORY * ONE_GiB
+      ) {
+        throw new NotEnoughMemoryError({
+          availableMemory: lazy.mlUtils.totalPhysicalMemory,
+          requiredMemory: lazy.MINIMUM_PHYSICAL_MEMORY * ONE_GiB,
+        });
+      }
+
+      if (!engineId) {
+        throw new Error(
+          "Expected to receive an engineId in the PipelineOptions"
+        );
+      }
+
+      // Allow notifications callback changes even when reusing engine.
+      this.notificationsCallback = notificationsCallback;
+
+      if (MLEngineParent.engineLocks.has(engineId)) {
+        // Wait for the existing lock to resolve
+        await MLEngineParent.engineLocks.get(engineId);
+      }
+      lock = Promise.withResolvers();
+      MLEngineParent.engineLocks.set(engineId, lock.promise);
+      start = ChromeUtils.now();
+
       const currentEngine = MLEngine.getInstance(engineId);
       if (currentEngine) {
         if (
@@ -309,8 +315,6 @@ export class MLEngineParent extends JSProcessActorParent {
           /* replacement*/ true
         );
       }
-
-      const start = ChromeUtils.now();
 
       // Parent-owned controller used to cancel engine-related operations
       // (e.g. model downloads) if the engine is terminated during creation.
@@ -347,11 +351,11 @@ export class MLEngineParent extends JSProcessActorParent {
       Services.obs.addObserver(engine, "ipc:content-shutdown", true);
       engine.isObserving = true;
 
-      const creationTime = ChromeUtils.now() - start;
-
-      engine.telemetry.recordEngineCreationSuccessFlow({
+      engine.telemetry.recordEngineCreation({
         engineId,
-        duration: creationTime,
+        modelId: pipelineOptions.modelId,
+        backend: engine.pipelineOptions.backend,
+        duration: ChromeUtils.now() - start,
       });
 
       // TODO - What happens if the engine is already killed here?
@@ -359,24 +363,27 @@ export class MLEngineParent extends JSProcessActorParent {
     } catch (error) {
       // Abort any pending operations as the engine creating failed
       abortController?.abort();
-      const { modelId, taskName, flowId } = pipelineOptions;
+      const { modelId, backend, flowId } = pipelineOptions;
       const telemetry = new MLTelemetry({
         featureId,
         flowId,
         hostProcess: "inference",
       });
-      telemetry.recordEngineCreationFailure({
-        modelId,
-        featureId,
-        taskName,
+      telemetry.recordEngineCreation({
         engineId,
+        modelId,
+        backend,
+        duration: ChromeUtils.now() - start,
         error,
       });
 
       throw error;
     } finally {
-      MLEngineParent.engineLocks.delete(engineId);
-      resolveLock();
+      // Only the request that took the lock releases it.
+      if (lock) {
+        MLEngineParent.engineLocks.delete(engineId);
+        lock.resolve();
+      }
     }
   }
 

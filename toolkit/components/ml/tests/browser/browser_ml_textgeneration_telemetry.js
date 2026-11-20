@@ -34,13 +34,10 @@ function only(name) {
   return all[0].extra;
 }
 
-function labeledCount(name, label) {
-  return Glean.firefoxAiRuntime[name][label].testGetValue()?.count ?? 0;
-}
-
-function lastError(name) {
-  const all = events(name);
-  return all[all.length - 1]?.extra.error;
+function failedCreations() {
+  return events("engineCreation")
+    .map(event => event.extra)
+    .filter(creation => creation.outcome === "error");
 }
 
 function unsuccessfulRuns() {
@@ -80,8 +77,9 @@ add_task(async function test_creation_records_success_and_download() {
     });
     await engine.terminate();
 
-    const created = only("engineCreationSuccessFlow");
-    Assert.equal(created.engineId, "hwi-tel-create");
+    const created = only("engineCreation");
+    Assert.equal(created.outcome, "success");
+    Assert.equal(created.engine_id, "hwi-tel-create");
     Assert.equal(created.host_process, "hwinference");
     Assert.equal(
       created.device_kind,
@@ -89,12 +87,6 @@ add_task(async function test_creation_records_success_and_download() {
       "The creation records the device kind"
     );
     Assert.greaterOrEqual(Number(created.duration), 0);
-    Assert.equal(
-      labeledCount("engineCreationSuccess", "hwi-tel-create"),
-      1,
-      "The labeled creation timing got its sample"
-    );
-    Assert.equal(events("engineCreationFailure").length, 0);
 
     const download = only("modelDownload");
     Assert.equal(download.outcome, "success", "The model download succeeded");
@@ -276,16 +268,13 @@ add_task(async function test_download_failure() {
     }).catch(e => (thrown = e));
     Assert.ok(thrown, "A missing model fails engine creation");
 
-    Assert.equal(events("engineCreationFailure").length, 1);
+    Assert.equal(failedCreations().length, 1);
     Assert.equal(
-      lastError("engineCreationFailure"),
+      failedCreations().at(-1).error,
       thrown.name,
       "The creation failure records the download error"
     );
-    Assert.equal(
-      events("engineCreationFailure").at(-1).extra.host_process,
-      "hwinference"
-    );
+    Assert.equal(failedCreations().at(-1).host_process, "hwinference");
     const download = events("modelDownload").at(-1).extra;
     Assert.equal(download.outcome, "error", "The download is recorded failed");
     Assert.equal(Number(download.failed_files), 1, "One file failed");
@@ -312,9 +301,9 @@ add_task(async function test_aborted_creation() {
       ),
       error => error.name === "AbortError"
     );
-    Assert.equal(events("engineCreationFailure").length, 1);
+    Assert.equal(failedCreations().length, 1);
     Assert.equal(
-      lastError("engineCreationFailure"),
+      failedCreations().at(-1).error,
       "AbortError",
       "The creation failure names the abort"
     );

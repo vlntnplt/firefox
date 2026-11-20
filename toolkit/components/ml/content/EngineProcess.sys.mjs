@@ -14,6 +14,7 @@ const lazy = {};
 ChromeUtils.defineESModuleGetters(
   lazy,
   {
+    MLTelemetry: "chrome://global/content/ml/MLTelemetry.sys.mjs",
     TextGenerationEngine:
       "moz-src:///toolkit/components/ml/textgeneration/TextGenerationEngine.sys.mjs",
   },
@@ -1392,13 +1393,11 @@ export async function createEngine(
       abortSignal,
     });
   } catch (e) {
-    Glean.firefoxAiRuntime.engineCreationFailure.record({
-      engineId: options.engineId || "",
-      modelId: options.modelId || "",
-      featureId: options.featureId || "",
-      flow_id: options.flowId || "",
-      taskName: options.taskName || "",
-      error: e.constructor.name || "",
+    new lazy.MLTelemetry({ flowId: options.flowId }).recordEngineCreation({
+      engineId: options.engineId ?? null,
+      modelId: options.modelId ?? null,
+      backend: options.backend ?? null,
+      error: e,
     });
     throw e;
   }

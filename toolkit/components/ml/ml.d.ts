@@ -513,9 +513,6 @@ export type StatusByEngineId = Map<
   }
 >;
 
-export type EngineNames =
-  keyof GleanImpl["firefoxAiRuntime"]["engineCreationSuccess"];
-
 export interface ParsedModelHubUrl {
   model: string;
   revision: string;

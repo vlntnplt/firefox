@@ -24,23 +24,24 @@ registerCleanupFunction(() => {
   Services.env.set("MOZ_ALLOW_EXTERNAL_ML_HUB", "");
 });
 
-function getGleanCount(metricsName, engineId = "default-engine") {
-  var metrics = Glean.firefoxAiRuntime[metricsName];
+/**
+ * @param {"success" | "error"} outcome
+ * @returns {number} How many engine_run events ended that way.
+ */
+function countRuns(outcome) {
+  return (Glean.firefoxAiRuntime.engineRun.testGetValue() ?? []).filter(
+    event => event.extra.outcome === outcome
+  ).length;
+}
 
-  if (["runInferenceSuccess", "runInferenceFailure"].includes(metricsName)) {
-    const outcome = metricsName === "runInferenceSuccess" ? "success" : "error";
-    return (Glean.firefoxAiRuntime.engineRun.testGetValue() ?? []).filter(
-      event => event.extra.outcome === outcome
-    ).length;
-  }
-
-  // events
-  if (metricsName === "engineCreationFailure") {
-    return metrics.testGetValue()?.length || 0;
-  }
-
-  // labeled timing distribution
-  return metrics[engineId]?.testGetValue()?.count || 0;
+/**
+ * @param {"success" | "error"} outcome
+ * @returns {number} How many engine_creation events ended that way.
+ */
+function countCreations(outcome) {
+  return (Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? []).filter(
+    ({ extra }) => extra.outcome === outcome
+  ).length;
 }
 
 const TELEMETRY_TEST_STUB_URL =
@@ -51,10 +52,10 @@ const TELEMETRY_TEST_STUB_URL =
  */
 add_task(async function test_default_telemetry() {
   const { cleanup, remoteClients } = await setup();
-  const engineCreationSuccessCount = getGleanCount("engineCreationSuccess");
-  const runInferenceSuccessCount = getGleanCount("runInferenceSuccess");
-  const runInferenceFailureCount = getGleanCount("runInferenceFailure");
-  const engineCreationFailureCount = getGleanCount("engineCreationFailure");
+  const engineCreationSuccessCount = countCreations("success");
+  const runInferenceSuccessCount = countRuns("success");
+  const runInferenceFailureCount = countRuns("error");
+  const engineCreationFailureCount = countCreations("error");
 
   info("Get the engine");
   const engineInstance = await createEngine(RAW_PIPELINE_OPTIONS);
@@ -112,27 +113,15 @@ add_task(async function test_default_telemetry() {
     "The engine process is still active."
   );
 
-  Assert.equal(
-    getGleanCount("engineCreationSuccess"),
-    engineCreationSuccessCount + 1
-  );
+  Assert.equal(countCreations("success"), engineCreationSuccessCount + 1);
 
-  Assert.equal(
-    getGleanCount("engineCreationSuccess"),
-    engineCreationSuccessCount + 1
-  );
+  Assert.equal(countCreations("success"), engineCreationSuccessCount + 1);
 
-  Assert.equal(
-    getGleanCount("runInferenceSuccess"),
-    runInferenceSuccessCount + 1
-  );
+  Assert.equal(countRuns("success"), runInferenceSuccessCount + 1);
 
-  Assert.equal(getGleanCount("runInferenceFailure"), runInferenceFailureCount);
+  Assert.equal(countRuns("error"), runInferenceFailureCount);
 
-  Assert.equal(
-    getGleanCount("engineCreationFailure"),
-    engineCreationFailureCount
-  );
+  Assert.equal(countCreations("error"), engineCreationFailureCount);
 
   await EngineProcess.destroyMLEngine();
   await cleanup();
@@ -143,10 +132,10 @@ add_task(async function test_default_telemetry() {
  */
 add_task(async function test_ml_engine_run_failure() {
   const { cleanup, remoteClients } = await setup();
-  const engineCreationSuccessCount = getGleanCount("engineCreationSuccess");
-  const runInferenceSuccessCount = getGleanCount("runInferenceSuccess");
-  const runInferenceFailureCount = getGleanCount("runInferenceFailure");
-  const engineCreationFailureCount = getGleanCount("engineCreationFailure");
+  const engineCreationSuccessCount = countCreations("success");
+  const runInferenceSuccessCount = countRuns("success");
+  const runInferenceFailureCount = countRuns("error");
+  const engineCreationFailureCount = countCreations("error");
 
   info("Get the engine");
   const engineInstance = await createEngine(RAW_PIPELINE_OPTIONS);
@@ -169,26 +158,17 @@ add_task(async function test_ml_engine_run_failure() {
     "The error is correctly surfaced."
   );
 
-  Assert.equal(
-    getGleanCount("engineCreationSuccess"),
-    engineCreationSuccessCount + 1
-  );
+  Assert.equal(countCreations("success"), engineCreationSuccessCount + 1);
 
-  Assert.equal(getGleanCount("runInferenceSuccess"), runInferenceSuccessCount);
+  Assert.equal(countRuns("success"), runInferenceSuccessCount);
 
-  Assert.equal(
-    getGleanCount("runInferenceFailure"),
-    runInferenceFailureCount + 1
-  );
+  Assert.equal(countRuns("error"), runInferenceFailureCount + 1);
   const { extra } = Glean.firefoxAiRuntime.engineRun.testGetValue().at(-1);
   Assert.equal(extra.outcome, "error");
   Assert.equal(extra.error, "Error", "The error is recorded by name");
   Assert.equal(extra.engine_id, "default-engine");
 
-  Assert.equal(
-    getGleanCount("engineCreationFailure"),
-    engineCreationFailureCount
-  );
+  Assert.equal(countCreations("error"), engineCreationFailureCount);
 
   await EngineProcess.destroyMLEngine();
   await cleanup();
@@ -199,36 +179,70 @@ add_task(async function test_ml_engine_run_failure() {
  */
 add_task(async function test_engine_creation_failure() {
   const { cleanup } = await setup();
-  const engineCreationSuccessCount = getGleanCount("engineCreationSuccess");
-  const engineCreationFailureCount = getGleanCount("engineCreationFailure");
-  const runInferenceSuccessCount = getGleanCount("runInferenceSuccess");
-  const runInferenceFailureCount = getGleanCount("runInferenceFailure");
+  const engineCreationSuccessCount = countCreations("success");
+  const engineCreationFailureCount = countCreations("error");
+  const runInferenceSuccessCount = countRuns("success");
+  const runInferenceFailureCount = countRuns("error");
 
   try {
     await createEngine({ taskName: "moz-echo", featureId: "I DONT EXIST" });
   } catch (e) {}
 
-  Assert.equal(
-    getGleanCount("engineCreationSuccess"),
-    engineCreationSuccessCount
-  );
+  Assert.equal(countCreations("success"), engineCreationSuccessCount);
 
-  Assert.equal(
-    getGleanCount("engineCreationSuccess"),
-    engineCreationSuccessCount
-  );
+  Assert.equal(countCreations("success"), engineCreationSuccessCount);
 
-  Assert.equal(getGleanCount("runInferenceSuccess"), runInferenceSuccessCount);
+  Assert.equal(countRuns("success"), runInferenceSuccessCount);
 
-  Assert.equal(getGleanCount("runInferenceFailure"), runInferenceFailureCount);
+  Assert.equal(countRuns("error"), runInferenceFailureCount);
 
-  Assert.equal(
-    getGleanCount("engineCreationFailure"),
-    engineCreationFailureCount + 1
-  );
+  Assert.equal(countCreations("error"), engineCreationFailureCount + 1);
 
   await EngineProcess.destroyMLEngine();
   await cleanup();
+});
+
+/**
+ * A request refused before an engine is created is a failed creation too, and
+ * leaves the lock of a creation under way alone.
+ */
+add_task(async function test_engine_creation_refused_for_memory() {
+  const { cleanup } = await setup({
+    prefs: [
+      ["browser.ml.checkForMemory", true],
+      ["browser.ml.minimumPhysicalMemory", 99999],
+    ],
+  });
+  const creationsBefore = (
+    Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? []
+  ).length;
+  const creationUnderWay = Promise.withResolvers().promise;
+  MLEngineParent.engineLocks.set("default-engine", creationUnderWay);
+
+  try {
+    await Assert.rejects(
+      createEngine(RAW_PIPELINE_OPTIONS),
+      error => error.name === "NotEnoughMemoryError",
+      "The engine is refused on a machine with too little memory"
+    );
+
+    Assert.deepEqual(
+      (Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? [])
+        .slice(creationsBefore)
+        .map(({ extra }) => [extra.engine_id, extra.outcome, extra.error]),
+      [["default-engine", "error", "NotEnoughMemoryError"]],
+      "The refused creation is recorded once, with the name of its error"
+    );
+    Assert.equal(
+      MLEngineParent.engineLocks.get("default-engine"),
+      creationUnderWay,
+      "The refused request does not release the lock of the other creation"
+    );
+  } finally {
+    MLEngineParent.engineLocks.delete("default-engine");
+    await EngineProcess.destroyMLEngine();
+    await cleanup();
+  }
 });
 
 /**
