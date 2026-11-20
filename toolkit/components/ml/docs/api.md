@@ -77,6 +77,24 @@ await engine.terminate();
 model, which stays loaded until `terminate()`. Requests carrying `tools` reject,
 and `response_format` is ignored.
 
+## Passing a purpose to a run
+
+`run` and `runWithGenerator` take the purpose of the run, which says who it is for. Telemetry
+records it on the `firefox.ai.runtime.engine_run` event.
+
+```javascript
+const res = await engine.run(request, { purpose: "link-preview" });
+```
+
+A run without a purpose is recorded under the `purpose` option its engine was created with,
+which is what an engine on the `openai` backend sends to MLPA. An engine created with none is
+recorded under its `featureId`, so a feature whose `featureId` is already its name has nothing
+to add. Pass the purpose on the run when several features share the engine.
+
+A purpose is the name of the product feature (`link-preview`). When a feature runs a model in
+several ways, the purpose says which after a colon (`memories:index-store`,
+`memories:embed-query`).
+
 ## Passing a flow id to a run
 
 `run` and `runWithGenerator` take a `flowId`, which ties the events of one user-level operation

@@ -2246,7 +2246,8 @@ export class ModelHub {
    * @param {string} config.engineId - The engine id.
    * @param {string} config.model - The model name (organization/name).
    * @param {string} config.revision - The model revision.
-   * @param {string} config.featureId - The engine id.
+   * @param {string} config.featureId - The feature id of the engine.
+   * @param {?string} [config.purpose] - The purpose the engine was created with.
    * @param {string} config.sessionId - Shared across the same model download session.
    * @returns {Promise<void>}
    */
@@ -2255,9 +2256,10 @@ export class ModelHub {
     model,
     revision,
     featureId,
+    purpose,
     sessionId,
   }) {
-    const ending = { engineId, model, revision, featureId, sessionId };
+    const ending = { engineId, model, revision, featureId, purpose, sessionId };
     if (this.#filesInFlight.has(sessionId)) {
       // Record once the files still being fetched have settled.
       this.#downloadsEnding.set(sessionId, ending);
@@ -2275,9 +2277,17 @@ export class ModelHub {
    * @param {string} ending.model
    * @param {string} ending.revision
    * @param {string} ending.featureId
+   * @param {?string} [ending.purpose]
    * @param {string} ending.sessionId
    */
-  #recordDownload({ engineId, model, revision, featureId, sessionId }) {
+  #recordDownload({
+    engineId,
+    model,
+    revision,
+    featureId,
+    purpose,
+    sessionId,
+  }) {
     // Allows multiple calls to notifyModelDownloadComplete to work as expected
     // Also, we don't want to signal model download end if there was no start
     const download = this.#downloads.get(sessionId);
@@ -2291,7 +2301,7 @@ export class ModelHub {
     }
     Glean.firefoxAiRuntime.modelDownload.record({
       engine_id: engineId,
-      feature_id: featureId,
+      purpose: lazy.MLTelemetry.enginePurpose({ purpose, featureId }),
       model_id: model,
       model_revision: revision,
       outcome,

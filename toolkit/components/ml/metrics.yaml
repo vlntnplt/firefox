@@ -24,6 +24,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2092194
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2092192
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://phabricator.services.mozilla.com/D270909
@@ -31,6 +32,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2092192
     data_sensitivity:
       - interaction
     notification_emails:
@@ -64,6 +66,11 @@ firefox.ai.runtime:
         description: >
           The backend the engine runs on, e.g. onnx, onnx-native, llama.cpp,
           openai.
+      purpose:
+        type: string
+        description: >
+          The purpose the engine was created with, or else its feature id.
+          See purpose on engine_run.
       device_kind: &device_kind
         type: string
         description: >
@@ -110,11 +117,13 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2092192
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2092192
     data_sensitivity:
       - interaction
     notification_emails:
@@ -124,9 +133,11 @@ firefox.ai.runtime:
       engine_id:
         type: string
         description: The id of the engine the model is downloaded for.
-      feature_id:
+      purpose:
         type: string
-        description: The feature id of the engine the model is downloaded for.
+        description: >
+          Who the download is for: the purpose its engine was created with, or
+          else its feature id, as on engine_creation.
       model_id:
         type: string
         description: The model whose files are downloaded.
@@ -190,8 +201,8 @@ firefox.ai.runtime:
   engine_run:
     type: event
     description: >
-      One run of the inference engine, however it ended: its outcome, and its
-      performance and memory characteristics.
+      One run of the inference engine, however it ended: who it was for, its
+      outcome, and its performance and memory characteristics.
     extra_keys:
       flow_id: *flow_id
       host_process: *host_process
@@ -210,10 +221,14 @@ firefox.ai.runtime:
           An estimate of the private physical memory of the engine's process
           after the run, in bytes. Null for a run that returned no response.
         type: quantity
-      feature_id:
+      purpose:
         description: >
-          A unique id to describe the feature. e.g. pdfjs-alt-text, suggest-NER,
-          link-preview.
+          Who the run is for: the product feature, e.g. link-preview,
+          followed by what the run does when the feature runs a model in
+          several ways, e.g. memories:index-store. A run that names none is
+          recorded under the purpose its engine was created with, which is
+          what a cloud engine sends to MLPA, or else under the engine's
+          feature id.
         type: string
       outcome:
         description: >
@@ -300,6 +315,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2092192
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1992779
       - https://phabricator.services.mozilla.com/D270909
@@ -309,6 +325,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097023
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2092192
     data_sensitivity:
       - interaction
     notification_emails:

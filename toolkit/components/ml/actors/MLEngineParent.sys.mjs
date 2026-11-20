@@ -391,6 +391,7 @@ export class MLEngineParent extends JSProcessActorParent {
         engineId,
         modelId: engine.resolvedModelId ?? pipelineOptions.modelId,
         backend: engine.pipelineOptions.backend,
+        purpose: MLTelemetry.enginePurpose(pipelineOptions),
         duration: ChromeUtils.now() - start,
       });
 
@@ -413,6 +414,7 @@ export class MLEngineParent extends JSProcessActorParent {
         engineId,
         modelId,
         backend,
+        purpose: MLTelemetry.enginePurpose(pipelineOptions),
         duration: ChromeUtils.now() - start,
         error,
         aborted,
@@ -636,7 +638,8 @@ export class MLEngineParent extends JSProcessActorParent {
    * @param {string} config.engineId - The engine id.
    * @param {string} config.model - The model name (organization/name).
    * @param {string} config.revision - The model revision.
-   * @param {string} config.featureId - The engine id.
+   * @param {string} config.featureId - The feature id of the engine.
+   * @param {?string} [config.purpose] - The purpose the engine was created with.
    * @param {string} config.sessionId - Shared across the same model download session.
    * @returns {Promise<void>}
    */
@@ -645,6 +648,7 @@ export class MLEngineParent extends JSProcessActorParent {
     model,
     revision,
     featureId,
+    purpose,
     sessionId,
   }) {
     if (this.modelHub === null) {
@@ -657,6 +661,7 @@ export class MLEngineParent extends JSProcessActorParent {
       engineId,
       sessionId,
       featureId,
+      purpose,
       model,
       revision,
     });
@@ -1788,7 +1793,8 @@ export class MLEngine {
    * Resolves the live engine for a run on this suspended one, and records
    * the run as failed when the engine cannot be reopened.
    *
-   * @param {{ flowId?: string }} who - The flow the run belongs to.
+   * @param {{ purpose: string | null, flowId?: string }} who - Who the run
+   *   is for.
    * @returns {Promise<MLEngine<FeatureID>>}
    */
   async #liveEngineForRun(who) {
@@ -1839,12 +1845,15 @@ export class MLEngine {
    * @param {EngineRequests[FeatureID]} request
    * @param {object} [options]
    * @param {AbortSignal} [options.signal]
+   * @param {string} [options.purpose] - Who the run is for. Defaults to
+   *   the purpose the engine was created with, or else its feature id.
    * @param {string} [options.flowId] - The flow the run belongs to. Defaults
    *   to the flow of the request that created the engine.
    * @returns {Promise<EngineResponses[FeatureID]>}
    */
-  async run(request, { signal, flowId } = {}) {
-    const who = { flowId };
+  async run(request, { signal, purpose, flowId } = {}) {
+    purpose ??= MLTelemetry.enginePurpose(this.pipelineOptions);
+    const who = { purpose, flowId };
     signal?.throwIfAborted();
     if (this.engineStatus === "suspended") {
       const liveEngine = await this.#liveEngineForRun(who);
@@ -1926,12 +1935,15 @@ export class MLEngine {
    *
    * @param {EngineRequests[FeatureID]} request - The inference request containing the input data.
    * @param {object} [options]
+   * @param {string} [options.purpose] - Who the run is for. Defaults to
+   *   the purpose the engine was created with, or else its feature id.
    * @param {string} [options.flowId] - The flow the run belongs to. Defaults
    *   to the flow of the request that created the engine.
    * @returns {AsyncGenerator<ChunkResponse>} An async generator yielding chunks of generated responses.
    */
-  async *runWithGenerator(request, { flowId } = {}) {
-    const who = { flowId };
+  async *runWithGenerator(request, { purpose, flowId } = {}) {
+    purpose ??= MLTelemetry.enginePurpose(this.pipelineOptions);
+    const who = { purpose, flowId };
     lazy.console.debug(`runWithGenerator called for request ${request}`);
     if (this.engineStatus === "suspended") {
       const liveEngine = await this.#liveEngineForRun(who);

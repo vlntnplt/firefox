@@ -218,11 +218,10 @@ export class MemoriesView extends MozLitElement {
         const call = { id, featureId, status: "running" };
         run.calls.push(call);
         this.requestUpdate();
-        call.result = await this.#engine.run({
-          args: prompt,
-          featureId,
-          inferenceParams: { temperature: 0 },
-        });
+        call.result = await this.#engine.run(
+          { args: prompt, inferenceParams: { temperature: 0 } },
+          { purpose: featureId }
+        );
         signal.throwIfAborted();
         call.status = "done";
       }

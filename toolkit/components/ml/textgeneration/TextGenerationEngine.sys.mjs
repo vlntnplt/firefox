@@ -41,7 +41,6 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  * @property {TextGenerationSampler[]} [samplers]
  * @property {number[]} [stopTokens]
  * @property {boolean} [stopOnEndOfGenerationTokens]
- * @property {string} [featureId] Overrides the engine's feature ID for run telemetry.
  */
 
 /**
@@ -56,7 +55,6 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  * @property {string} [token]
  * @property {string} [chatId]
  * @property {object} [streamOptions]
- * @property {string} [featureId] Overrides the engine's feature ID for run telemetry.
  */
 
 /**
@@ -392,6 +390,7 @@ export class TextGenerationEngine {
         engineId,
         modelId: pipelineOptions.modelId,
         backend: pipelineOptions.backend,
+        purpose: lazy.MLTelemetry.enginePurpose(pipelineOptions),
         duration: ChromeUtils.now() - start,
         deviceKind: engine.#deviceKind,
       });
@@ -400,6 +399,7 @@ export class TextGenerationEngine {
         engineId,
         modelId: pipelineOptions.modelId,
         backend: pipelineOptions.backend,
+        purpose: lazy.MLTelemetry.enginePurpose(pipelineOptions),
         duration: ChromeUtils.now() - start,
         error,
         aborted: !!abortSignal?.aborted,
@@ -464,6 +464,7 @@ export class TextGenerationEngine {
         model: options.modelId,
         revision: options.modelRevision,
         featureId: options.featureId ?? options.engineId,
+        purpose: options.purpose,
         sessionId,
       });
     }
@@ -528,8 +529,8 @@ export class TextGenerationEngine {
 
   /**
    * @param {StreamStats} stats
-   * @param {{ feature_id?: string, flowId?: string }} who - What the run is
-   *   recorded under.
+   * @param {{ purpose: string | null, flowId?: string }} who - Who the run
+   *   was for.
    * @param {object} [ending]
    * @param {EngineRunResult | null} [ending.result] - What the run returned.
    * @param {unknown} [ending.error] - What the run threw.
@@ -566,11 +567,13 @@ export class TextGenerationEngine {
    * @param {LlamaRunRequest | ChatCompletionRequest} request
    * @param {object} [options]
    * @param {AbortSignal} [options.signal] - Cancels the generation and rejects with its reason.
+   * @param {string} [options.purpose] - Who the run is for.
    * @param {string} [options.flowId] - The flow the run belongs to.
    */
-  async run(request, { signal, flowId } = {}) {
+  async run(request, { signal, purpose, flowId } = {}) {
     signal?.throwIfAborted();
-    const who = { feature_id: request.featureId, flowId };
+    purpose ??= lazy.MLTelemetry.enginePurpose(this.pipelineOptions);
+    const who = { purpose, flowId };
     const stats = new StreamStats();
     const cancel = () => this.cancel();
     signal?.addEventListener("abort", cancel, { once: true });
@@ -591,10 +594,12 @@ export class TextGenerationEngine {
   /**
    * @param {LlamaRunRequest | ChatCompletionRequest} request
    * @param {object} [options]
+   * @param {string} [options.purpose] - Who the run is for.
    * @param {string} [options.flowId] - The flow the run belongs to.
    */
-  async *runWithGenerator(request, { flowId } = {}) {
-    const who = { feature_id: request.featureId, flowId };
+  async *runWithGenerator(request, { purpose, flowId } = {}) {
+    purpose ??= lazy.MLTelemetry.enginePurpose(this.pipelineOptions);
+    const who = { purpose, flowId };
     const stats = new StreamStats();
     stats.streaming = true;
     const queue = new ChunkQueue();

@@ -901,6 +901,7 @@ class InferenceEngine {
         notifyModelDownloadCompleteFn({
           sessionId,
           featureId: pipelineOptions.featureId,
+          purpose: pipelineOptions.purpose,
           engineId: pipelineOptions.engineId,
           model: pipelineOptions.modelId,
           revision: pipelineOptions.modelRevision,

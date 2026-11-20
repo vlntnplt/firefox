@@ -31,9 +31,10 @@ async function createEchoEngine(remoteClients) {
 
 /**
  * @param {number} port - The port of a scripted completions server.
+ * @param {object} [options] - More engine options.
  * @returns {Promise<object>} An engine on the openai backend.
  */
-function createCloudEngine(port) {
+function createCloudEngine(port, options = {}) {
   return createEngine({
     taskName: "text-generation",
     featureId: "about-inference",
@@ -42,6 +43,7 @@ function createCloudEngine(port) {
     apiKey: "test-key",
     baseURL: `http://localhost:${port}/v1`,
     maxRetries: 0,
+    ...options,
   });
 }
 
@@ -148,7 +150,6 @@ add_task(async function test_successful_run() {
 
   Assert.equal(result.output.echo, "echo me", "The run ran");
   Assert.equal(run.outcome, "success");
-  Assert.equal(run.feature_id, "test-feature");
   Assert.equal(run.engine_id, "default-engine");
   Assert.equal(run.model_id, "Mozilla/test");
   Assert.equal(run.backend, "test-backend");
@@ -274,6 +275,113 @@ add_task(async function test_run_on_an_engine_already_torn_down() {
 
   await EngineProcess.destroyMLEngine();
   await cleanup();
+});
+
+add_task(async function test_run_records_the_purpose_it_names() {
+  const { cleanup, remoteClients } = await setup();
+  const engine = await createEchoEngine(remoteClients);
+
+  const named = await recordEngineRunOf(() =>
+    engine.run({ data: "named" }, { purpose: "link-preview" })
+  );
+  Assert.equal(named.run.outcome, "success");
+  Assert.equal(named.run.purpose, "link-preview");
+
+  const failed = await recordEngineRunOf(() =>
+    engine.run("throw", { purpose: "link-preview" })
+  );
+  Assert.equal(failed.run.outcome, "error");
+  Assert.equal(
+    failed.run.purpose,
+    "link-preview",
+    "A failed run keeps its purpose"
+  );
+
+  const unnamed = await recordEngineRunOf(() =>
+    engine.run({ data: "unnamed" })
+  );
+  Assert.equal(
+    unnamed.run.purpose,
+    ECHO_OPTIONS.featureId,
+    "A run with no purpose, on an engine with none, falls back to the feature id"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
+add_task(async function test_runs_sharing_an_engine_keep_their_own_purpose() {
+  const { cleanup, remoteClients } = await setup();
+  const engine = await createEchoEngine(remoteClients);
+  const before = engineRunEvents().length;
+
+  await Promise.all([
+    engine.run(
+      { data: "for semantic history", sleepTime: 200 },
+      { purpose: "semantic-history:embed-query" }
+    ),
+    engine.run(
+      { data: "for memories", sleepTime: 50 },
+      { purpose: "memories:index-store" }
+    ),
+  ]);
+
+  const runs = engineRunEvents().slice(before);
+  Assert.equal(runs.length, 2, "Each run recorded its own event");
+  const byPurpose = Object.fromEntries(runs.map(run => [run.purpose, run]));
+  const history = byPurpose["semantic-history:embed-query"];
+  const memories = byPurpose["memories:index-store"];
+  Assert.ok(history && memories, "Each run is recorded under its own purpose");
+  Assert.equal(
+    memories.engine_id,
+    history.engine_id,
+    "Both ran on the same engine"
+  );
+  Assert.greaterOrEqual(
+    Number(history.wall_milliseconds),
+    200,
+    "Each run has its own wall time"
+  );
+  Assert.greaterOrEqual(Number(memories.wall_milliseconds), 50);
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
+add_task(async function test_cloud_run_defaults_to_its_engine_purpose() {
+  const { cleanup } = await setup();
+  const { server, port } = startScriptedOpenAI({
+    chunks: ["A title."],
+    usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+  });
+  const engine = await createCloudEngine(port, { purpose: "title-generation" });
+
+  const created = Glean.firefoxAiRuntime.engineCreation.testGetValue().at(-1);
+  Assert.equal(
+    created.extra.purpose,
+    "title-generation",
+    "The engine's creation is recorded under its purpose"
+  );
+
+  const { run } = await recordEngineRunOf(() => engine.run(CLOUD_REQUEST));
+  Assert.equal(
+    run.purpose,
+    "title-generation",
+    "A run is recorded under the purpose its engine sends to MLPA"
+  );
+
+  const streamed = await recordEngineRunOf(() =>
+    drain(engine.runWithGenerator(CLOUD_STREAM_REQUEST, { purpose: "chat" }))
+  );
+  Assert.equal(
+    streamed.run.purpose,
+    "chat",
+    "A run that names its purpose is recorded under that one"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+  await stopMockOpenAI(server);
 });
 
 add_task(async function test_streamed_completion() {

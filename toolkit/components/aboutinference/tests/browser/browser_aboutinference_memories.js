@@ -171,12 +171,11 @@ add_task(async function test_fixed_workload() {
     Assert.equal(create.firstCall.args[0].engineId, MEMORIES_ENGINE_ID);
     Assert.equal(create.firstCall.args[0].featureId, MEMORIES_MODEL.featureId);
     Assert.deepEqual(
-      engine.run.getCalls().map(call => call.args[0]),
-      [...workload, ...workload].map(({ featureId, prompt }) => ({
-        args: prompt,
-        featureId,
-        inferenceParams: { temperature: 0 },
-      })),
+      engine.run.getCalls().map(call => call.args),
+      [...workload, ...workload].map(({ featureId, prompt }) => [
+        { args: prompt, inferenceParams: { temperature: 0 } },
+        { purpose: featureId },
+      ]),
       "Every task uses fixed input, regardless of earlier output"
     );
   });
@@ -532,7 +531,7 @@ add_task(async function test_native_run_and_cache() {
       events("modelDownload").map(download => [
         download.outcome,
         download.files,
-        download.feature_id,
+        download.purpose,
       ]),
       [["success", "1", MEMORIES_MODEL.featureId]],
       "The model is downloaded once, for the first run"
@@ -544,7 +543,7 @@ add_task(async function test_native_run_and_cache() {
     ];
     const runs = events("engineRun");
     Assert.deepEqual(
-      runs.map(run => run.feature_id),
+      runs.map(run => run.purpose),
       [...features, ...features]
     );
     Assert.ok(runs.every(run => run.engine_id === MEMORIES_ENGINE_ID));

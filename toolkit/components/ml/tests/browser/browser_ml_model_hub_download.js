@@ -930,9 +930,9 @@ add_task(async function test_shared_download_records_each_sessions_telemetry() {
       );
       const [download] = sessionEvents;
       Assert.equal(
-        download.feature_id,
+        download.purpose,
         config.featureId,
-        `${config.sessionId} records its feature.`
+        `${config.sessionId} records who it is for.`
       );
       Assert.equal(
         download.model_id,
@@ -1254,6 +1254,7 @@ add_task(async function test_download_that_cannot_be_stored_is_a_failure() {
     ...MODEL_ARGS,
     engineId: "full-disk-engine",
     featureId: "full-disk-feature",
+    purpose: "full-disk-purpose",
     sessionId: "full-disk-session",
   };
   const put = sinon
@@ -1279,6 +1280,11 @@ add_task(async function test_download_that_cannot_be_stored_is_a_failure() {
       downloadEventsOf(config)[0].error,
       "QuotaExceededError",
       "The error is recorded by its name, as engine_run records one."
+    );
+    Assert.equal(
+      downloadEventsOf(config)[0].purpose,
+      "full-disk-purpose",
+      "The purpose of the engine comes before its feature id."
     );
   } finally {
     put.restore();

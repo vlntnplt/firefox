@@ -74,6 +74,18 @@ export class MLTelemetry {
   }
 
   /**
+   * The purpose an engine's runs are recorded under when they name none: the
+   * one the engine was created with, or else its feature id.
+   *
+   * @param {{ purpose?: string | null, featureId?: string | null }} options -
+   *   The options of the engine.
+   * @returns {string | null}
+   */
+  static enginePurpose(options) {
+    return options.purpose ?? options.featureId ?? null;
+  }
+
+  /**
    * The name events record for an error: its own name, never its message.
    *
    * @param {unknown} error
@@ -106,6 +118,7 @@ export class MLTelemetry {
    * @param {string | null} options.engineId
    * @param {string | null} [options.modelId]
    * @param {string | null} [options.backend]
+   * @param {string | null} [options.purpose] - The purpose the engine is created with.
    * @param {number | null} [options.duration] - How long the attempt took, in milliseconds.
    * @param {string | null} [options.deviceKind] - Kind of the device that loaded the model.
    * @param {unknown} [options.error] - What the attempt threw, when it failed.
@@ -118,6 +131,7 @@ export class MLTelemetry {
     engineId,
     modelId = null,
     backend = null,
+    purpose = null,
     duration = null,
     deviceKind = null,
     error = null,
@@ -136,6 +150,7 @@ export class MLTelemetry {
       engine_id: engineId,
       model_id: modelId,
       backend,
+      purpose,
       device_kind: deviceKind,
       duration: duration === null ? null : Math.round(duration),
       outcome,
@@ -170,7 +185,7 @@ export class MLTelemetry {
    * @param {string | null} [options.deviceKind]
    * @param {string} [options.flowId] - The flow the run belongs to. Uses
    *   the instance's flow when not provided.
-   * @param {string} [options.feature_id]
+   * @param {string | null} [options.purpose] - Who the run was for.
    * @param {unknown} [options.error] - What the run threw, when it failed.
    * @param {boolean} [options.aborted] - Whether the caller gave the run up.
    */
@@ -190,7 +205,7 @@ export class MLTelemetry {
     backendSourceRevision = null,
     deviceKind = null,
     flowId = this.#flowId,
-    feature_id = this.#featureId,
+    purpose = null,
     error = null,
     aborted = false,
   }) {
@@ -234,7 +249,7 @@ export class MLTelemetry {
       cpu_milliseconds: round(cpuMilliseconds),
       wall_milliseconds: round(wallMilliseconds),
       memory_bytes: round(memoryBytes),
-      feature_id,
+      purpose,
       outcome,
       error: errorName,
       http_status: httpStatus,

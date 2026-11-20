@@ -131,7 +131,6 @@ add_task(async function test_run_records_the_engine_run() {
     await engine.terminate();
 
     const run = only("engineRun");
-    Assert.equal(run.feature_id, "link-preview");
     Assert.ok(
       ["eos", "length"].includes(result.finishReason),
       `The generation ran to its end (${result.finishReason})`
@@ -171,7 +170,7 @@ add_task(async function test_run_records_the_engine_run() {
   }
 });
 
-add_task(async function test_run_records_the_request_feature() {
+add_task(async function test_run_records_its_purpose() {
   const { cleanup } = await setup({ prefs: HWI_PREFS });
   try {
     const engine = await createEngine({
@@ -181,15 +180,15 @@ add_task(async function test_run_records_the_request_feature() {
     });
     await engine.run(RUN_REQUEST);
     await collectGeneratedText(engine.runWithGenerator(RUN_REQUEST));
-    await engine.run({ ...RUN_REQUEST, featureId: "hwi-prompt" });
+    await engine.run(RUN_REQUEST, { purpose: "hwi-prompt" });
     await collectGeneratedText(
-      engine.runWithGenerator({ ...RUN_REQUEST, featureId: "hwi-prompt" })
+      engine.runWithGenerator(RUN_REQUEST, { purpose: "hwi-prompt" })
     );
 
     Assert.deepEqual(
-      events("engineRun").map(({ extra }) => extra.feature_id),
+      events("engineRun").map(({ extra }) => extra.purpose),
       ["test-feature", "test-feature", "hwi-prompt", "hwi-prompt"],
-      "A run records the request's feature id or falls back to the engine's"
+      "A run records the purpose it names or falls back to its engine's feature id"
     );
     await engine.terminate();
   } finally {

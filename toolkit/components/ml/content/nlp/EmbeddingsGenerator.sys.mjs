@@ -467,10 +467,12 @@ export class EmbeddingsGenerator {
    *
    * @param {string} text
    *   The input text to be embedded.
+   * @param {{ purpose?: string }} [options]
+   *   Who the run is for.
    * @returns {Promise<any>}
    *   A promise that resolves with the embedding result from the engine.
    */
-  async embed(text) {
+  async embed(text, options) {
     await this.ensureEngine();
     if (typeof text !== "string" || text.trim() === "") {
       throw new Error("Invalid input: text must be a non-empty string");
@@ -479,7 +481,7 @@ export class EmbeddingsGenerator {
       args: [text],
       options: { pooling: "mean", normalize: true },
     };
-    return this.engineRun(request);
+    return this.engineRun(request, options);
   }
 
   /**
@@ -493,12 +495,14 @@ export class EmbeddingsGenerator {
    *
    * @param {string[]} texts
    *   The array of texts to be embedded.
+   * @param {{ purpose?: string }} [options]
+   *   Who the run is for.
    * @returns {Promise<number[][]>}
    *   A promise that resolves to an array of embedding vectors,
    *   where each vector is an array of floats with length equal to
    *  `#embeddingSize`.
    */
-  async embedMany(texts) {
+  async embedMany(texts, options) {
     await this.ensureEngine();
 
     if (!Array.isArray(texts)) {
@@ -510,10 +514,13 @@ export class EmbeddingsGenerator {
     }
 
     // call the engine once with the batch of texts.
-    let batchTensors = await this.engineRun({
-      args: this.options.backend == "static-embeddings" ? texts : [texts],
-      options: { pooling: "mean", normalize: true, max_length: 100 },
-    });
+    let batchTensors = await this.engineRun(
+      {
+        args: this.options.backend == "static-embeddings" ? texts : [texts],
+        options: { pooling: "mean", normalize: true, max_length: 100 },
+      },
+      options
+    );
 
     // If the result is triple nested, extract the inner array.
     if (
@@ -558,8 +565,8 @@ export class EmbeddingsGenerator {
   }
 
   // for easier testing purpose
-  async engineRun(request) {
-    return await this.#engine.run(request);
+  async engineRun(request, options) {
+    return await this.#engine.run(request, options);
   }
 
   // Helper to wrap createEngine for testing purpose

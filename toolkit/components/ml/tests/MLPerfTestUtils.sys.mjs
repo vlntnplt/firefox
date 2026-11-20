@@ -324,17 +324,17 @@ function startEngineRunCapture(enginesByFeatureId) {
     // can count and time its generated tokens.
     const streamsTokenIds = prototype !== TextGenerationEngine.prototype;
 
-    prototype.run = async function (request) {
+    prototype.run = async function (request, options) {
       const config = configForEngine(this);
       if (!config) {
-        return originalRun.call(this, request);
+        return originalRun.call(this, request, options);
       }
 
       const start = ChromeUtils.now();
       activeRuns++;
 
       try {
-        const result = await originalRun.call(this, request);
+        const result = await originalRun.call(this, request, options);
         recordRun(this, config, start, result, {});
 
         return result;
@@ -343,14 +343,14 @@ function startEngineRunCapture(enginesByFeatureId) {
       }
     };
 
-    prototype.runWithGenerator = async function* (request) {
+    prototype.runWithGenerator = async function* (request, options) {
       const config = configForEngine(this);
       if (!config) {
-        return yield* originalRunWithGenerator.call(this, request);
+        return yield* originalRunWithGenerator.call(this, request, options);
       }
 
       const start = ChromeUtils.now();
-      const generator = originalRunWithGenerator.call(this, request);
+      const generator = originalRunWithGenerator.call(this, request, options);
       let completed = false;
       let failed = false;
       let firstTokenTime = null;

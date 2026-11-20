@@ -96,7 +96,6 @@ add_task(async function test_default_telemetry() {
     checkNumber("memory_bytes");
     checkNumber("system_memory_mb");
 
-    Assert.equal(extra.feature_id, "test-feature");
     Assert.equal(extra.outcome, "success");
     Assert.equal(extra.error, undefined, "A successful run names no error");
     Assert.equal(extra.engine_id, "default-engine");
@@ -444,6 +443,11 @@ add_task(async function test_model_download_telemetry_success() {
     ["main", "acme/bert", "v0.1"],
     "The download names the engine it is for, and the model and revision"
   );
+  Assert.equal(
+    download.purpose,
+    "link-preview",
+    "An engine created with no purpose downloads under its feature id"
+  );
 
   await EngineProcess.destroyMLEngine();
   await IndexedDBCache.init({ reset: true });
@@ -663,7 +667,7 @@ add_task(async function test_model_hub_service_download_attribution() {
 
   Assert.greater(observed.length, 0, "The download was measured");
   Assert.deepEqual(
-    observed.map(obj => obj.extra.feature_id),
+    observed.map(obj => obj.extra.purpose),
     ["speech-recognition"],
     "The download is attributed to the task that asked for it"
   );
@@ -753,7 +757,6 @@ add_task(async function test_run_with_generator_telemetry() {
       "average_chunk_time should be a non-negative number"
     );
 
-    Assert.equal(extra.feature_id, "about-inference");
     Assert.equal(extra.backend, "openai");
   }
 

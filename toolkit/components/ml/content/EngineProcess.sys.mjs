@@ -1397,6 +1397,7 @@ export async function createEngine(
       engineId: options.engineId ?? null,
       modelId: options.modelId ?? null,
       backend: options.backend ?? null,
+      purpose: lazy.MLTelemetry.enginePurpose(options),
       error: e,
     });
     throw e;
