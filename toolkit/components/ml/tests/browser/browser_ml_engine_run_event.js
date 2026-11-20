@@ -118,6 +118,26 @@ add_task(async function test_reused_engine_records_the_flow_of_each_request() {
   await cleanup();
 });
 
+add_task(async function test_run_records_the_model_remote_settings_picked() {
+  const { cleanup, remoteClients } = await setup();
+  const { modelId, ...options } = ECHO_OPTIONS;
+  const engine = await createEngine({ ...options, engineId: "rs-model" });
+  const warmUp = engine.run({ data: "warm up", sleepTime: 0 });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  const { output } = await warmUp;
+  Assert.notEqual(output.modelId, modelId, "Remote Settings picked the model");
+
+  const { run } = await recordEngineRunOf(() => engine.run({ data: "again" }));
+  Assert.equal(
+    run.model_id,
+    output.modelId,
+    "The run names the model the engine loaded"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
 add_task(async function test_successful_run() {
   const { cleanup, remoteClients } = await setup();
   const engine = await createEchoEngine(remoteClients);

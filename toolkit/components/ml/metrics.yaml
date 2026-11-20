@@ -23,6 +23,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2092194
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://phabricator.services.mozilla.com/D270909
@@ -54,7 +55,10 @@ firefox.ai.runtime:
         description: The id of the engine.
       model_id:
         type: string
-        description: The model the engine was asked to load.
+        description: >
+          The model the engine loaded, as resolved from Remote Settings or the
+          task's default when its creator named none. For a failed attempt,
+          the model its creator asked for.
       backend:
         type: string
         description: >

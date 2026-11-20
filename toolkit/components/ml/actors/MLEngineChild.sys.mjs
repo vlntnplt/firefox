@@ -172,6 +172,7 @@ export class MLEngineChild extends JSProcessActorChild {
             type: "EnginePort:EngineReady",
             error: null,
             resolvedBackend: currentEngineDispatcher.pipelineOptions?.backend,
+            resolvedModelId: currentEngineDispatcher.pipelineOptions?.modelId,
           });
           return;
         }
@@ -203,6 +204,8 @@ export class MLEngineChild extends JSProcessActorChild {
         // The parent's requested backend may resolve to a more specific
         // one, e.g. "best-onnx" will resolve to "onnx" or "onnx-native".
         resolvedBackend: dispatcher.pipelineOptions?.backend,
+        // The model can come from Remote Settings or from the task's default.
+        resolvedModelId: dispatcher.pipelineOptions?.modelId,
       });
     } catch (error) {
       port.postMessage({
@@ -734,6 +737,7 @@ class EngineDispatcher {
               error: null,
               resourcesBefore,
               resourcesAfter,
+              resolvedModelId: this.pipelineOptions?.modelId,
             });
           } catch (error) {
             port.postMessage({
@@ -742,6 +746,7 @@ class EngineDispatcher {
               response: null,
               error,
               errorDetails: getErrorDetails(error),
+              resolvedModelId: this.pipelineOptions?.modelId,
             });
           } finally {
             this.#runningRequests.delete(requestId);

@@ -389,7 +389,7 @@ export class MLEngineParent extends JSProcessActorParent {
 
       engine.telemetry.recordEngineCreation({
         engineId,
-        modelId: pipelineOptions.modelId,
+        modelId: engine.resolvedModelId ?? pipelineOptions.modelId,
         backend: engine.pipelineOptions.backend,
         duration: ChromeUtils.now() - start,
       });
@@ -1168,6 +1168,15 @@ export class MLEngine {
   engineStatus = "uninitialized";
 
   /**
+   * The model the engine's process loaded, which Remote Settings or the
+   * task's default picks when the options name none. The options keep what
+   * was asked for, since engine reuse compares them.
+   *
+   * @type {string | null}
+   */
+  resolvedModelId = null;
+
+  /**
    * Whether this engine is currently registered as an "ipc:content-shutdown"
    * observer. Used to avoid removing an observer that was never added, which
    * would throw NS_ERROR_ILLEGAL_VALUE.
@@ -1546,6 +1555,7 @@ export class MLEngine {
           if (data.resolvedBackend) {
             this.pipelineOptions.backend = data.resolvedBackend;
           }
+          this.resolvedModelId = data.resolvedModelId ?? this.resolvedModelId;
           newPortResolvers.resolve();
         }
 
@@ -1560,6 +1570,7 @@ export class MLEngine {
           resourcesBefore,
           resourcesAfter,
         } = data;
+        this.resolvedModelId = data.resolvedModelId ?? this.resolvedModelId;
         if (this.#canceledRequests.delete(requestId)) {
           break;
         }
@@ -1812,7 +1823,7 @@ export class MLEngine {
   #recordRun(run) {
     this.telemetry.recordEngineRun({
       engineId: this.engineId,
-      modelId: this.pipelineOptions.modelId,
+      modelId: this.resolvedModelId ?? this.pipelineOptions.modelId,
       backend: this.pipelineOptions.backend,
       backendSourceRevision:
         this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
@@ -2030,7 +2041,7 @@ export class MLEngine {
         "MLEngineParent",
         { startTime },
         `runWithGenerator generated ${markerText}` +
-          ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
+          ` (${this.pipelineOptions.backend} ${this.resolvedModelId ?? this.pipelineOptions.modelId})`
       );
 
       this.#recordRun({
@@ -2108,7 +2119,7 @@ export class MLEngine {
             "MLEngineParent",
             { startTime: chunkStartTime },
             `chunk generated ${markerText}` +
-              ` (${this.pipelineOptions.backend} ${this.pipelineOptions.modelId})`
+              ` (${this.pipelineOptions.backend} ${this.resolvedModelId ?? this.pipelineOptions.modelId})`
           );
 
           chunkStartTime = ChromeUtils.now();
