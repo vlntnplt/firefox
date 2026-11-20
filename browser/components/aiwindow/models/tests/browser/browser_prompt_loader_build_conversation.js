@@ -599,3 +599,12 @@ add_task(async function test_buildConversation_on_device_options() {
     createEngineStub.restore();
   }
 });
+
+add_task(async function test_buildConversation_needs_a_declared_purpose() {
+  // This key has a config record and only ever supplies prompt text.
+  await Assert.rejects(
+    buildConversation(MODEL_FEATURES.RESUME_ACTIVITY_CONVERSATION),
+    /No purpose is declared for the feature "resume-activity-conversation"/,
+    "A feature with no declared purpose cannot build an engine"
+  );
+});

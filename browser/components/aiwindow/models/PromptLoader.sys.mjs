@@ -72,9 +72,11 @@ const LEGACY_BROWSER_CONTEXT_VERSION = "1.0";
 const LEGACY_TAB_MODULE = "tab";
 const TAB_MODULE = "tab-conditional-fields";
 
-export const DEFAULT_PURPOSE = "default";
+/**
+ * The purpose each feature that builds an engine sends to MLPA, which is also
+ * what its runs are recorded under. A feature missing here cannot build one.
+ */
 export const FEATURE_PURPOSES = Object.freeze({
-  [DEFAULT_PURPOSE]: PURPOSES.CHAT,
   [MODEL_FEATURES.CHAT]: PURPOSES.CHAT,
   [MODEL_FEATURES.SMART_FORM_FILL]: PURPOSES.SMART_FORM_FILL,
   [MODEL_FEATURES.CONVERSATION_SUGGESTIONS_SIDEBAR_STARTER]:
@@ -87,6 +89,7 @@ export const FEATURE_PURPOSES = Object.freeze({
     PURPOSES.MEMORY_GENERATION,
   [MODEL_FEATURES.MEMORIES_MESSAGE_CLASSIFICATION_SYSTEM]:
     PURPOSES.MEMORY_GENERATION,
+  [MODEL_FEATURES.RESUME_ACTIVITY_CONVERSATION_STARTER]: PURPOSES.CHAT,
   [MODEL_FEATURES.AGENT_MONITOR]: PURPOSES.MONITOR,
   [MODEL_FEATURES.AGENT_MONITOR_SETUP]: PURPOSES.MONITOR,
   [MODEL_FEATURES.SEARCH_ANSWER_GENERATION]: PURPOSES.CHAT,
@@ -558,6 +561,10 @@ async function resolveInferenceModel(feature, config, opts = {}) {
  */
 export async function buildEngineForFeature(feature, opts = {}) {
   const mainConfig = await selectFeatureConfig(feature, opts);
+  const purpose = FEATURE_PURPOSES[feature];
+  if (!purpose) {
+    throw new Error(`No purpose is declared for the feature "${feature}"`);
+  }
 
   let parameters = mainConfig.parameters ?? {};
   if (typeof parameters === "string") {
@@ -568,10 +575,6 @@ export async function buildEngineForFeature(feature, opts = {}) {
     }
   }
   const serviceType = mainConfig.service_type ?? getDefaultServiceType(feature);
-  let purpose =
-    mainConfig.purpose ??
-    FEATURE_PURPOSES[feature] ??
-    FEATURE_PURPOSES[DEFAULT_PURPOSE];
   const modelChoiceId =
     opts.modelChoiceIdOverride ??
     Services.prefs.getStringPref(MODEL_CHOICE_PREF, "");
