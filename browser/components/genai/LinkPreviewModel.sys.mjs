@@ -110,11 +110,14 @@ export async function runSmokeTest({ engine, buildID }) {
   }
   try {
     let text = "";
-    for await (const chunk of engine.runWithGenerator({
-      prompt: SMOKE_PROMPT,
-      samplers: SMOKE_SAMPLERS,
-      nPredict: SMOKE_N_PREDICT,
-    })) {
+    for await (const chunk of engine.runWithGenerator(
+      {
+        prompt: SMOKE_PROMPT,
+        samplers: SMOKE_SAMPLERS,
+        nPredict: SMOKE_N_PREDICT,
+      },
+      { purpose: `${FEATURE_ID}:smoke-test` }
+    )) {
       text += chunk.text || "";
     }
     const outputHash = await sha256Hex(text);
