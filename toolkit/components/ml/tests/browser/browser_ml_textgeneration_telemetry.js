@@ -381,8 +381,8 @@ add_task(async function test_terminate_mid_generation() {
     Assert.equal(unsuccessfulRuns().length, 1);
     Assert.equal(
       unsuccessfulRuns()[0].extra.outcome,
-      "error",
-      "A run whose engine the caller tore down did not succeed"
+      "aborted",
+      "A run whose engine the caller tore down is aborted, not failed"
     );
   } finally {
     await cleanup();

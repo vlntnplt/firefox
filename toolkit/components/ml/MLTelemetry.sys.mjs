@@ -161,6 +161,7 @@ export class MLTelemetry {
    * @param {string} [options.flow_id]
    * @param {string} [options.feature_id]
    * @param {unknown} [options.error] - What the run threw, when it failed.
+   * @param {boolean} [options.aborted] - Whether the caller gave the run up.
    */
   recordEngineRun({
     engineId,
@@ -179,9 +180,23 @@ export class MLTelemetry {
     flow_id = this.#flowId,
     feature_id = this.#featureId,
     error = null,
+    aborted = false,
   }) {
-    const outcome = error === null ? "success" : "error";
-    const errorName = error === null ? null : MLTelemetry.errorName(error);
+    let outcome = "success";
+    let errorName = null;
+    let httpStatus = null;
+    if (aborted) {
+      outcome = "aborted";
+    } else if (error !== null) {
+      const { status } = /** @type {any} */ (error);
+      httpStatus = Number.isInteger(status) ? status : null;
+      if (httpStatus === 429) {
+        outcome = "limited";
+      } else {
+        outcome = "error";
+        errorName = MLTelemetry.errorName(error);
+      }
+    }
 
     let cpuMilliseconds = null;
     let cpuUtilization = null;
@@ -215,6 +230,7 @@ export class MLTelemetry {
       feature_id,
       outcome,
       error: errorName,
+      http_status: httpStatus,
       engine_id: engineId,
       model_id: modelId,
       backend,

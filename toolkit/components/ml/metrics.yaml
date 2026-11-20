@@ -192,13 +192,23 @@ firefox.ai.runtime:
         type: string
       outcome:
         description: >
-          How the run ended: success or error.
+          How the run ended: success, error, aborted when the caller gave it
+          up, or limited when the service refused it for a rate limit (HTTP
+          429). An aborted or limited run is not a failed one.
         type: string
       error:
         description: >
-          The name of the error a failed run threw, e.g. TypeError. Never the
+          The name of the error a failed run threw, e.g. TypeError, or
+          InferenceProcessCrash when the engine's process died. Never the
           error's message. Null unless outcome is error.
         type: string
+      http_status:
+        description: >
+          The HTTP status a service refused the run with, e.g. 401, 429, 500.
+          Null when outcome is success or aborted, and for a failed run that
+          got no HTTP response: a service that could not be reached, or an
+          engine that runs on device.
+        type: quantity
       engine_id:
         type: string
         description: >
@@ -252,6 +262,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
     data_reviews:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1992779
       - https://phabricator.services.mozilla.com/D270909
@@ -259,6 +270,7 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
     data_sensitivity:
       - interaction
     notification_emails:

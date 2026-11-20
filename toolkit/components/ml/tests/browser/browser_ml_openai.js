@@ -874,6 +874,11 @@ add_task(async function test_openai_error_keeps_status_and_code() {
     );
     Assert.equal(error.status, 429, "The HTTP status is kept on the error");
     Assert.equal(error.error, 1, "The body error code is kept on the error");
+    Assert.equal(
+      Glean.firefoxAiRuntime.engineRun.testGetValue().at(-1).extra.outcome,
+      "limited",
+      "The run is recorded as rate limited, apart from failed runs"
+    );
   } finally {
     await EngineProcess.destroyMLEngine();
     await cleanup();

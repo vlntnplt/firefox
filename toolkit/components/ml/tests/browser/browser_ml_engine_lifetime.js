@@ -70,8 +70,8 @@ async function checkCanceledRunWithLateResponse(request) {
     Assert.equal(runs().length, runCount + 1, "The canceled run is recorded");
     Assert.equal(
       runs().at(-1).extra.outcome,
-      "error",
-      "The canceled request is recorded as a run that did not succeed"
+      "aborted",
+      "The canceled request is recorded as aborted, not as a failure"
     );
 
     const next = await engine.run({ data: "Next request" });

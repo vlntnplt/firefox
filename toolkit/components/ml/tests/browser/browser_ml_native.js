@@ -529,6 +529,11 @@ add_task(
           "llama.cpp",
           "The recorded run reports the backend that generated it"
         );
+        Assert.equal(
+          engineRun.extra.outcome,
+          "aborted",
+          "A run its consumer abandoned is recorded as aborted"
+        );
       } finally {
         await EngineProcess.destroyMLEngine();
         await cleanup();

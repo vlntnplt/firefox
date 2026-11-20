@@ -523,8 +523,13 @@ export class TextGenerationEngine {
    * @param {object} [ending]
    * @param {EngineRunResult | null} [ending.result] - What the run returned.
    * @param {unknown} [ending.error] - What the run threw.
+   * @param {boolean} [ending.aborted] - Whether the caller gave the run up.
    */
-  #recordRun(stats, featureId, { result = null, error = null } = {}) {
+  #recordRun(
+    stats,
+    featureId,
+    { result = null, error = null, aborted = false } = {}
+  ) {
     this.telemetry.recordEngineRun({
       feature_id: featureId,
       beforeRun: stats.beforeRun,
@@ -539,6 +544,7 @@ export class TextGenerationEngine {
       outputTokens: result?.metrics.outputTokens,
       ...(stats.streaming && result ? stats.metrics() : {}),
       error,
+      aborted: aborted || (error !== null && this.engineStatus === "closed"),
     });
   }
 
@@ -555,9 +561,15 @@ export class TextGenerationEngine {
     let result;
     try {
       result = await this.#execute(request);
-      this.#recordRun(stats, request.featureId, { result });
+      this.#recordRun(stats, request.featureId, {
+        result,
+        aborted: !!signal?.aborted,
+      });
     } catch (error) {
-      this.#recordRun(stats, request.featureId, { error });
+      this.#recordRun(stats, request.featureId, {
+        error,
+        aborted: !!signal?.aborted,
+      });
       throw error;
     } finally {
       signal?.removeEventListener("abort", cancel);
@@ -604,9 +616,7 @@ export class TextGenerationEngine {
       if (!settled) {
         this.cancel();
         const result = await completion?.catch(() => null);
-        if (result) {
-          this.#recordRun(stats, request.featureId, { result });
-        }
+        this.#recordRun(stats, request.featureId, { result, aborted: true });
       }
     }
   }

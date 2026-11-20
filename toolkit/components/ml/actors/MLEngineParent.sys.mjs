@@ -99,6 +99,18 @@ export class NotEnoughMemoryError extends Error {
 }
 
 /**
+ * The error of a run whose inference process died, or whose engine is no
+ * longer reopened after repeated crashes.
+ */
+export class InferenceProcessCrash extends Error {
+  /** @param {string} message */
+  constructor(message) {
+    super(message);
+    this.name = "InferenceProcessCrash";
+  }
+}
+
+/**
  * The ML engine is in its own content process. This actor handles the
  * marshalling of the data such as the engine payload.
  */
@@ -1249,7 +1261,7 @@ export class MLEngine {
         );
       }
       this.#port = null;
-      const err = new Error(
+      const err = new InferenceProcessCrash(
         `The inference process was shutdown (pid=${pid}), childId=${childID}`
       );
       this.setEngineStatus(
@@ -1690,7 +1702,7 @@ export class MLEngine {
       MLEngine.#consecutiveCrashes.get(this.engineId) >= MAX_CONSECUTIVE_CRASHES
     ) {
       this.setEngineStatus("crashed");
-      throw new Error(
+      throw new InferenceProcessCrash(
         `The inference process crashed ${MAX_CONSECUTIVE_CRASHES} times in a row, not reopening the engine.`
       );
     }
@@ -1720,6 +1732,35 @@ export class MLEngine {
   }
 
   /**
+   * Resolves the live engine for a run on this suspended one, and records
+   * the run as failed when the engine cannot be reopened.
+   *
+   * @returns {Promise<MLEngine<FeatureID>>}
+   */
+  async #liveEngineForRun() {
+    const beforeRun = ChromeUtils.now();
+    try {
+      return await this.#resolveLiveEngine();
+    } catch (error) {
+      this.#recordRun({ beforeRun, error });
+      throw error;
+    }
+  }
+
+  /**
+   * The error for a run on an engine without a port: a crash when the engine
+   * is no longer reopened after repeated crashes.
+   *
+   * @param {string} message
+   * @returns {Error}
+   */
+  #portGoneError(message) {
+    return this.engineStatus === "crashed"
+      ? new InferenceProcessCrash(message)
+      : new Error(message);
+  }
+
+  /**
    * Records the engine_run event of a run that ended, however it ended.
    *
    * @param {object} run - What MLTelemetry.recordEngineRun takes, less the
@@ -1733,6 +1774,8 @@ export class MLEngine {
       backendSourceRevision:
         this.pipelineOptions.backend === "llama.cpp" ? LLAMA_CPP_VERSION : null,
       ...run,
+      aborted:
+        run.aborted || (run.error != null && this.engineStatus === "closed"),
     });
   }
 
@@ -1747,11 +1790,12 @@ export class MLEngine {
   async run(request, { signal } = {}) {
     signal?.throwIfAborted();
     if (this.engineStatus === "suspended") {
-      return (await this.#resolveLiveEngine()).run(request, { signal });
+      const liveEngine = await this.#liveEngineForRun();
+      return liveEngine.run(request, { signal });
     }
     // If the port is null maybe the inference process has shut down
     if (this.#port === null) {
-      const error = new Error("Port does not exist");
+      const error = this.#portGoneError("Port does not exist");
       this.#recordRun({ beforeRun: ChromeUtils.now(), error });
       throw error;
     }
@@ -1800,6 +1844,7 @@ export class MLEngine {
       this.#recordRun({
         beforeRun,
         error,
+        aborted: !!signal?.aborted,
       });
       throw error;
     } finally {
@@ -1826,13 +1871,14 @@ export class MLEngine {
   async *runWithGenerator(request) {
     lazy.console.debug(`runWithGenerator called for request ${request}`);
     if (this.engineStatus === "suspended") {
-      return yield* (await this.#resolveLiveEngine()).runWithGenerator(request);
+      const liveEngine = await this.#liveEngineForRun();
+      return yield* liveEngine.runWithGenerator(request);
     }
     const startTime = ChromeUtils.now();
 
     // If the port is null maybe the inference process has shut down
     if (this.#port === null) {
-      const error = new Error("The port is null");
+      const error = this.#portGoneError("The port is null");
       this.#recordRun({ beforeRun: startTime, error });
       throw error;
     }
@@ -1908,8 +1954,9 @@ export class MLEngine {
      * @param {any} result - The engine's response for the run, if it gave one.
      * @param {object} [ending]
      * @param {unknown} [ending.error] - What the run threw.
+     * @param {boolean} [ending.aborted] - Whether the consumer gave the run up.
      */
-    const recordRun = (result, { error = null } = {}) => {
+    const recordRun = (result, { error = null, aborted = false } = {}) => {
       if (recorded) {
         return;
       }
@@ -1935,6 +1982,7 @@ export class MLEngine {
       this.#recordRun({
         beforeRun: startTime,
         error,
+        aborted,
         resourcesBefore: result?.resourcesBefore,
         resourcesAfter: result?.resourcesAfter,
         inputTokens: result?.metrics?.inputTokens,
@@ -2011,7 +2059,7 @@ export class MLEngine {
           // in case of a timeout check if the inference process is still alive
           lazy.console.error("The port was closed.");
           if (this.engineStatus === "crashed") {
-            throw new Error(
+            throw new InferenceProcessCrash(
               "The inference process has crashed, the port is null. This was for the following request: " +
                 lazy.stringifyForLog(request)
             );
@@ -2046,11 +2094,10 @@ export class MLEngine {
         if (loopError) {
           recordRun(null, { error: loopError });
         } else {
-          // The engine settles the run either way and records its own success
-          // metrics for it, so report it from there.
+          // The engine settles the run either way, so report it from there.
           completionPromise.then(
-            result => recordRun(result),
-            () => {}
+            result => recordRun(result, { aborted: true }),
+            () => recordRun(null, { aborted: true })
           );
         }
       }
