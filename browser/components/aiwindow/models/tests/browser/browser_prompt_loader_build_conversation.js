@@ -575,6 +575,11 @@ add_task(async function test_buildConversation_on_device_options() {
     Assert.equal(options.featureId, feature);
     Assert.ok(!("apiKey" in options), "Cloud credentials stay out");
     Assert.equal(run.firstCall.args[0].inferenceParams.max_tokens, 8);
+    Assert.equal(
+      run.firstCall.args[1].flowId,
+      "local-flow",
+      "The run names the flow its conversation was built for"
+    );
     Assert.ok(
       options.engineId.endsWith(`-${onDeviceOptions.modelId}`),
       "The engine id names the on-device model"

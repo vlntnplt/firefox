@@ -338,7 +338,10 @@ export class openAIEngine {
   async _runWithAuth(content) {
     const { signal, ...engineContent } = content;
     try {
-      return await this.engineInstance.run(engineContent, { signal });
+      return await this.engineInstance.run(engineContent, {
+        signal,
+        flowId: this.#flowId ?? undefined,
+      });
     } catch (ex) {
       // Skip the token retry flow on device or with a custom endpoint,
       // as the retry logic only applies to AuthProvider tokens.
@@ -358,7 +361,10 @@ export class openAIEngine {
       const updatedContent = { ...engineContent, token: newToken };
 
       try {
-        return await this.engineInstance.run(updatedContent, { signal });
+        return await this.engineInstance.run(updatedContent, {
+          signal,
+          flowId: this.#flowId ?? undefined,
+        });
       } catch (retryEx) {
         if (signal?.aborted || !this._is401Error(retryEx)) {
           throw retryEx;
@@ -425,7 +431,9 @@ export class openAIEngine {
     const { signal, ...engineOptions } = options;
     try {
       yield* yieldUntilAborted(
-        this.engineInstance.runWithGenerator(engineOptions),
+        this.engineInstance.runWithGenerator(engineOptions, {
+          flowId: this.#flowId ?? undefined,
+        }),
         signal
       );
     } catch (ex) {
@@ -448,7 +456,9 @@ export class openAIEngine {
 
       try {
         yield* yieldUntilAborted(
-          this.engineInstance.runWithGenerator(updatedOptions),
+          this.engineInstance.runWithGenerator(updatedOptions, {
+            flowId: this.#flowId ?? undefined,
+          }),
           signal
         );
       } catch (retryEx) {
