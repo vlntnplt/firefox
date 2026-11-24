@@ -72,6 +72,20 @@ function getErrorDetails(error) {
 }
 
 /**
+ * Marks an error with the step of engine creation that threw it.
+ *
+ * @param {any} error
+ * @param {"runtime-load" | "model-load"} step
+ * @returns {any}
+ */
+function withFailedStep(error, step) {
+  if (error && typeof error === "object") {
+    error.failedStep = step;
+  }
+  return error;
+}
+
+/**
  * The engine child is responsible for the life cycle and instantiation of the local
  * machine learning inference engine.
  */
@@ -194,6 +208,8 @@ export class MLEngineChild extends JSProcessActorChild {
       port.postMessage({
         type: "EnginePort:EngineReady",
         error,
+        // A structured clone keeps only an Error's name, message and stack.
+        failedStep: /** @type {any} */ (error)?.failedStep ?? null,
       });
     }
   }
@@ -477,22 +493,30 @@ class EngineDispatcher {
       const opts = /** @type {PipelineOptions} */ (this.pipelineOptions);
       let wasm = null;
       if (lazy.WASM_BACKENDS.includes(opts.backend || lazy.BACKENDS.onnx)) {
-        wasm = await this.mlEngineChild.getWasmArrayBuffer(opts.backend);
+        try {
+          wasm = await this.mlEngineChild.getWasmArrayBuffer(opts.backend);
+        } catch (error) {
+          throw withFailedStep(error, "runtime-load");
+        }
       }
-      return InferenceEngine.create({
-        workerUrl: workerConfig.url,
-        workerOptions: workerConfig.options,
-        wasm,
-        pipelineOptions: opts,
-        notificationsCallback,
-        getModelFileFn: this.mlEngineChild.getModelFile.bind(
-          this.mlEngineChild
-        ),
-        notifyModelDownloadCompleteFn:
-          this.mlEngineChild.notifyModelDownloadComplete.bind(
+      try {
+        return await InferenceEngine.create({
+          workerUrl: workerConfig.url,
+          workerOptions: workerConfig.options,
+          wasm,
+          pipelineOptions: opts,
+          notificationsCallback,
+          getModelFileFn: this.mlEngineChild.getModelFile.bind(
             this.mlEngineChild
           ),
-      });
+          notifyModelDownloadCompleteFn:
+            this.mlEngineChild.notifyModelDownloadComplete.bind(
+              this.mlEngineChild
+            ),
+        });
+      } catch (error) {
+        throw withFailedStep(error, "model-load");
+      }
     };
 
     const triedNativeForBestOnnx =

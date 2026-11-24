@@ -1152,8 +1152,10 @@ add_task(async function test_download_ends_with_its_last_file_in_flight() {
     await transferStarted.promise;
     await Assert.rejects(
       modelHub.getModelDataAsFile({ ...config, file: "missing.json" }),
-      /Failed to fetch the model file/,
-      "The missing file fails while the other one is still being fetched."
+      error =>
+        /Failed to fetch the model file/.test(error.message) &&
+        ModelHub.failedStep(error) === "model-download",
+      "The missing file fails, as a download failure, while the other one is still being fetched."
     );
 
     info(
@@ -1262,8 +1264,10 @@ add_task(async function test_download_that_cannot_be_stored_is_a_failure() {
   try {
     await Assert.rejects(
       modelHub.getModelDataAsFile(config),
-      error => error.name === "QuotaExceededError",
-      "The caller gets the storage error."
+      error =>
+        error.name === "QuotaExceededError" &&
+        ModelHub.failedStep(error) === "model-cache",
+      "The caller gets the storage error, marked as a storage failure."
     );
     await modelHub.notifyModelDownloadComplete(config);
     Assert.deepEqual(

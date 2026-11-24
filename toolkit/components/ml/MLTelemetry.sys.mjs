@@ -114,6 +114,8 @@ export class MLTelemetry {
    * @param {string | null} [options.deviceKind] - Kind of the device that loaded the model.
    * @param {unknown} [options.error] - What the attempt threw, when it failed.
    * @param {boolean} [options.aborted] - Whether the caller gave the attempt up.
+   * @param {string | null} [options.failedStep] - What a failed attempt was
+   *   doing; see failed_step in metrics.yaml.
    */
   recordEngineCreation({
     flowId = this.#flowId,
@@ -124,6 +126,7 @@ export class MLTelemetry {
     deviceKind = null,
     error = null,
     aborted = false,
+    failedStep = null,
   }) {
     let outcome = "success";
     if (aborted) {
@@ -141,6 +144,7 @@ export class MLTelemetry {
       duration: duration === null ? null : Math.round(duration),
       outcome,
       error: outcome === "error" ? MLTelemetry.errorName(error) : null,
+      failed_step: outcome === "error" ? (failedStep ?? null) : null,
     };
     Glean.firefoxAiRuntime.engineCreation.record(extra);
     this.logEventToConsole(this.recordEngineCreation, extra);

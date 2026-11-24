@@ -284,6 +284,11 @@ add_task(async function test_download_failure() {
       "The creation failure records the download error"
     );
     Assert.equal(failedCreations().at(-1).host_process, "hwinference");
+    Assert.equal(
+      failedCreations().at(-1).failed_step,
+      "model-download",
+      "The creation failed while downloading the model"
+    );
     const download = events("modelDownload").at(-1).extra;
     Assert.equal(download.outcome, "error", "The download is recorded failed");
     Assert.equal(Number(download.failed_files), 1, "One file failed");

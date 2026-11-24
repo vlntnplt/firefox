@@ -210,6 +210,14 @@ export class MLEngineParent extends JSProcessActorParent {
   #modelFilesInUse = new Map();
 
   /**
+   * For each engine being created, how its last request for a model file
+   * ended: the step it failed at, or null when the file arrived.
+   *
+   * @type {Map<string, "model-download" | "model-cache" | null>}
+   */
+  #lastModelFileStep = new Map();
+
+  /**
    * The callback to call for updating about notifications such as dowload progress status.
    *
    * @type {?function(ProgressAndStatusCallbackParams):void}
@@ -299,6 +307,7 @@ export class MLEngineParent extends JSProcessActorParent {
       }
       lock = Promise.withResolvers();
       MLEngineParent.engineLocks.set(engineId, lock.promise);
+      this.#lastModelFileStep.delete(engineId);
       start = ChromeUtils.now();
 
       const currentEngine = MLEngine.getInstance(engineId);
@@ -392,6 +401,9 @@ export class MLEngineParent extends JSProcessActorParent {
         duration: ChromeUtils.now() - start,
         error,
         aborted,
+        failedStep:
+          this.#lastModelFileStep.get(engineId) ??
+          /** @type {any} */ (error)?.failedStep,
       });
 
       throw error;
@@ -560,19 +572,26 @@ export class MLEngineParent extends JSProcessActorParent {
     // if this errors out, it will be caught in the worker
     const parsedUrl = this.modelHub.parseUrl(url, { rootUrl, urlTemplate });
 
-    const [filePath, headers] = await this.modelHub.getModelDataAsFile({
-      engineId,
-      taskName,
-      model: parsedUrl.model,
-      revision: parsedUrl.revision,
-      file: parsedUrl.file,
-      modelHubRootUrl: rootUrl,
-      modelHubUrlTemplate: urlTemplate,
-      progressCallback: this.notificationsCallback?.bind(this),
-      abortSignal: MLEngineParent.engineCreationAbortSignal.get(engineId),
-      featureId,
-      sessionId,
-    });
+    let filePath, headers;
+    try {
+      [filePath, headers] = await this.modelHub.getModelDataAsFile({
+        engineId,
+        taskName,
+        model: parsedUrl.model,
+        revision: parsedUrl.revision,
+        file: parsedUrl.file,
+        modelHubRootUrl: rootUrl,
+        modelHubUrlTemplate: urlTemplate,
+        progressCallback: this.notificationsCallback?.bind(this),
+        abortSignal: MLEngineParent.engineCreationAbortSignal.get(engineId),
+        featureId,
+        sessionId,
+      });
+      this.#lastModelFileStep.set(engineId, null);
+    } catch (error) {
+      this.#lastModelFileStep.set(engineId, lazy.ModelHub.failedStep(error));
+      throw error;
+    }
 
     // Keep the latest revision for each task, model
     this.#modelFilesInUse.set(`${taskName}-${parsedUrl.model}`, {
@@ -1501,6 +1520,9 @@ export class MLEngine {
     switch (data.type) {
       case "EnginePort:EngineReady": {
         if (data.error) {
+          if (data.failedStep && typeof data.error === "object") {
+            data.error.failedStep = data.failedStep;
+          }
           newPortResolvers.reject(data.error);
         } else {
           // The child reports the backend it actually used; record it so

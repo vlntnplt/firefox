@@ -80,6 +80,15 @@ firefox.ai.runtime:
         description: >
           The name of the error a failed attempt threw, e.g. TypeError. Never
           the error's message. Null unless outcome is error.
+      failed_step:
+        type: string
+        description: >
+          What a failed attempt was doing when it failed. model-download or
+          model-cache: the last model file the engine asked for could not be
+          fetched, or could not be stored. runtime-load: the runtime could not
+          be fetched. model-load: the backend did not start with the model.
+          Null unless outcome is error, and for an attempt that failed before
+          any of these steps.
 
   model_download:
     type: event

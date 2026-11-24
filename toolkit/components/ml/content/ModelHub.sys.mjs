@@ -67,9 +67,18 @@ import { XPCOMUtils } from "resource://gre/modules/XPCOMUtils.sys.mjs";
  *   downloadStarted: boolean,
  *   downloadStartedAt: number,
  *   duration: number,
+ *   step: "model-download" | "model-cache",
  *   lastProgress: ?ProgressAndStatusCallbackParams,
  * }} InFlightDownload
  */
+
+/**
+ * What getModelDataAsFile was doing when it threw an error: fetching the file
+ * or working with its storage.
+ *
+ * @type {WeakMap<object, "model-download" | "model-cache">}
+ */
+const gFailedSteps = new WeakMap();
 
 const lazy = XPCOMUtils.declareLazy({
   clearTimeout: "resource://gre/modules/Timer.sys.mjs",
@@ -2219,6 +2228,18 @@ export class ModelHub {
   }
 
   /**
+   * The step getModelDataAsFile failed at when it threw `error`.
+   *
+   * @param {unknown} error
+   * @returns {"model-download" | "model-cache" | null}
+   */
+  static failedStep(error) {
+    return (
+      (error && typeof error === "object" && gFailedSteps.get(error)) || null
+    );
+  }
+
+  /**
    * Notify that a model download is complete.
    *
    * @param {object} config
@@ -2336,6 +2357,7 @@ export class ModelHub {
         downloadStarted: false,
         downloadStartedAt: 0,
         duration: 0,
+        step: "model-cache",
         lastProgress: null,
       };
 
@@ -2355,12 +2377,17 @@ export class ModelHub {
           },
         },
         capturedInFlight
-      ).finally(() => {
-        // leave() may have already replaced this entry. Don't delete that one.
-        if (this.#inFlightDownloads.get(key) === capturedInFlight) {
-          this.#inFlightDownloads.delete(key);
-        }
-      });
+      )
+        .catch(error => {
+          gFailedSteps.set(error, capturedInFlight.step);
+          throw error;
+        })
+        .finally(() => {
+          // leave() may have already replaced this entry. Don't delete that one.
+          if (this.#inFlightDownloads.get(key) === capturedInFlight) {
+            this.#inFlightDownloads.delete(key);
+          }
+        });
 
       inFlight = capturedInFlight;
       this.#inFlightDownloads.set(key, inFlight);
@@ -2551,15 +2578,20 @@ export class ModelHub {
     }
 
     const recordEngineReference = async () => {
-      const hostname = new URL(key).hostname;
-      const cache = await this.#initCache();
-      await cache.updateTask({
-        engineId,
-        taskName,
-        model: `${hostname}/${model}`,
-        revision,
-        file,
-      });
+      try {
+        const hostname = new URL(key).hostname;
+        const cache = await this.#initCache();
+        await cache.updateTask({
+          engineId,
+          taskName,
+          model: `${hostname}/${model}`,
+          revision,
+          file,
+        });
+      } catch (error) {
+        gFailedSteps.set(/** @type {object} */ (error), "model-cache");
+        throw error;
+      }
     };
 
     /**
@@ -2846,6 +2878,7 @@ export class ModelHub {
     );
 
     inFlight.downloadStarted = true;
+    inFlight.step = "model-download";
     const start = ChromeUtils.now();
     inFlight.downloadStartedAt = start;
 
@@ -2881,6 +2914,7 @@ export class ModelHub {
       const headers = this.extractHeaders(response);
       headers.fileSize = fileObject.size;
 
+      inFlight.step = "model-cache";
       await cache.put({
         engineId,
         taskName,

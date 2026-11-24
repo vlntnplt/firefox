@@ -42,6 +42,10 @@ _lazyForTestMocking.getBackend = async function (
 
   await mlEngineWorker.getModelFile({ url }).catch(() => {});
 
+  if (engineId === "fails-to-load") {
+    throw new Error("The backend does not start with the model it fetched");
+  }
+
   // Download Another file using engineId as revision
   const url2 = lazy.createFileUrl({
     model: modelId,

@@ -76,6 +76,7 @@ const lazy = XPCOMUtils.declareLazy({
   MLEngineParent:
     "moz-src:///toolkit/components/ml/actors/MLEngineParent.sys.mjs",
   MLTelemetry: "chrome://global/content/ml/MLTelemetry.sys.mjs",
+  ModelHub: "chrome://global/content/ml/ModelHub.sys.mjs",
   generateUUID: "chrome://global/content/ml/Utils.sys.mjs",
 });
 
@@ -362,6 +363,8 @@ export class TextGenerationEngine {
   /** @type {RunTimestamp[]} */
   #initTimestamps = [];
   #inFlight = false;
+  /** @type {"model-download" | "model-cache" | "model-load" | null} */
+  #failedStep = null;
 
   /** @param {PipelineOptions} pipelineOptions */
   static shouldRoute(pipelineOptions) {
@@ -404,6 +407,7 @@ export class TextGenerationEngine {
         duration: ChromeUtils.now() - start,
         error,
         aborted: !!abortSignal?.aborted,
+        failedStep: engine.#failedStep,
       });
       throw error;
     }
@@ -455,6 +459,9 @@ export class TextGenerationEngine {
         featureId: options.featureId ?? options.engineId,
         sessionId,
       });
+    } catch (error) {
+      this.#failedStep = lazy.ModelHub.failedStep(error);
+      throw error;
     } finally {
       await hub.notifyModelDownloadComplete({
         engineId: options.engineId,
@@ -466,7 +473,12 @@ export class TextGenerationEngine {
     }
 
     const createOptions = toCreateOptions(options);
-    this.#generator = await TextGenerator.create(modelBlob, createOptions);
+    try {
+      this.#generator = await TextGenerator.create(modelBlob, createOptions);
+    } catch (error) {
+      this.#failedStep = "model-load";
+      throw error;
+    }
     this.#deviceKind = this.#generator.deviceKind;
     this.pipelineOptions.backend = "llama.cpp";
     this.#initTimestamps.push({

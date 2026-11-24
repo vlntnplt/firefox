@@ -234,6 +234,12 @@ add_task(async function test_engine_creation_refused_for_memory() {
       "The refused creation is recorded once, with the name of its error"
     );
     Assert.equal(
+      Glean.firefoxAiRuntime.engineCreation.testGetValue().at(-1).extra
+        .failed_step,
+      undefined,
+      "A creation refused before it starts fails at no step"
+    );
+    Assert.equal(
       MLEngineParent.engineLocks.get("default-engine"),
       creationUnderWay,
       "The refused request does not release the lock of the other creation"
@@ -242,6 +248,87 @@ add_task(async function test_engine_creation_refused_for_memory() {
     MLEngineParent.engineLocks.delete("default-engine");
     await EngineProcess.destroyMLEngine();
     await cleanup();
+  }
+});
+
+/**
+ * A failed creation says what it was doing when it failed.
+ */
+add_task(async function test_engine_creation_failed_step() {
+  const modelOptions = {
+    taskName: "real-llama-text-generation",
+    featureId: "link-preview",
+    backend: "llama.cpp",
+    modelId: "acme/bert",
+    modelHubUrlTemplate: "{model}/resolve/{revision}",
+    modelRevision: "v0.1",
+    modelHubRootUrl:
+      "chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data",
+    modelFile: "onnx/config.json",
+  };
+  const cases = [
+    {
+      step: "model-download",
+      why: "The hub does not have the model",
+      options: {
+        ...modelOptions,
+        engineId: "given-up",
+        modelId: "acme-not-found/bert",
+      },
+    },
+    {
+      step: "model-cache",
+      why: "The model arrives and cannot be stored",
+      options: { ...modelOptions, engineId: "given-up" },
+      stub: sandbox =>
+        sandbox
+          .stub(TestIndexedDBCache.prototype, "put")
+          .rejects(new DOMException("The disk is full", "QuotaExceededError")),
+    },
+    {
+      step: "runtime-load",
+      why: "The runtime cannot be fetched",
+      options: { ...modelOptions, engineId: "no-runtime", backend: "onnx" },
+      stub: () =>
+        MLEngineParent.getWasmArrayBuffer.rejects(new Error("No runtime")),
+    },
+    {
+      step: "model-load",
+      why: "The backend does not start with the model it downloaded",
+      options: { ...modelOptions, engineId: "fails-to-load" },
+    },
+  ];
+
+  Services.env.set("MOZ_ALLOW_EXTERNAL_ML_HUB", "true");
+  for (const { step, why, options, stub } of cases) {
+    const sandbox = sinon.createSandbox();
+    sandbox
+      .stub(MLEngineParent, "getWasmArrayBuffer")
+      .returns(new ArrayBuffer(16));
+    sandbox
+      .stub(MLEngineParent, "getWorkerConfig")
+      .returns({ url: TELEMETRY_TEST_STUB_URL, options: { type: "module" } });
+    stub?.(sandbox);
+    await IndexedDBCache.init({ reset: true });
+    await EngineProcess.destroyMLEngine();
+    const creationsBefore = (
+      Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? []
+    ).length;
+
+    try {
+      await Assert.rejects(createEngine(options), /./, why);
+      Assert.deepEqual(
+        (Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? [])
+          .slice(creationsBefore)
+          .map(({ extra }) => [extra.outcome, extra.failed_step]),
+        [["error", step]],
+        `${why}: the creation fails at ${step}`
+      );
+    } finally {
+      sandbox.restore();
+      await EngineProcess.destroyMLEngine();
+      await IndexedDBCache.init({ reset: true });
+    }
   }
 });
 
