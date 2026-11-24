@@ -528,7 +528,8 @@ export class TextGenerationEngine {
 
   /**
    * @param {StreamStats} stats
-   * @param {string} [featureId]
+   * @param {{ feature_id?: string, flowId?: string }} who - What the run is
+   *   recorded under.
    * @param {object} [ending]
    * @param {EngineRunResult | null} [ending.result] - What the run returned.
    * @param {unknown} [ending.error] - What the run threw.
@@ -536,11 +537,10 @@ export class TextGenerationEngine {
    */
   #recordRun(
     stats,
-    featureId,
+    who,
     { result = null, error = null, aborted = false } = {}
   ) {
     this.telemetry.recordEngineRun({
-      feature_id: featureId,
       beforeRun: stats.beforeRun,
       resourcesBefore: result?.resourcesBefore,
       resourcesAfter: result?.resourcesAfter,
@@ -553,6 +553,7 @@ export class TextGenerationEngine {
       outputTokens: result?.metrics.outputTokens,
       finishReason: result?.finishReason,
       ...(stats.streaming && result ? stats.metrics() : {}),
+      ...who,
       error,
       aborted:
         aborted ||
@@ -565,24 +566,20 @@ export class TextGenerationEngine {
    * @param {LlamaRunRequest | ChatCompletionRequest} request
    * @param {object} [options]
    * @param {AbortSignal} [options.signal] - Cancels the generation and rejects with its reason.
+   * @param {string} [options.flowId] - The flow the run belongs to.
    */
-  async run(request, { signal } = {}) {
+  async run(request, { signal, flowId } = {}) {
     signal?.throwIfAborted();
+    const who = { feature_id: request.featureId, flowId };
     const stats = new StreamStats();
     const cancel = () => this.cancel();
     signal?.addEventListener("abort", cancel, { once: true });
     let result;
     try {
       result = await this.#execute(request);
-      this.#recordRun(stats, request.featureId, {
-        result,
-        aborted: !!signal?.aborted,
-      });
+      this.#recordRun(stats, who, { result, aborted: !!signal?.aborted });
     } catch (error) {
-      this.#recordRun(stats, request.featureId, {
-        error,
-        aborted: !!signal?.aborted,
-      });
+      this.#recordRun(stats, who, { error, aborted: !!signal?.aborted });
       throw error;
     } finally {
       signal?.removeEventListener("abort", cancel);
@@ -591,8 +588,13 @@ export class TextGenerationEngine {
     return result;
   }
 
-  /** @param {LlamaRunRequest | ChatCompletionRequest} request */
-  async *runWithGenerator(request) {
+  /**
+   * @param {LlamaRunRequest | ChatCompletionRequest} request
+   * @param {object} [options]
+   * @param {string} [options.flowId] - The flow the run belongs to.
+   */
+  async *runWithGenerator(request, { flowId } = {}) {
+    const who = { feature_id: request.featureId, flowId };
     const stats = new StreamStats();
     stats.streaming = true;
     const queue = new ChunkQueue();
@@ -617,19 +619,19 @@ export class TextGenerationEngine {
       // Link Preview keys its final flush on an empty terminal chunk.
       yield { text: "", tokens: [], isPrompt: false };
 
-      this.#recordRun(stats, request.featureId, { result });
+      this.#recordRun(stats, who, { result });
       settled = true;
       return result;
     } catch (error) {
       settled = true;
-      this.#recordRun(stats, request.featureId, { error });
+      this.#recordRun(stats, who, { error });
       throw error;
     } finally {
       // Breaking out of a `for await` loop returns this generator mid-decode.
       if (!settled) {
         this.cancel();
         const result = await completion?.catch(() => null);
-        this.#recordRun(stats, request.featureId, { result, aborted: true });
+        this.#recordRun(stats, who, { result, aborted: true });
       }
     }
   }

@@ -1777,14 +1777,15 @@ export class MLEngine {
    * Resolves the live engine for a run on this suspended one, and records
    * the run as failed when the engine cannot be reopened.
    *
+   * @param {{ flowId?: string }} who - The flow the run belongs to.
    * @returns {Promise<MLEngine<FeatureID>>}
    */
-  async #liveEngineForRun() {
+  async #liveEngineForRun(who) {
     const beforeRun = ChromeUtils.now();
     try {
       return await this.#resolveLiveEngine();
     } catch (error) {
-      this.#recordRun({ beforeRun, error });
+      this.#recordRun({ beforeRun, ...who, error });
       throw error;
     }
   }
@@ -1827,18 +1828,21 @@ export class MLEngine {
    * @param {EngineRequests[FeatureID]} request
    * @param {object} [options]
    * @param {AbortSignal} [options.signal]
+   * @param {string} [options.flowId] - The flow the run belongs to. Defaults
+   *   to the flow of the request that created the engine.
    * @returns {Promise<EngineResponses[FeatureID]>}
    */
-  async run(request, { signal } = {}) {
+  async run(request, { signal, flowId } = {}) {
+    const who = { flowId };
     signal?.throwIfAborted();
     if (this.engineStatus === "suspended") {
-      const liveEngine = await this.#liveEngineForRun();
-      return liveEngine.run(request, { signal });
+      const liveEngine = await this.#liveEngineForRun(who);
+      return liveEngine.run(request, { signal, ...who });
     }
     // If the port is null maybe the inference process has shut down
     if (this.#port === null) {
       const error = this.#portGoneError("Port does not exist");
-      this.#recordRun({ beforeRun: ChromeUtils.now(), error });
+      this.#recordRun({ beforeRun: ChromeUtils.now(), ...who, error });
       throw error;
     }
 
@@ -1885,6 +1889,7 @@ export class MLEngine {
     } catch (error) {
       this.#recordRun({
         beforeRun,
+        ...who,
         error,
         aborted: !!signal?.aborted,
       });
@@ -1895,6 +1900,7 @@ export class MLEngine {
 
     this.#recordRun({
       beforeRun,
+      ...who,
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
       finishReason: result.finishReason,
@@ -1908,20 +1914,24 @@ export class MLEngine {
    * Run the inference request using an async generator function.
    *
    * @param {EngineRequests[FeatureID]} request - The inference request containing the input data.
+   * @param {object} [options]
+   * @param {string} [options.flowId] - The flow the run belongs to. Defaults
+   *   to the flow of the request that created the engine.
    * @returns {AsyncGenerator<ChunkResponse>} An async generator yielding chunks of generated responses.
    */
-  async *runWithGenerator(request) {
+  async *runWithGenerator(request, { flowId } = {}) {
+    const who = { flowId };
     lazy.console.debug(`runWithGenerator called for request ${request}`);
     if (this.engineStatus === "suspended") {
-      const liveEngine = await this.#liveEngineForRun();
-      return yield* liveEngine.runWithGenerator(request);
+      const liveEngine = await this.#liveEngineForRun(who);
+      return yield* liveEngine.runWithGenerator(request, who);
     }
     const startTime = ChromeUtils.now();
 
     // If the port is null maybe the inference process has shut down
     if (this.#port === null) {
       const error = this.#portGoneError("The port is null");
-      this.#recordRun({ beforeRun: startTime, error });
+      this.#recordRun({ beforeRun: startTime, ...who, error });
       throw error;
     }
 
@@ -2025,6 +2035,7 @@ export class MLEngine {
 
       this.#recordRun({
         beforeRun: startTime,
+        ...who,
         error,
         aborted,
         resourcesBefore: result?.resourcesBefore,

@@ -71,6 +71,53 @@ async function drain(generator) {
   return { text, chunks, promptTokens };
 }
 
+/**
+ * @returns {Record<string, string>[]} The extras of the engine_creation
+ *   events recorded so far.
+ */
+function engineCreationEvents() {
+  return (Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? []).map(
+    event => event.extra
+  );
+}
+
+add_task(async function test_reused_engine_records_the_flow_of_each_request() {
+  const { cleanup, remoteClients } = await setup();
+  const creationsBefore = engineCreationEvents().length;
+  const runsBefore = engineRunEvents().length;
+
+  const first = await createEngine({ ...ECHO_OPTIONS, flowId: "flow-a" });
+  const warmUp = first.run({ data: "first operation" });
+  await remoteClients["ml-onnx-runtime"].resolvePendingDownloads(1);
+  await warmUp;
+
+  const second = await createEngine({ ...ECHO_OPTIONS, flowId: "flow-b" });
+  Assert.equal(second, first, "The second operation is handed the live engine");
+  await second.run({ data: "second operation" }, { flowId: "flow-b" });
+  await drain(
+    second.runWithGenerator({ data: "second operation" }, { flowId: "flow-b" })
+  );
+  await second.run({ data: "an operation that names no flow" });
+
+  Assert.deepEqual(
+    engineCreationEvents()
+      .slice(creationsBefore)
+      .map(creation => creation.flow_id),
+    ["flow-a"],
+    "Only the flow that created the engine has an engine_creation"
+  );
+  Assert.deepEqual(
+    engineRunEvents()
+      .slice(runsBefore)
+      .map(run => run.flow_id),
+    ["flow-a", "flow-b", "flow-b", "flow-a"],
+    "A run is recorded under the flow it names, or else its engine's"
+  );
+
+  await EngineProcess.destroyMLEngine();
+  await cleanup();
+});
+
 add_task(async function test_successful_run() {
   const { cleanup, remoteClients } = await setup();
   const engine = await createEchoEngine(remoteClients);

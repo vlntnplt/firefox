@@ -168,7 +168,8 @@ export class MLTelemetry {
    *   stopped, as the backend reports it.
    * @param {string | null} [options.backendSourceRevision]
    * @param {string | null} [options.deviceKind]
-   * @param {string} [options.flow_id]
+   * @param {string} [options.flowId] - The flow the run belongs to. Uses
+   *   the instance's flow when not provided.
    * @param {string} [options.feature_id]
    * @param {unknown} [options.error] - What the run threw, when it failed.
    * @param {boolean} [options.aborted] - Whether the caller gave the run up.
@@ -188,7 +189,7 @@ export class MLTelemetry {
     finishReason = null,
     backendSourceRevision = null,
     deviceKind = null,
-    flow_id = this.#flowId,
+    flowId = this.#flowId,
     feature_id = this.#featureId,
     error = null,
     aborted = false,
@@ -229,7 +230,7 @@ export class MLTelemetry {
     }
 
     const payload = {
-      flow_id,
+      flow_id: flowId,
       cpu_milliseconds: round(cpuMilliseconds),
       wall_milliseconds: round(wallMilliseconds),
       memory_bytes: round(memoryBytes),

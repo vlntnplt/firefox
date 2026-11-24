@@ -40,7 +40,9 @@ firefox.ai.runtime:
         type: string
         description: >
           Unique identifier of a flow, the sequence of events one user-level
-          operation records. Used to correlate them across components.
+          operation records. Used to correlate them across components. A run
+          records the flow it is given, or else the flow of the request that
+          created its engine.
       host_process: &host_process
         description: >
           The process serving the engine: "inference" for the content

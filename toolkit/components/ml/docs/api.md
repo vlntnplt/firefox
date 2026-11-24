@@ -77,6 +77,19 @@ await engine.terminate();
 model, which stays loaded until `terminate()`. Requests carrying `tools` reject,
 and `response_format` is ignored.
 
+## Passing a flow id to a run
+
+`run` and `runWithGenerator` take a `flowId`, which ties the events of one user-level operation
+together. Telemetry records it on the `firefox.ai.runtime.engine_run` event.
+
+```javascript
+const res = await engine.run(request, { flowId: conversationId });
+```
+
+A run without a `flowId` is recorded under the one its engine was created with. `createEngine`
+hands a live engine back to later requests whatever their `flowId`, so pass it on the run when
+operations share the engine.
+
 ## Available Options
 
 Options passed to the `createEngine` function are verified and converted into a `PipelineOptions` object.

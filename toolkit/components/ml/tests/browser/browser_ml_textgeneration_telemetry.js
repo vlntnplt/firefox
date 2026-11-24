@@ -197,6 +197,31 @@ add_task(async function test_run_records_the_request_feature() {
   }
 });
 
+add_task(async function test_run_records_its_flow() {
+  const { cleanup } = await setup({ prefs: HWI_PREFS });
+  try {
+    const engine = await createEngine({
+      ...TINYSTORIES_ENGINE_OPTIONS,
+      engineId: "hwi-tel-flow",
+    });
+    await engine.run(RUN_REQUEST);
+    await engine.run(RUN_REQUEST, { flowId: "flow-b" });
+    await collectGeneratedText(
+      engine.runWithGenerator(RUN_REQUEST, { flowId: "flow-b" })
+    );
+    await engine.terminate();
+
+    const engineFlow = only("engineCreation").flow_id;
+    Assert.deepEqual(
+      events("engineRun").map(({ extra }) => extra.flow_id),
+      [engineFlow, "flow-b", "flow-b"],
+      "A run records the flow it is given, or else its engine's"
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
 add_task(async function test_stream_records_the_chunk_metrics() {
   const { cleanup } = await setup({ prefs: HWI_PREFS });
   try {
