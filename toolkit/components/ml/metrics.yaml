@@ -22,12 +22,14 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://phabricator.services.mozilla.com/D270909
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2046983
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2058478
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
     data_sensitivity:
       - interaction
     notification_emails:
@@ -69,7 +71,10 @@ firefox.ai.runtime:
           download.
       outcome:
         type: string
-        description: How the attempt ended, success or error.
+        description: >
+          How the attempt ended: success, error, or aborted when the caller
+          gave it up or the engine was terminated under it. An aborted attempt
+          is not a failed one.
       error:
         type: string
         description: >
@@ -88,9 +93,11 @@ firefox.ai.runtime:
       - https://bugzilla.mozilla.org/show_bug.cgi?id=1891685
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2015825
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
     data_reviews:
       - https://phabricator.services.mozilla.com/D238583
       - https://bugzilla.mozilla.org/show_bug.cgi?id=2097021
+      - https://bugzilla.mozilla.org/show_bug.cgi?id=2063339
     data_sensitivity:
       - interaction
     notification_emails:
@@ -113,12 +120,13 @@ firefox.ai.runtime:
         type: string
         description: >
           How the download ended: success when the last file fetched arrived,
-          error otherwise.
+          aborted when its caller gave that file up, error otherwise. An
+          aborted download is not a failed one.
       error:
         type: string
         description: >
-          The class of the error the last failed file threw. Null unless
-          outcome is error.
+          The name of the error the last failed file threw, e.g. TypeError.
+          Never the error's message. Null unless outcome is error.
       duration:
         type: quantity
         description: >

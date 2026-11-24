@@ -403,6 +403,7 @@ export class TextGenerationEngine {
         backend: pipelineOptions.backend,
         duration: ChromeUtils.now() - start,
         error,
+        aborted: !!abortSignal?.aborted,
       });
       throw error;
     }

@@ -35,6 +35,11 @@ _lazyForTestMocking.getBackend = async function (
     rootUrl: modelHubRootUrl,
   });
 
+  if (engineId === "given-up") {
+    // Stands in for a backend that does not load without its model.
+    await mlEngineWorker.getModelFile({ url });
+  }
+
   await mlEngineWorker.getModelFile({ url }).catch(() => {});
 
   // Download Another file using engineId as revision

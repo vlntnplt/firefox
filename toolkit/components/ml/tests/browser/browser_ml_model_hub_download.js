@@ -1097,13 +1097,12 @@ add_task(
           download.files,
           download.failed_files,
         ]),
-        [["error", "0", "1"]],
-        "The caller that canceled records a download that did not arrive."
+        [["aborted", "0", "1"]],
+        "The caller that canceled records a download it gave up, not a failed one."
       );
-      Assert.equal(
-        canceled[0].error,
-        "AbortError",
-        "The abort is recorded by its name."
+      Assert.ok(
+        !("error" in canceled[0]),
+        "An aborted download names no error."
       );
       Assert.deepEqual(
         surviving.map(download => [
@@ -1173,6 +1172,54 @@ add_task(async function test_download_ends_with_its_last_file_in_flight() {
       downloadCountsOf(config),
       [["success", "1", String(size), "1"]],
       "One event counts both files, and ends on the last one."
+    );
+  } finally {
+    Services.fog.testResetFOG();
+    await cleanup();
+  }
+});
+
+/**
+ * The only caller of a transfer giving it up records an aborted download,
+ * which is not a failed one.
+ */
+add_task(async function test_download_given_up_by_its_only_caller() {
+  const { modelHub, cleanup } = await withModelHub({
+    content: "x".repeat(1024 * 1024),
+  });
+  const controller = new AbortController();
+  const config = {
+    ...MODEL_ARGS,
+    engineId: "lone-engine",
+    featureId: "lone-feature",
+    sessionId: "lone-session",
+  };
+
+  Services.fog.testResetFOG();
+  try {
+    await Assert.rejects(
+      modelHub.getModelDataAsFile({
+        ...config,
+        abortSignal: controller.signal,
+        progressCallback: progress => {
+          if (progress.totalLoaded) {
+            controller.abort();
+          }
+        },
+      }),
+      error => error.name === "AbortError",
+      "The caller gets its abort."
+    );
+    await modelHub.notifyModelDownloadComplete(config);
+    Assert.deepEqual(
+      downloadEventsOf(config).map(download => [
+        download.outcome,
+        download.error,
+        download.files,
+        download.failed_files,
+      ]),
+      [["aborted", undefined, "0", "1"]],
+      "The download is recorded as aborted, with no error."
     );
   } finally {
     Services.fog.testResetFOG();

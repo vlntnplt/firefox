@@ -113,6 +113,7 @@ export class MLTelemetry {
    * @param {number | null} [options.duration] - How long the attempt took, in milliseconds.
    * @param {string | null} [options.deviceKind] - Kind of the device that loaded the model.
    * @param {unknown} [options.error] - What the attempt threw, when it failed.
+   * @param {boolean} [options.aborted] - Whether the caller gave the attempt up.
    */
   recordEngineCreation({
     flowId = this.#flowId,
@@ -122,7 +123,14 @@ export class MLTelemetry {
     duration = null,
     deviceKind = null,
     error = null,
+    aborted = false,
   }) {
+    let outcome = "success";
+    if (aborted) {
+      outcome = "aborted";
+    } else if (error !== null) {
+      outcome = "error";
+    }
     const extra = {
       flow_id: flowId,
       host_process: this.#hostProcess,
@@ -131,8 +139,8 @@ export class MLTelemetry {
       backend,
       device_kind: deviceKind,
       duration: duration === null ? null : Math.round(duration),
-      outcome: error === null ? "success" : "error",
-      error: error === null ? null : MLTelemetry.errorName(error),
+      outcome,
+      error: outcome === "error" ? MLTelemetry.errorName(error) : null,
     };
     Glean.firefoxAiRuntime.engineCreation.record(extra);
     this.logEventToConsole(this.recordEngineCreation, extra);

@@ -246,6 +246,62 @@ add_task(async function test_engine_creation_refused_for_memory() {
 });
 
 /**
+ * A creation its caller gives up is aborted, not failed.
+ */
+add_task(async function test_engine_creation_given_up_by_its_caller() {
+  Services.env.set("MOZ_ALLOW_EXTERNAL_ML_HUB", "true");
+  const wasmBufferStub = sinon
+    .stub(MLEngineParent, "getWasmArrayBuffer")
+    .returns(new ArrayBuffer(16));
+  const workerConfigStub = sinon
+    .stub(MLEngineParent, "getWorkerConfig")
+    .returns({ url: TELEMETRY_TEST_STUB_URL, options: { type: "module" } });
+  await IndexedDBCache.init({ reset: true });
+  await EngineProcess.destroyMLEngine();
+  const creationsBefore = (
+    Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? []
+  ).length;
+  const controller = new AbortController();
+  controller.abort();
+
+  try {
+    await Assert.rejects(
+      createEngine(
+        {
+          engineId: "given-up",
+          taskName: "real-llama-text-generation",
+          featureId: "link-preview",
+          backend: "llama.cpp",
+          modelId: "acme/bert",
+          modelHubUrlTemplate: "{model}/resolve/{revision}",
+          modelRevision: "v0.1",
+          modelHubRootUrl:
+            "chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/data",
+          modelFile: "onnx/config.json",
+        },
+        null,
+        controller.signal
+      ),
+      /abort/i,
+      "The creation does not survive its caller's abort"
+    );
+
+    Assert.deepEqual(
+      (Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? [])
+        .slice(creationsBefore)
+        .map(({ extra }) => [extra.engine_id, extra.outcome, extra.error]),
+      [["given-up", "aborted", undefined]],
+      "The creation is recorded as aborted, with no error"
+    );
+  } finally {
+    await EngineProcess.destroyMLEngine();
+    await IndexedDBCache.init({ reset: true });
+    wasmBufferStub.restore();
+    workerConfigStub.restore();
+  }
+});
+
+/**
  * Check that model download telemetry is working as expected
  */
 add_task(async function test_model_download_telemetry_success() {

@@ -373,6 +373,10 @@ export class MLEngineParent extends JSProcessActorParent {
       // TODO - What happens if the engine is already killed here?
       return engine;
     } catch (error) {
+      // The caller gave the creation up, or the engine was terminated under it.
+      const aborted = !!(
+        abortSignal?.aborted || abortController?.signal.aborted
+      );
       // Abort any pending operations as the engine creating failed
       abortController?.abort();
       const { modelId, backend, flowId } = pipelineOptions;
@@ -387,6 +391,7 @@ export class MLEngineParent extends JSProcessActorParent {
         backend,
         duration: ChromeUtils.now() - start,
         error,
+        aborted,
       });
 
       throw error;

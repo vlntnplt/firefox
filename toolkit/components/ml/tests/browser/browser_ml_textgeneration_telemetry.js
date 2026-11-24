@@ -310,12 +310,14 @@ add_task(async function test_aborted_creation() {
       ),
       error => error.name === "AbortError"
     );
-    Assert.equal(failedCreations().length, 1);
+    Assert.equal(failedCreations().length, 0, "An abort is not a failure");
+    const creation = only("engineCreation");
     Assert.equal(
-      failedCreations().at(-1).error,
-      "AbortError",
-      "The creation failure names the abort"
+      creation.outcome,
+      "aborted",
+      "A creation its caller gave up is recorded as aborted"
     );
+    Assert.equal(creation.error, undefined, "and names no error");
   } finally {
     await cleanup();
   }

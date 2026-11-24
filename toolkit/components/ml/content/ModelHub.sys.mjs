@@ -1747,9 +1747,9 @@ export class ModelHub {
   /**
    * The downloads under way, by session: when the first file started, how
    * many files arrived, their size, how many failed, and whether the last one
-   * arrived.
+   * arrived or was given up by its caller.
    *
-   * @type {Map<string, { start: number, files: number, bytes: number, failedFiles: number, ok: boolean, error: unknown }>}
+   * @type {Map<string, { start: number, files: number, bytes: number, failedFiles: number, ok: boolean, aborted: boolean, error: unknown }>}
    */
   #downloads = new Map();
 
@@ -2264,13 +2264,18 @@ export class ModelHub {
       return;
     }
     this.#downloads.delete(sessionId);
+    let outcome = "success";
+    if (!download.ok) {
+      outcome = download.aborted ? "aborted" : "error";
+    }
     Glean.firefoxAiRuntime.modelDownload.record({
       engine_id: engineId,
       feature_id: featureId,
       model_id: model,
       model_revision: revision,
-      outcome: download.ok ? "success" : "error",
-      error: download.ok ? null : lazy.MLTelemetry.errorName(download.error),
+      outcome,
+      error:
+        outcome === "error" ? lazy.MLTelemetry.errorName(download.error) : null,
       duration: Math.floor(ChromeUtils.now() - download.start),
       files: download.files,
       bytes: download.bytes,
@@ -2455,10 +2460,18 @@ export class ModelHub {
    * @param {string} config.sessionId
    * @param {boolean} config.success
    * @param {unknown} [config.error]
+   * @param {boolean} [config.aborted] - Whether the caller gave the file up.
    * @param {number} [config.bytes] - The size of the file that arrived.
    * @param {number} config.startedAt - When the shared download actually began.
    */
-  #recordDownloadAttempt({ sessionId, success, error, bytes = 0, startedAt }) {
+  #recordDownloadAttempt({
+    sessionId,
+    success,
+    error,
+    aborted = false,
+    bytes = 0,
+    startedAt,
+  }) {
     let download = this.#downloads.get(sessionId);
     if (!download) {
       download = {
@@ -2467,11 +2480,13 @@ export class ModelHub {
         bytes: 0,
         failedFiles: 0,
         ok: false,
+        aborted: false,
         error: null,
       };
       this.#downloads.set(sessionId, download);
     }
     download.ok = success;
+    download.aborted = !success && aborted;
     if (success) {
       download.files += 1;
       download.bytes += bytes;
@@ -2566,6 +2581,7 @@ export class ModelHub {
           sessionId,
           success,
           error,
+          aborted: !!abortSignal?.aborted,
           bytes,
           startedAt: inFlight.downloadStartedAt,
         });
