@@ -250,6 +250,15 @@ firefox.ai.runtime:
           (non-prompt) chunks for a streamed text generation run. Null when
           fewer than two generated chunks were produced.
         type: quantity
+      finish_reason:
+        description: >
+          Why a generation stopped, as its backend reports it: stop, length,
+          tool_calls or content_filter from a completions endpoint; eos,
+          length or cancelled from llama.cpp in the HWInference process. Null
+          for the other backends, for a run that did not return, and for a
+          completion whose stream ended before the service gave a reason: the
+          answer was cut off.
+        type: string
       system_memory_mb:
         description: The total physical system memory in MB.
         type: quantity

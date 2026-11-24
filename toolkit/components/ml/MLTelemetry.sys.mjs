@@ -156,6 +156,8 @@ export class MLTelemetry {
    * @param {number | null} [options.characterCount]
    * @param {number | null} [options.timeToFirstChunk]
    * @param {number | null} [options.averageChunkTime]
+   * @param {string | null} [options.finishReason] - Why the generation
+   *   stopped, as the backend reports it.
    * @param {string | null} [options.backendSourceRevision]
    * @param {string | null} [options.deviceKind]
    * @param {string} [options.flow_id]
@@ -175,6 +177,7 @@ export class MLTelemetry {
     characterCount,
     timeToFirstChunk = null,
     averageChunkTime = null,
+    finishReason = null,
     backendSourceRevision = null,
     deviceKind = null,
     flow_id = this.#flowId,
@@ -244,6 +247,11 @@ export class MLTelemetry {
       character_count: characterCount || null,
       time_to_first_chunk: round(timeToFirstChunk),
       average_chunk_time: round(averageChunkTime),
+      finish_reason:
+        typeof finishReason === "string" &&
+        /^[a-z][a-z_-]{0,31}$/.test(finishReason)
+          ? finishReason
+          : null,
       system_memory_mb: MLTelemetry.#systemMemoryMB,
       host_process: this.#hostProcess,
     };

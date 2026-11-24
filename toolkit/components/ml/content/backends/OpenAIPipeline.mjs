@@ -247,6 +247,7 @@ export class OpenAIPipeline {
     let streamOutput = "";
     let toolAcc = new Map();
     let sawToolCallsFinish = false;
+    let finishReason = null;
     let usage = null;
     let chunkIndex = 0;
 
@@ -298,6 +299,10 @@ export class OpenAIPipeline {
           usage = chunk.usage;
         }
 
+        if (choice?.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+
         // If the model signals it wants tools now
         if (choice?.finish_reason === "tool_calls") {
           sawToolCallsFinish = true;
@@ -341,6 +346,8 @@ export class OpenAIPipeline {
     return {
       finalOutput: streamOutput,
       metrics: [],
+      // Null when the stream ended before the service said why it stopped.
+      finishReason,
       ...(sawToolCallsFinish
         ? { toolCalls: this.#finalizeToolCalls(toolAcc) }
         : {}),
@@ -399,6 +406,7 @@ export class OpenAIPipeline {
     return {
       finalOutput: output,
       metrics: [],
+      finishReason: completion.choices[0].finish_reason ?? null,
       ...(toolCalls ? { toolCalls } : {}),
       ...(providerSpecificFields ? { providerSpecificFields } : {}),
     };

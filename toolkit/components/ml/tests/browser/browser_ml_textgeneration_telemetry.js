@@ -127,11 +127,20 @@ add_task(async function test_run_records_the_engine_run() {
       engineId: "hwi-tel-resources",
       featureId: "link-preview",
     });
-    await engine.run(RUN_REQUEST);
+    const result = await engine.run(RUN_REQUEST);
     await engine.terminate();
 
     const run = only("engineRun");
     Assert.equal(run.feature_id, "link-preview");
+    Assert.ok(
+      ["eos", "length"].includes(result.finishReason),
+      `The generation ran to its end (${result.finishReason})`
+    );
+    Assert.equal(
+      run.finish_reason,
+      result.finishReason,
+      "The run records why the generation stopped"
+    );
     Assert.equal(run.engine_id, "hwi-tel-resources");
     Assert.equal(run.model_id, "Mozilla/test-llama");
     Assert.equal(run.backend, "llama.cpp");
@@ -349,6 +358,41 @@ add_task(async function test_process_crash_mid_generation() {
     Assert.equal(failed.error, "AbortError", "The error is recorded by name");
     Assert.equal(failed.host_process, "hwinference");
     await engine.terminate();
+  } finally {
+    await cleanup();
+  }
+});
+
+add_task(async function test_cancel_mid_generation() {
+  const { cleanup } = await setup({ prefs: HWI_PREFS });
+  try {
+    const engine = await createEngine({
+      ...TINYSTORIES_ENGINE_OPTIONS,
+      engineId: "hwi-tel-cancel",
+      featureId: "link-preview",
+    });
+    const pending = engine.run({
+      prompt: TINYSTORIES_STORYTELLER_PROMPT,
+      samplers: TINYSTORIES_GREEDY_SAMPLERS,
+      nPredict: 4096,
+      stopOnEndOfGenerationTokens: false,
+    });
+    engine.cancel();
+    const result = await pending;
+    await engine.terminate();
+
+    Assert.equal(
+      result.finishReason,
+      "cancelled",
+      "The generation was stopped before its end"
+    );
+    const run = only("engineRun");
+    Assert.equal(
+      run.outcome,
+      "aborted",
+      "A generation its caller cancelled is aborted, not a success"
+    );
+    Assert.equal(run.finish_reason, "cancelled");
   } finally {
     await cleanup();
   }

@@ -542,9 +542,13 @@ export class TextGenerationEngine {
       deviceKind: this.#deviceKind,
       inputTokens: result?.metrics.inputTokens,
       outputTokens: result?.metrics.outputTokens,
+      finishReason: result?.finishReason,
       ...(stats.streaming && result ? stats.metrics() : {}),
       error,
-      aborted: aborted || (error !== null && this.engineStatus === "closed"),
+      aborted:
+        aborted ||
+        result?.finishReason === "cancelled" ||
+        (error !== null && this.engineStatus === "closed"),
     });
   }
 

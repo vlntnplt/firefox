@@ -1855,6 +1855,7 @@ export class MLEngine {
       beforeRun,
       resourcesBefore: result.resourcesBefore,
       resourcesAfter: result.resourcesAfter,
+      finishReason: result.finishReason,
       inputTokens: result.metrics?.inputTokens,
       outputTokens: result.metrics?.outputTokens,
     });
@@ -1985,6 +1986,7 @@ export class MLEngine {
         aborted,
         resourcesBefore: result?.resourcesBefore,
         resourcesAfter: result?.resourcesAfter,
+        finishReason: result?.finishReason,
         inputTokens: result?.metrics?.inputTokens,
         outputTokens: result?.metrics?.outputTokens || tokenCount,
         characterCount,
