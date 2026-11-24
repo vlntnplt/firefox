@@ -1527,6 +1527,25 @@ export class MLEngine {
       }
       throw error;
     }
+    // Nothing answers on the port once the inference process is gone, and the
+    // engine only observes its process after it is created.
+    const processGone = {
+      /** @param {nsIPropertyBag2} subject */
+      observe: subject => {
+        subject.QueryInterface(Ci.nsIPropertyBag2);
+        if (
+          subject.get("abnormal") &&
+          subject.get("childID") === this.mlEngineParent.childID
+        ) {
+          newPortResolvers.reject(
+            new InferenceProcessCrash(
+              `The inference process was shutdown (pid=${subject.get("osPid")}) before the engine was ready`
+            )
+          );
+        }
+      },
+    };
+    Services.obs.addObserver(processGone, "ipc:content-shutdown");
     try {
       await newPortResolvers.promise;
       this.setEngineStatus("ready");
@@ -1535,6 +1554,8 @@ export class MLEngine {
       this.setEngineStatus("error");
       cleanupOnError(error);
       throw error;
+    } finally {
+      Services.obs.removeObserver(processGone, "ipc:content-shutdown");
     }
   }
 

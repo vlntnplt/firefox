@@ -1175,6 +1175,97 @@ add_task(
 );
 
 /**
+ * An engine creation its inference process dies under is rejected instead of
+ * left pending, and the next creation starts a new process.
+ */
+add_task(async function test_ml_engine_creation_rejects_when_process_crashes() {
+  const { MLTestUtils } = ChromeUtils.importESModule(
+    "resource://testing-common/MLTestUtils.sys.mjs"
+  );
+  const modelFile = {
+    model: "acme/bert",
+    revision: "v0.1",
+    file: "onnx/config.json",
+  };
+  const hub = MLTestUtils.createMockModelHub();
+  hub.setFile({
+    ...modelFile,
+    content: "x".repeat(1024 * 1024),
+    pauseAfterBytes: 64 * 1024,
+  });
+  const options = {
+    engineId: "crashes-mid-creation",
+    taskName: "real-llama-text-generation",
+    featureId: "link-preview",
+    backend: "llama.cpp",
+    modelId: modelFile.model,
+    modelRevision: modelFile.revision,
+    modelFile: modelFile.file,
+    modelHubRootUrl: hub.rootUrl,
+    modelHubUrlTemplate: hub.urlTemplate,
+  };
+
+  Services.env.set("MOZ_ALLOW_EXTERNAL_ML_HUB", "true");
+  const sandbox = sinon.createSandbox();
+  // A backend that only downloads its model, so the creation is still under
+  // way while the transfer stalls.
+  sandbox
+    .stub(MLEngineParent, "getWasmArrayBuffer")
+    .returns(new ArrayBuffer(16));
+  sandbox.stub(MLEngineParent, "getWorkerConfig").returns({
+    url: "chrome://mochitests/content/browser/toolkit/components/ml/tests/browser/ml_telemetry_stub.worker.mjs",
+    options: { type: "module" },
+  });
+  await IndexedDBCache.init({ reset: true });
+  await EngineProcess.destroyMLEngine();
+  const creationsBefore = (
+    Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? []
+  ).length;
+
+  try {
+    const transferStarted = Promise.withResolvers();
+    const creation = createEngine(options, progress => {
+      if (progress.totalLoaded) {
+        transferStarted.resolve();
+      }
+    });
+    // The crash is what settles the creation; keep its rejection handled
+    // until the test looks at it.
+    creation.catch(() => {});
+    await transferStarted.promise;
+
+    await crashInferenceProcess();
+    hub.resumeAfterPause(modelFile);
+
+    await Assert.rejects(
+      creation,
+      error => error.name === "InferenceProcessCrash",
+      "The creation is rejected when its inference process dies"
+    );
+    Assert.deepEqual(
+      (Glean.firefoxAiRuntime.engineCreation.testGetValue() ?? [])
+        .slice(creationsBefore)
+        .map(({ extra }) => [extra.engine_id, extra.outcome, extra.error]),
+      [["crashes-mid-creation", "error", "InferenceProcessCrash"]],
+      "The failed creation is recorded as a process crash"
+    );
+
+    const engine = await createEngine(options);
+    Assert.equal(
+      engine.engineStatus,
+      "ready",
+      "The next creation succeeds in a new inference process"
+    );
+  } finally {
+    Services.env.set("MOZ_ALLOW_EXTERNAL_ML_HUB", "");
+    sandbox.restore();
+    await EngineProcess.destroyMLEngine();
+    await IndexedDBCache.init({ reset: true });
+    await hub.cleanup();
+  }
+});
+
+/**
  * These status are visualized in about:inference, but aren't used for business
  * logic.
  */
